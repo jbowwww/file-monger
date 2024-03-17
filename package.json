@@ -1,0 +1,30 @@
+{
+  "name": "file-monger",
+  "version": "1.0.0",
+  "description": "Another attempt at a distributed file-mongering tool.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jbowwww/file-monger.git"
+  },
+  "keywords": [
+    "file",
+    "monger",
+    "backup",
+    "index",
+    "crawl",
+    "checksum",
+    "hash",
+    "search",
+    "replication"
+  ],
+  "author": "Joel Bowman",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/jbowwww/file-monger/issues"
+  },
+  "homepage": "https://github.com/jbowwww/file-monger#readme"
+}
