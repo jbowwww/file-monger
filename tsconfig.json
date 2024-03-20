@@ -1,0 +1,14 @@
+{
+    "compilerOptions": {
+        "target": "ESNext",
+        "module": "Node16",
+        "strict": true,
+        "esModuleInterop": true,
+        "moduleResolution": "Node16",
+        "rootDir": "src",
+        "outDir": "dist/"
+    },
+    "include": [
+        "src/"
+    ]
+}
