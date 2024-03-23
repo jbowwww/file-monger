@@ -5,7 +5,8 @@
   "main": "index.js",
   "scripts": {
     "build": "npx tsc",
-    "exec": "node dist/cli.js --help",
+    "exec": "node dist/cli.js",
+    "help": "node dist/cli.js --help",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
