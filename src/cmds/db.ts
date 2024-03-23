@@ -21,6 +21,6 @@ exports.builder = function (yargs: yargs.Argv<DbCommandArgv>) {
 
         });
     })
-        .demandCommand();
+    .demandCommand();
 };
 

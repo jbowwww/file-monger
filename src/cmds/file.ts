@@ -54,5 +54,5 @@ exports.builder = function (yargs: yargs.Argv<FileCommandArgv>) {
             }
         });
     })
-        .demandCommand();
+    .demandCommand();
 };
