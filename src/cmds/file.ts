@@ -40,7 +40,7 @@ exports.builder = function (yargs: yargs.Argv<FileCommandArgv>) {
                 const file = await coll.findOne({ path: path });
                 let doHash = true;
                 if (file) {
-                    if (file.stats.size == stats.size || file.stats.mtimeMs == stats.mtimeMs) {
+                    if (file.stats.size == stats.size && file.stats.mtimeMs === stats.mtimeMs) {
                         console.log(`matches local DB: ${JSON.stringify(file)}`);
                         doHash = false;
                     } else {
