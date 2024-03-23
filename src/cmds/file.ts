@@ -34,20 +34,20 @@ exports.builder = function (yargs: yargs.Argv<FileCommandArgv>) {
             if (!stats.isFile())
                 throw new Error(`Path '${path}' is not a file`);
             else
-                process.stdout.write(`File '${path}'`);
+                process.stdout.write(`File '${path}' `);
             await db.runCommand(argv.dbUrl, {}, async db => {
                 const coll = db.collection<File>('local');
                 const file = await coll.findOne({ path: path });
                 let doHash = true;
                 if (file) {
                     if (file.stats.size == stats.size || file.stats.mtimeMs == stats.mtimeMs) {
-                        console.log(`File '${path}' matches local DB: ${JSON.stringify(file)}`);
+                        console.log(`matches local DB: ${JSON.stringify(file)}`);
                         doHash = false;
                     } else {
-                        console.log(`File '${path}' does not match local DB: ${JSON.stringify(file)}\n\tFile.stat=${JSON.stringify(stats)}`);
+                        console.log(`does not match local DB: ${JSON.stringify(file)}\n\tFile.stat=${JSON.stringify(stats)}`);
                     }
                 } else {
-                    console.log(`File '${path}' not present in local DB stat=${JSON.stringify(stats)}`);
+                    console.log(`not present in local DB stat=${JSON.stringify(stats)}`);
                 }
                 if (doHash) {
                     process.stdout.write(`Calculating hash for file '${path}' ... `)
