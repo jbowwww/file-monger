@@ -4,6 +4,7 @@ import yargs from 'yargs/yargs';
 import { hideBin } from 'yargs/helpers';
 
 var argv = yargs(hideBin(process.argv))
+  .scriptName('cli')
   .commandDir('cmds')
   .demandCommand()
   .help()
