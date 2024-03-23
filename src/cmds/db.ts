@@ -5,16 +5,22 @@ export interface DbCommandArgv {
     db: string
 }
 
-export default {
-    command: 'db [path]',
-    description: 'Database commands',
-    builder: (yargs: yargs.Argv<DbCommandArgv>) => yargs
-        .command(
-            'init',
-            'Initialise database',
-            yargs => yargs,
-            async argv => await db.runCommand(argv.db, {}, async db => {
-                // init db
-            })
-        )
-}
+exports.command = 'db';
+exports.description = 'Database commands';
+exports.builder = function (yargs: yargs.Argv<DbCommandArgv>) {
+    yargs.command('init [dbPath]', 'Initialise database', yargs => {
+        yargs.positional('dbPath', {
+            description: 'Path to database',
+            type: 'string',
+            demandOption: true,
+            default: './db'
+        });
+    }, async argv => {
+        console.log(`init db argv=${JSON.stringify(argv)}`);
+        await db.runCommand(argv.db, {}, async db => {
+
+        });
+    })
+        .demandCommand();
+};
+
