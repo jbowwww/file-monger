@@ -4,7 +4,7 @@ import fs from 'fs';
 import { calculateHash } from "../file";
 
 export interface FileCommandArgv {
-    db: string,
+    dbUrl: string,
     path: string,
 }
 
@@ -33,7 +33,9 @@ exports.builder = function (yargs: yargs.Argv<FileCommandArgv>) {
         const stats = await fs.promises.stat(path);
         if (!stats.isFile())
             throw new Error(`Path '${path}' is not a file`);
-        await db.runCommand(argv.db, {}, async db => {
+        else
+            console.log(`File '${path}' stat=${JSON.stringify(stats)}`);
+        await db.runCommand(argv.dbUrl, {}, async db => {
             const coll = db.collection<File>('local');
             const file = await coll.findOne({ path: path });
             let doHash = true;
@@ -48,11 +50,12 @@ exports.builder = function (yargs: yargs.Argv<FileCommandArgv>) {
                 console.log(`File '${path}' not present in local DB`);
             }
             if (doHash) {
-                const hash = calculateHash(path);
+                process.stdout.write(`Calculating hash for file '${path}' ... `)
+                const hash = await calculateHash(path);
                 await coll.updateOne({ path }, { path, stats, hash }, { upsert: true });
-                console.log(`File '${path}' updated with hash ${hash}`);
+                console.log(hash);
             }
         });
     })
-    .demandCommand();
+    yargs.demandCommand();
 };
