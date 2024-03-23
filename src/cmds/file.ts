@@ -52,7 +52,7 @@ exports.builder = function (yargs: yargs.Argv<FileCommandArgv>) {
                 if (doHash) {
                     process.stdout.write(`Calculating hash for file '${path}' ... `)
                     const hash = await calculateHash(path);
-                    await coll.updateOne({ path }, { $updateOne: { path, stats, hash } }, { upsert: true });
+                    await coll.updateOne({ path }, { $set: { path, stats, hash } }, { upsert: true });
                     console.log(hash);
                 }
                 console.log();
