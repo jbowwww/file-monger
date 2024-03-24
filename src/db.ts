@@ -10,20 +10,24 @@ export function getMockDb() {
                 updateOne(filter: any, update: any, options: any) {
                     return null;
                 }
-            });
+            }) as unknown as mongo.Db;
         }
     }
 }
 
-export async function runCommand(url: string, options: mongo.MongoClientOptions = {}, command: (db: mongo.Db) => Promise<void>) {
+export async function connect(url: string, options: mongo.MongoClientOptions = {}) {
     const client = new mongo.MongoClient(url, options);
     const connection = await client.connect();
-    const db = connection.db();
+    return connection;
+}
+
+export async function useConnection(url: string, options: mongo.MongoClientOptions = {}, command: (db: mongo.MongoClient) => Promise<void>) {
+    const connection = await connect(url, options);
     try {
-        await command(db as unknown as mongo.Db);
+        await command(connection);
     } catch (err) {
         throw err;
     } finally {
-        await client.close();
+        await connection.close();
     }
 }
