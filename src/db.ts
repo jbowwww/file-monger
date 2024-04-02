@@ -1,5 +1,10 @@
 import * as mongo from 'mongodb';
 
+export interface Storage {
+    findOne<TModel>(filter: any): Promise<TModel>;
+    updateOne<TModel>(filter: any, update: any, options: any): Promise<TModel>;
+}
+
 export function getMockDb() {
     return {
         collection<T>(name: string) {
@@ -30,4 +35,8 @@ export async function useConnection(url: string, options: mongo.MongoClientOptio
     } finally {
         await connection.close();
     }
+}
+
+export class Model<TDataProps> {
+    _id: mongo.ObjectId
 }

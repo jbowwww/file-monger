@@ -56,7 +56,7 @@ export class File {
     }
 
     async calculateHash() {
-        process.stdout.write(`Calculating hash for file '${this.path}' ... `)
+        process.stdout.write(`Calculating hash for file '${this.path}' ... `);
         if (this.hash) {
             this.previousHashes?.push({ hash: this.hash, mTimeMs: this.stats.mtimeMs, timestamp: new Date(Date.now()) });
         }
