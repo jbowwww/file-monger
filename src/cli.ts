@@ -3,16 +3,8 @@ import process from 'process';
 import yargs from 'yargs/yargs';
 import { hideBin } from 'yargs/helpers';
 
-export const globalOptions = {
-  dbUrl: {
-    description: 'Path to database',
-    demandOption: true,
-    default: "mongodb://localhost:27017/"
-  }
-};
-
-var argv = yargs(hideBin(process.argv))
-  .scriptName('cli')
+  var argv = yargs(hideBin(process.argv))
+  .scriptName('cli').global()
   .options(globalOptions)
   .commandDir('cmds')
   .demandCommand()

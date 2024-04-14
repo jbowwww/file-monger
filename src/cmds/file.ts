@@ -22,10 +22,11 @@ export const builder = function (yargs: yargs.Argv<FileCommandArgv>) {
         });
     }, async function (argv) {
         for (const path of argv.paths) {
-            await db.useConnection(argv.dbUrl, {}, async connection => {
-                const coll = connection.db().collection<File>('local');
-                const file = await File.findOrCreateFromPath(path, coll);
-            });
+            // await db.useConnection(argv.dbUrl, {}, async connection => {
+            //     const coll = connection.db().collection<File>('local');
+            //     const file = await File.findOrCreateFromPath(path, coll);
+            // });
+            const store = new db.Store(File, 'files');
         }
     })
     yargs.demandCommand();

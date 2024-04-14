@@ -1,42 +1,73 @@
 import * as mongo from 'mongodb';
+import { ClassConstructor, DataProperties, Model } from './models/base';
+import { Filter, FindCursor, UpdateFilter, UpdateOptions, WithoutId } from 'mongodb';
 
-export interface Storage {
-    findOne<TModel>(filter: any): Promise<TModel>;
-    updateOne<TModel>(filter: any, update: any, options: any): Promise<TModel>;
+let client: mongo.MongoClient | null = null;
+let connection: mongo.MongoClient;
+let db: mongo.Db;
+
+export function isConnected() {
+    return client !== null;
 }
 
-export function getMockDb() {
-    return {
-        collection<T>(name: string) {
-            return ({
-                findOne(filter: any) {
-                    return null;
-                },
-                updateOne(filter: any, update: any, options: any) {
-                    return null;
-                }
-            }) as unknown as mongo.Db;
-        }
+export async function connect(url: string, options?: mongo.MongoClientOptions) {
+    if (client === null) {
+        process.stdout.write(`Initialising DB connection to ${url} ${options !== undefined ? ("options=" + JSON.stringify(options)) : "" }} ... `);
+        client = new mongo.MongoClient(url, options);
+        connection = await client.connect();
+        db = connection.db();
+        process.stdout.write("OK\n");
     }
-}
-
-export async function connect(url: string, options: mongo.MongoClientOptions = {}) {
-    const client = new mongo.MongoClient(url, options);
-    const connection = await client.connect();
     return connection;
 }
 
+export async function close() {
+    if (client !== null) {
+        process.stdout.write(`Closing DB connection ... `);
+        await connection.close();
+        client = null;
+        process.stdout.write("OK\n");
+    }
+}
+
 export async function useConnection(url: string, options: mongo.MongoClientOptions = {}, command: (db: mongo.MongoClient) => Promise<void>) {
-    const connection = await connect(url, options);
+    await connect(url, options);
     try {
         await command(connection);
     } catch (err) {
         throw err;
     } finally {
-        await connection.close();
+        await close();
     }
 }
 
-export class Model<TDataProps> {
-    _id: mongo.ObjectId
+export interface Store<TSchema extends Model> {
+    find(filter: Filter<TSchema>, options?: mongo.FindOptions): Promise<FindCursor<TSchema>>;
+    findOne(filter: Filter<TSchema>, options?: mongo.FindOptions): Promise<TSchema | null>;
+    updateOne(filter: Filter<TSchema>, update: UpdateFilter<TSchema>, options?: mongo.FindOneAndUpdateOptions): Promise<TSchema | null>;
+};
+
+export class Store<TSchema extends Model> {
+    private _collection: mongo.Collection<TSchema>;
+    private _modelClass: ClassConstructor<TSchema>;
+
+    constructor(modelClass: ClassConstructor<TSchema>, collectionName: string, options?: mongo.CollectionOptions) {
+        this._collection = db.collection<TSchema>(collectionName, {});
+        this._modelClass = modelClass;
+    }
+
+    async find(filter: Filter<TSchema>, options?: mongo.FindOptions): Promise<FindCursor<TSchema>> {
+        return this._collection.find<TSchema>(filter, options).map(doc => new this._modelClass(doc));
+    }
+
+    async findOne(filter: Filter<TSchema>, options?: mongo.FindOptions): Promise<TSchema | null> {
+        const doc = await this._collection.findOne<TSchema>(filter, options);
+        return doc !== null ? new this._modelClass(doc) : null;
+    }
+
+    async updateOne(filter: Filter<TSchema>, update: UpdateFilter<TSchema>, options?: mongo.FindOneAndUpdateOptions): Promise<TSchema | null> {
+        const doc = await this._collection.findOneAndUpdate(filter, update, options ?? {}) as TSchema;
+        return doc !== null ? new this._modelClass(doc) : null;
+    }
+
 }

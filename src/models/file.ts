@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import { Collection, WithId } from 'mongodb'; // TODO: An abstracted "Storage" ;ayer/class/types so not tied to mongo
 import { calculateHash } from '../file';
+import { DataProperties, Model } from './base';
 
 export interface TimeStampedHash {
     hash: string;
@@ -8,22 +9,23 @@ export interface TimeStampedHash {
     timestamp: Date;
 }
 
-export interface FileProps {
+export interface File {
     path: string,           // file system path
     stats: fs.Stats,        // fs.stat()  
     hash?: string,          // hash of file contents
     previousHashes?: TimeStampedHash[],  // previous hash(es), not necessarily consecutive however. Can aid in determining relative file versions
 }
 
-export class File {
+export class File extends Model {
     path: string;
     stats: fs.Stats;
     hash?: string;
     previousHashes?: TimeStampedHash[] = [];
 
-    constructor(file: FileProps | null | undefined) {
+    constructor(file: DataProperties<File>) {
+        super(file);
         this.path = file?.path ?? "";
-        this.stats = Object.assign(new fs.Stats(), file?.stats);
+        this.stats = Object.assign(new fs.Stats(), file?.stats ?? {});
         this.hash = file?.hash;
         this.previousHashes = file?.previousHashes ?? [];
     }
