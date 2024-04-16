@@ -2,30 +2,71 @@ import * as fs from 'fs';
 import { Collection, WithId } from 'mongodb'; // TODO: An abstracted "Storage" ;ayer/class/types so not tied to mongo
 import { calculateHash } from '../file';
 import { DataProperties, Model } from './base';
+import { Aspect } from './base/Artefact';
 
-export interface TimeStampedHash {
-    hash: string;
+/*
+ * Ongoing reminder of the things I want File aspects / models /classes/modules(<-less OOP more FP?)
+ *
+ *  - Determine if the File (/dir too?) at its (immutable?) FS path:
+ *      + (a) exists, and
+ *      + (b) the time lapsed since the model (whether isNew() or loaded from Storage) was (re-)stat()'d 
+ *          - (b)(ii) if new stat()'s appear to have changed (any properties from new check / re-stat() are different to DB/model)
+ *          - (b)(iii) either and/or both of these values/conditions should (configurably ig?) be capable/configurable of either/and:
+ *              + invalidating/flagging and/or deleting (or just Timestamping certain values/model properties that are!) certain values
+ *                in the DB/model (like hash(s)(should maybe eventually use several hash/checksum algorithms)) that are
+ *                  - dynamic
+ *                  - "reactive"
+ *                  - invalidate-able (note: this obviously implies "validation" is an important operation/aspect of this general idea/problem)
+ *              + triggering re-fresh() of the values
+ *                  - this inevitably requires a (very likely often async) function associated with such dynamic properties.
+ *                      + getters and setters could be perfect for the job
+ *                          - model could cache the result / debounce the function invocation - rewrite the model property as plain data property(&vice/versa)
+ *                              + definition of and easy (re-)assigning to and from _pure data_  DB models/DTO TS _interfaces_ for each aspect model type,
+ *                                even if they end up being also being actual classes with instance methods, would make for easy save/load to/from Storage
+ *                                
+ *
+ *  */
+export type TimeStampedValue<TValue, TValueGetter = () => Promise<TValue>> {
+    status: "valid";
+    version: number;
+    value: TValue;
     mTimeMs: number;
     timestamp: Date;
-}
+} | {
+    status: "new";
+    version: 0;
+    value: TValueGetter;
+    mTimeMs: number;        // when a value has status: "new", mTimeMs and timestamp will still have valid timestamps, but they are time the TimeStampedValue was created
+    timestamp: Date;
+} | {
+    status: "expired" | "scheduled" | "running";
+    version: number;
+    mTimeMs: number;
+    timestamp: Date;
+};
+
+export type TimeStampedHash = TimeStampedValue<string>;
 
 export interface File {
     path: string,           // file system path
-    stats: fs.Stats,        // fs.stat()  
-    hash?: string,          // hash of file contents
+    stats: TimeStampedValue<fs.Stats>,        // fs.stat()  
+    // hash?: string,          // hash of file contents
+    hash: TimeStampedHash;
     previousHashes?: TimeStampedHash[],  // previous hash(es), not necessarily consecutive however. Can aid in determining relative file versions
 }
 
-export class File extends Model {
+// @Aspect
+export class File extends Model<File> {
+
     path: string;
-    stats: fs.Stats;
-    hash?: string;
+    stats: TimeStampedValue<fs.Stats>;
+    hash: TimeStampedHash;
     previousHashes?: TimeStampedHash[] = [];
 
     constructor(file: DataProperties<File>) {
         super(file);
-        this.path = file?.path ?? "";
-        this.stats = Object.assign(new fs.Stats(), file?.stats ?? {});
+        // this.path = file?.path ?? "";
+        // this.stats = Object.assign(new fs.Stats(), file?.stats ?? {});
         this.hash = file?.hash;
         this.previousHashes = file?.previousHashes ?? [];
     }
