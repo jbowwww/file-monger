@@ -1,8 +1,10 @@
-import * as fs from 'fs';
-import { Collection, WithId } from 'mongodb'; // TODO: An abstracted "Storage" ;ayer/class/types so not tied to mongo
+import * as nodeFs from 'fs';
+import * as nodePath from 'path';
+import { Collection, UUID, UpdateFilter, WithId } from 'mongodb'; // TODO: An abstracted "Storage" ;ayer/class/types so not tied to mongo
 import { calculateHash } from '../file';
-import { DataProperties, Model } from './base';
+import { DataProperties, IModel, Model, UpdateOrCreateOptions } from './base';
 import { Aspect } from './base/Artefact';
+import { Store } from '../db';
 
 /*
  * Ongoing reminder of the things I want File aspects / models /classes/modules(<-less OOP more FP?)
@@ -26,7 +28,7 @@ import { Aspect } from './base/Artefact';
  *                                
  *
  *  */
-export type TimeStampedValue<TValue, TValueGetter = () => Promise<TValue>> {
+export type TimeStampedValue<TValue, TValueGetter = () => Promise<TValue>> = {
     status: "valid";
     version: number;
     value: TValue;
@@ -47,64 +49,165 @@ export type TimeStampedValue<TValue, TValueGetter = () => Promise<TValue>> {
 
 export type TimeStampedHash = TimeStampedValue<string>;
 
-export interface File {
-    path: string,           // file system path
-    stats: TimeStampedValue<fs.Stats>,        // fs.stat()  
-    // hash?: string,          // hash of file contents
-    hash: TimeStampedHash;
-    previousHashes?: TimeStampedHash[],  // previous hash(es), not necessarily consecutive however. Can aid in determining relative file versions
+// Adds a setter and getter function to a property, allowing  same name, with type TimeStampedValue
+export function TimeStamped<T>(target: any, property: ClassFieldDecoratorContext) {
+    const descriptor = Object.getOwnPropertyDescriptor(target.prototype, property.name);
+    if (descriptor !== undefined) {
+        descriptor.set = (v: T) => {
+            descriptor.value = v;
+            descriptor.value._ts = Date.now();
+        };
+    }
+}
+
+export enum CalculateHashEnum {
+    Disable,
+    Inline,
+    Async,
+};
+
+export interface UpdateOrCreateFileOptions extends UpdateOrCreateOptions {
+    calculateHash?: CalculateHashEnum;
+};
+export var UpdateOrCreateFileOptions: {
+    default: UpdateOrCreateFileOptions;
+} = {
+    default: {
+        calculateHash: CalculateHashEnum.Inline,//.Async,
+    },
+};
+
+export interface IFile extends IModel {
+    path: string;
+    stats: nodeFs.Stats;
+    hash?: string;
+    previousHashes?: string[];
 }
 
 // @Aspect
 export class File extends Model<File> {
 
     path: string;
-    stats: TimeStampedValue<fs.Stats>;
-    hash: TimeStampedHash;
-    previousHashes?: TimeStampedHash[] = [];
+    // @TimeStamped
+    stats: nodeFs.Stats;
+    // @TimeStamped
+    hash?: string;
+    previousHashes: string[] = [];
 
-    constructor(file: DataProperties<File>) {
+    constructor(file: IFile) {
         super(file);
-        // this.path = file?.path ?? "";
-        // this.stats = Object.assign(new fs.Stats(), file?.stats ?? {});
-        this.hash = file?.hash;
-        this.previousHashes = file?.previousHashes ?? [];
+        this.path = file.path;
+        this.stats = file.stats;
+        this.hash = file.hash;
+        this.previousHashes = file.previousHashes ?? [];
     }
 
-    static async findOrCreateFromPath(path: string, collection: Collection<File>) {
-        const stats = await fs.promises.stat(path);
-        if (!stats.isFile())
-            throw new Error(`Path '${path}' is not a file`);
-        else
-            process.stdout.write(`File '${path}' `);
-        let dbFile = await collection.findOne({ path });
-        let file = dbFile === null ? null : new File(dbFile);
-        if (file && file.stats.size === stats.size && file.stats.mtimeMs === stats.mtimeMs && file.hash !== undefined) {
-            console.log(`has a valid hash in the local DB: ${JSON.stringify(file)}`);
+    query = {
+        findOne: (): UpdateFilter<File> => (this._id !== undefined ? { _id: this._id } : { path: this.path }),
+    };
+
+    async updateOrCreate(store: Store<File>, options: UpdateOrCreateFileOptions = UpdateOrCreateFileOptions.default) {
+        process.stdout.write(`File '${this.path}' `);
+        let dbFile = await store.findOne(this.query.findOne());
+        if (dbFile === null)
+            console.log(`does not exist yet in local DB`);
+        else if (!dbFile.hash)
+            console.log(`has a local DB entry without a hash: ${JSON.stringify(dbFile)}`);
+        else if (this.stats.size !== dbFile.stats.size || this.stats.mtimeMs > dbFile.stats.mtimeMs) {
+            console.log(`has an expired hash in the local DB: ${JSON.stringify(dbFile)}\n\tFile.stat=${JSON.stringify(this.stats)}`);
+            this.previousHashes.push(dbFile.hash);
         } else {
-            if (!file) {
-                file = new File({ path, stats });
-                console.log(`does not exist yet in local DB: ${JSON.stringify(file)}`);
-            } else if (!file.hash) {
-                console.log(`has a local DB entry without a hash: ${JSON.stringify(file)}`)
-            } else {
-                console.log(`has an expired hash in the local DB: ${JSON.stringify(file)}\n\tFile.stat=${JSON.stringify(stats)}`);
-            }
-            file.stats = stats;
-            await file.calculateHash();
-            await collection.updateOne({ path }, { $set: file }, { upsert: true });
-            console.log();
+            console.log(`has a valid hash in the local DB: ${JSON.stringify(dbFile)}`);
+            return;
         }
-        return file;
+        if (dbFile !== null)
+            this._id = dbFile._id;
+        else if (this._id === undefined)
+            this._id = new UUID().toHexString();
+        const result = await store.updateOne(this.query.findOne(), { $set: this.toData() }, { upsert: true });
+        if (/* result.upsertedCount > 0 &&  */result.upsertedId)
+            this._id = result.upsertedId;
+        const thisDoc = await store.findOne(this.query.findOne());
+        console.log(`updateOrCreate: thisDoc=${JSON.stringify(thisDoc)}`);
+        if (options.calculateHash === CalculateHashEnum.Inline) {
+            await this.calculateHash();
+            await store.updateOne(this.query.findOne(), { $set: this.toData() }, { upsert: true });
+            const thisDoc = await store.findOne(this.query.findOne());
+            console.log(`updateOrCreate: thisDoc=${JSON.stringify(thisDoc)}`);
+        } else if (options.calculateHash === CalculateHashEnum.Async) {
+            (async () => {
+                await this.calculateHash();
+                await store.updateOne(this.query.findOne(), { $set: this.toData() }, { upsert: true });
+                const thisDoc = await store.findOne(this.query.findOne());
+                console.log(`updateOrCreate: thisDoc=${JSON.stringify(thisDoc)}`);
+            })();
+        }
     }
 
     async calculateHash() {
         process.stdout.write(`Calculating hash for file '${this.path}' ... `);
         if (this.hash) {
-            this.previousHashes?.push({ hash: this.hash, mTimeMs: this.stats.mtimeMs, timestamp: new Date(Date.now()) });
+            this.previousHashes.push(this.hash);
+            this.hash = undefined;
         }
         this.hash = await calculateHash(this.path);
         console.log(this.hash);
         return this.hash;
     }
 }
+
+export interface IDirectory extends IModel {
+    path: string;
+    stats: nodeFs.Stats;
+}
+
+export class Directory extends Model<Directory> {
+    
+    path: string;
+    stats: nodeFs.Stats;
+
+    constructor(directory: IDirectory) {
+        super(directory);
+        this.path = directory.path;
+        this.stats = directory.stats;
+    }
+
+    async* walk(): AsyncGenerator<File | Directory, void, void> {
+        const entries = await nodeFs.promises.readdir(this.path);
+        const subDirs: Directory[] = [];
+        for (const entry of entries) {
+            const newPath = nodePath.join(this.path, entry);
+            const stats = await nodeFs.promises.stat(newPath);
+            let newEntry;
+            if (stats.isFile())
+                newEntry = new File({ path: newPath, stats });
+            else if (stats.isDirectory()) {
+                newEntry = new Directory({ path: newPath, stats });
+                subDirs.push(newEntry);
+            }
+            else {
+                console.warn(`Unknown file system entry for path '${newPath}`);
+                continue;
+            }
+            yield newEntry;
+        }
+        for (const subDir of subDirs) {
+            yield* subDir.walk()
+        }
+    }
+}
+
+export const FileSystem = {
+
+    async* walk(path: string): AsyncGenerator<File | Directory, void, void> {
+        const stats = await nodeFs.promises.stat(path);
+        if (stats.isFile())
+            yield new File({ path, stats });
+        else if (stats.isDirectory()) {
+            const newEntry = new Directory({ path, stats });
+            yield newEntry;
+            yield* newEntry.walk();
+        }
+    }
+
+};

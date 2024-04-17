@@ -1,10 +1,10 @@
-import yargs from "yargs"
+import yargs, { ArgumentsCamelCase } from "yargs"
 import * as db from '../db';
 
 import { calculateHash } from "../file";
 import { Collection, WithId } from "mongodb";
 
-import { File } from "../models/file";
+import { File, Directory, FileSystem } from "../models/file";
 
 export interface FileCommandArgv {
     dbUrl: string,
@@ -26,8 +26,19 @@ export const builder = function (yargs: yargs.Argv<FileCommandArgv>) {
             //     const coll = connection.db().collection<File>('local');
             //     const file = await File.findOrCreateFromPath(path, coll);
             // });
+            // await db.connect(argv.dbUrl);
             const store = new db.Store(File, 'files');
+            for await (const fileSystemEntry of FileSystem.walk(path)) {
+                if (fileSystemEntry instanceof File)
+                    await fileSystemEntry.updateOrCreate(store);
+            }
+            await db.close();
         }
     })
     yargs.demandCommand();
 };
+
+// exports.handler = async function (argv: ArgumentsCamelCase<FileCommandArgv>) {
+//     console.log(`cmds/file handler argv=${JSON.stringify(argv)}`);
+//     await db.connect(argv.dbUrl, {});
+// };

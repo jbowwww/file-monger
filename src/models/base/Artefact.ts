@@ -12,7 +12,7 @@ type ClassDecorator<TClass extends FunctionConstructor> = (
   ) => Function | void;
 
 const symbolAspectType = Symbol();
-export type AspectClass = Function & { [symbolAspectType]: string };
+export type AspectClass = FunctionConstructor & { [symbolAspectType]: string };
 
 /*
  * @name:
@@ -25,7 +25,7 @@ export type AspectClass = Function & { [symbolAspectType]: string };
 // export abstract class Model {
 //   Model()
 
-export const Aspect: ClassDecorator<AspectClass extends FunctionConstructor> = (value, { kind, name, addInitializer }) => {
+export const Aspect: ClassDecorator<AspectClass> = (value, { kind, name, addInitializer }) => {
   if (kind !== 'class')
     throw new TypeError(`@Aspect decorator called on non-class ${kind} value '${name}'`);
   value[symbolAspectType] = value.name;

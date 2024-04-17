@@ -9,7 +9,7 @@ export const globalOptions = {
     dbUrl: {
         description: 'Path to database',
         demandOption: true,
-        default: "mongodb://localhost:27017/",
+        default: "mongodb://mongo:mongo@localhost:27017/",
         global: true,
     }
 };
@@ -20,17 +20,6 @@ exports.description = 'Database commands';
 exports.builder = function (yargs: yargs.Argv<DbCommandArgv>) {
 
     console.log(`cmds/db builder yargs=${JSON.stringify(yargs)}`);
-
-    yargs.option(globalOptions);
-
-    yargs.middleware(async argv => {
-        console.log(`cmds/db builder middleware argv=${JSON.stringify(argv)}`);
-        await db.connect(argv.dbUrl);
-    });
-    yargs.onFinishCommand(async (result: any) => {
-        console.log(`cmds/db builder onFinishCommand result=${JSON.stringify(result)}`);
-        await db.close();
-    });
 
     yargs.command('init', 'Initialise database', yargs => { }, async argv => {
         console.log(`init db argv=${JSON.stringify(argv)}`);

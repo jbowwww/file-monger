@@ -1,6 +1,7 @@
 import * as mongo from 'mongodb';
-import { ClassConstructor, DataProperties, Model } from './models/base';
+import { ClassConstructor, DataProperties, IModel, Model } from './models/base';
 import { Filter, FindCursor, UpdateFilter, UpdateOptions, WithoutId } from 'mongodb';
+import { ToString } from 'yargs';
 
 let client: mongo.MongoClient | null = null;
 let connection: mongo.MongoClient;
@@ -12,7 +13,7 @@ export function isConnected() {
 
 export async function connect(url: string, options?: mongo.MongoClientOptions) {
     if (client === null) {
-        process.stdout.write(`Initialising DB connection to ${url} ${options !== undefined ? ("options=" + JSON.stringify(options)) : "" }} ... `);
+        process.stdout.write(`Initialising DB connection to ${url} ${options !== undefined ? ("options=" + JSON.stringify(options)) : "" } ... `);
         client = new mongo.MongoClient(url, options);
         connection = await client.connect();
         db = connection.db();
@@ -41,13 +42,13 @@ export async function useConnection(url: string, options: mongo.MongoClientOptio
     }
 }
 
-export interface Store<TSchema extends Model> {
+export interface Store<TSchema extends Model<TSchema>> {
     find(filter: Filter<TSchema>, options?: mongo.FindOptions): Promise<FindCursor<TSchema>>;
     findOne(filter: Filter<TSchema>, options?: mongo.FindOptions): Promise<TSchema | null>;
-    updateOne(filter: Filter<TSchema>, update: UpdateFilter<TSchema>, options?: mongo.FindOneAndUpdateOptions): Promise<TSchema | null>;
+    updateOne(filter: Filter<TSchema>, update: UpdateFilter<TSchema>, options?: mongo.FindOneAndUpdateOptions): Promise<mongo.UpdateResult<TSchema>>;
 };
 
-export class Store<TSchema extends Model> {
+export class Store<TSchema extends Model<TSchema>> {
     private _collection: mongo.Collection<TSchema>;
     private _modelClass: ClassConstructor<TSchema>;
 
@@ -65,9 +66,7 @@ export class Store<TSchema extends Model> {
         return doc !== null ? new this._modelClass(doc) : null;
     }
 
-    async updateOne(filter: Filter<TSchema>, update: UpdateFilter<TSchema>, options?: mongo.FindOneAndUpdateOptions): Promise<TSchema | null> {
-        const doc = await this._collection.findOneAndUpdate(filter, update, options ?? {}) as TSchema;
-        return doc !== null ? new this._modelClass(doc) : null;
-    }
-
+    async updateOne(filter: Filter<TSchema>, update: UpdateFilter<TSchema>, options?: mongo.UpdateOptions): Promise<mongo.UpdateResult<TSchema>> {
+        return await this._collection.updateOne(filter, update, options ?? {});
+    } 
 }

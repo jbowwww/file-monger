@@ -1,11 +1,11 @@
-import { Collection, Filter, FindOptions, InferIdType, UUID } from "mongodb";
+import { Collection, Filter, FindOptions, InferIdType, UUID, UpdateFilter } from "mongodb";
 import { Store } from "../db";
 import * as zod from "zod";
 
-export type NonMethodKeys<T> = { [P in keyof T]: T[P] extends () => void ? never : P; }[keyof T];
-export type DataProperties<T> = Pick<T, NonMethodKeys<T>>; 
+// export type NonMethodKeys<T> = { [P in keyof T]: T[P] extends () => void ? never : P; }[keyof T];
+export type DataProperties<T> = { [P in keyof T]: T[P] extends (...args: any[]) => any ? never : T[P]; };//Pick<T, NonMethodKeys<T>>; 
 
-export interface ClassConstructor<TClass, TCtorArgs extends Array<any> = [DataProperties<TClass>]> {
+export interface ClassConstructor<TClass, TCtorArgs extends Array<any> = [TClass]> {
     new (...args: TCtorArgs): TClass;
 };
 
@@ -58,23 +58,74 @@ export type TimeStampedHash = TimeStampedValue<string>;
 //     static abstract create<TModel extends Model<TModel>>(): void;
 // }
 
-const 
-const Model = zod.object({
-    _id: zod.string().optional();
-    _ts: 
-})
-export abstract class Model<TModel extends Model<TModel>> {
+// const 
+// const Model = zod.object({
+//     _id: zod.string().optional();
+//     _ts: 
+// })
+
+
+function copyProperties<T, K extends keyof DataProperties<T>>(s: Pick<T, K>, d: T, ks: K[]) {
+    ks.forEach(k => d[k] = s[k]);
+    return d;
+}
+
+export interface UpdateOrCreateOptions {
+};
+export var UpdateOrCreateOptions: {
+    default: UpdateOrCreateOptions;
+} = {
+    default: {},
+};
+
+export interface IModel {
+    _id?: string;// InferIdType<this>;
+    _ts?: Timestamp;
+}
+
+export abstract class Model<TModel extends Model<TModel>> implements IModel {
 
     public _id?: string;// InferIdType<this>;
-    public _ts?: ModelTimestampTree;// Timestamp;
+    public _ts?: Timestamp;
     
     get isNew() { return this._id === null; }
-
-    constructor(data?: DataProperties<Model<TModel>>): Model<TModel> {
+    
+    constructor(data?: IModel) {
         this._id = data?._id ?? undefined;
         this._ts = data?._ts ?? new Timestamp();
     }
 
+    toData(): Model<TModel> {
+        return { ...this };
+    }
+
+    query = {
+        findOne: (): UpdateFilter<TModel> => ({ _id: this._id }),
+    };
+
+    async updateOrCreate(store: Store<TModel>, options?: UpdateOrCreateOptions): Promise<void> {};
+
+    update(newData: Model<TModel>): string[] {
+        const prevData = { ...this };
+        const updated = (function checkUpdateValues(prev: any, next: any): string[] {
+            const updated: string[] = [];
+            for (const key of Object.keys(prev)) {
+                if (typeof prev[key] === 'object') {
+                    const updatedChildren = checkUpdateValues(prev[key], next[key]);
+                    if (updatedChildren.length > 0) {
+                        updated.push(...updatedChildren.map(childKey => key + "." + childKey));
+                        updated.push(key);
+                    }
+                }
+                else {
+                    if (prev[key] !== next[key])
+                        updated.push(key);
+                }
+            }
+            return updated;
+        })(prevData, newData);
+        return updated;
+    }
 };
 
 // export interface ModelStatic<TModel extends Model<TModel>> {
@@ -90,7 +141,7 @@ export abstract class Model<TModel extends Model<TModel>> {
     // ) {
     //     return await new typeof TAsyncCreator()
     // }
-}
+// }
 
     // static WrapCollection<TSchema extends Model<TSchema>>(collection: Collection<Model<TSchema>>, ctor: ClassConstructor<DataProperties<Model<TSchema>>>) {
     //     return Object.assign(collection, {
