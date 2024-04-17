@@ -95,7 +95,8 @@ export class File extends Model<File> {
     previousHashes: string[] = [];
 
     constructor(file: IFile) {
-        super(file);
+        super(File, file);
+
         this.path = file.path;
         this.stats = file.stats;
         this.hash = file.hash;
@@ -106,7 +107,7 @@ export class File extends Model<File> {
         findOne: (): UpdateFilter<File> => (this._id !== undefined ? { _id: this._id } : { path: this.path }),
     };
 
-    async updateOrCreate(store: Store<File>, options: UpdateOrCreateFileOptions = UpdateOrCreateFileOptions.default) {
+    async updateOrCreate(store: Store<{ File: File, Directory: Directory }, File | Directory>, options: UpdateOrCreateFileOptions = UpdateOrCreateFileOptions.default) {
         process.stdout.write(`File '${this.path}' `);
         let dbFile = await store.findOne(this.query.findOne());
         if (dbFile === null)
@@ -167,47 +168,35 @@ export class Directory extends Model<Directory> {
     stats: nodeFs.Stats;
 
     constructor(directory: IDirectory) {
-        super(directory);
+        super(Directory, directory);
         this.path = directory.path;
         this.stats = directory.stats;
     }
 
-    async* walk(): AsyncGenerator<File | Directory, void, void> {
+    async* walk(): AsyncGenerator<File | Directory | Error, void, undefined> {
         const entries = await nodeFs.promises.readdir(this.path);
-        const subDirs: Directory[] = [];
-        for (const entry of entries) {
-            const newPath = nodePath.join(this.path, entry);
-            const stats = await nodeFs.promises.stat(newPath);
-            let newEntry;
-            if (stats.isFile())
-                newEntry = new File({ path: newPath, stats });
-            else if (stats.isDirectory()) {
-                newEntry = new Directory({ path: newPath, stats });
-                subDirs.push(newEntry);
-            }
-            else {
-                console.warn(`Unknown file system entry for path '${newPath}`);
-                continue;
-            }
-            yield newEntry;
-        }
-        for (const subDir of subDirs) {
-            yield* subDir.walk()
-        }
+        const newFsEntries = await Promise.all(entries.map(entry => FileSystem.create(nodePath.join(this.path, entry))));
+        const subDirs = newFsEntries.filter(entry => entry instanceof Directory) as Directory[];
+        yield* newFsEntries;
+        for (const subDir of subDirs)
+            yield* subDir.walk();
     }
 }
 
 export const FileSystem = {
 
-    async* walk(path: string): AsyncGenerator<File | Directory, void, void> {
+    async create(path: string): Promise<File | Directory | Error> {
         const stats = await nodeFs.promises.stat(path);
-        if (stats.isFile())
-            yield new File({ path, stats });
-        else if (stats.isDirectory()) {
-            const newEntry = new Directory({ path, stats });
-            yield newEntry;
-            yield* newEntry.walk();
-        }
-    }
+        return stats.isFile() ? new File({ path, stats })
+            : stats.isDirectory() ? new Directory({ path, stats })
+            : new Error(`Unknown stat entry type for path '${path}'`);
+    },
+
+    async* walk(path: string): AsyncGenerator<File | Directory | Error, void, undefined> {
+        const rootEntry = FileSystem.create(path);
+        yield rootEntry;
+        if (rootEntry instanceof Directory)
+            yield* (rootEntry as Directory).walk();
+    },
 
 };

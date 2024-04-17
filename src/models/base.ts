@@ -1,12 +1,12 @@
 import { Collection, Filter, FindOptions, InferIdType, UUID, UpdateFilter } from "mongodb";
 import { Store } from "../db";
-import * as zod from "zod";
+import * as nodePath from 'path';
 
 // export type NonMethodKeys<T> = { [P in keyof T]: T[P] extends () => void ? never : P; }[keyof T];
 export type DataProperties<T> = { [P in keyof T]: T[P] extends (...args: any[]) => any ? never : T[P]; };//Pick<T, NonMethodKeys<T>>; 
 
 export interface ClassConstructor<TClass, TCtorArgs extends Array<any> = [TClass]> {
-    new (...args: TCtorArgs): TClass;
+    new (...args: TCtorArgs): Model<TClass>;
 };
 
 export type Optional<T, K extends keyof T> = Pick<Partial<T>, K> & Omit<T, K>;
@@ -79,33 +79,50 @@ export var UpdateOrCreateOptions: {
 };
 
 export interface IModel {
+    _T: string;
     _id?: string;// InferIdType<this>;
     _ts?: Timestamp;
 }
 
-export abstract class Model<TModel extends Model<TModel>> implements IModel {
+export abstract class Model<TModel> {
 
+    public _T: string;
     public _id?: string;// InferIdType<this>;
     public _ts?: Timestamp;
     
     get isNew() { return this._id === null; }
     
-    constructor(data?: IModel) {
+    constructor(modelCtor: ClassConstructor<TModel>, data?: IModel) {
+        this._T = modelCtor.name;
         this._id = data?._id ?? undefined;
         this._ts = data?._ts ?? new Timestamp();
     }
 
-    toData(): Model<TModel> {
-        return { ...this };
+    static Type<TModel extends Model<TModel>>(query: Partial<TModel>) {
+        return {
+            [this.name]: query,
+        };
+    }
+    //         findOne: (query: Document): { [K: string]: Document } => ({ [this._T]: query }),
+    //     };
+    // }
+
+    toData(): IModel {
+        return ({ ...this }) as IModel;
     }
 
+    toArtefact() {
+        return {
+            [this._T]: this.toData,
+        }
+    }
     query = {
         findOne: (): UpdateFilter<TModel> => ({ _id: this._id }),
     };
 
-    async updateOrCreate(store: Store<TModel>, options?: UpdateOrCreateOptions): Promise<void> {};
+    // async updateOrCreate(store: Store<TModel>, options?: UpdateOrCreateOptions): Promise<void> {};
 
-    update(newData: Model<TModel>): string[] {
+    update(newData: TModel): string[] {
         const prevData = { ...this };
         const updated = (function checkUpdateValues(prev: any, next: any): string[] {
             const updated: string[] = [];

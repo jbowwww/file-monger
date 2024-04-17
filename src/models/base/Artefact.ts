@@ -1,6 +1,7 @@
-import { ClassConstructor/* , Model */ } from "../base";
+import { ClassConstructor,/* , Model */ 
+Model} from "../base";
 
-import { File } from "../file";
+import { Directory, File } from "../file";
 
 type ClassDecorator<TClass extends FunctionConstructor> = (
     value: Function & TClass,
@@ -51,7 +52,12 @@ ModelOptions.default = {};
 type ArtefactSchema = {
   [aspectName: string]: FunctionConstructor;
 }
-export abstract class Artefact {
+export class Artefact<
+  TSchema extends { [K in keyof TSchema]: Partial<Model<TModel>> },
+  TModel extends Model<TModel>, // extends Model<infer TModel> ? Model<TModel> }> {
+  // TArtefactSchema extends Partial<{ [K in keyof TSchema]: Partial<TModel> }>,
+  // TSchemaKeys extends keyof TSchema
+> {
 
   private static _schema: ArtefactSchema = {};
 
@@ -63,4 +69,35 @@ export abstract class Artefact {
     });
   }
 
+  public constructor(...instances: TModel[]) {
+    const artefact = Object.create(Artefact.prototype);
+    for (const instance of instances) {
+      Object.assign(artefact, {
+        [instance.constructor.name]: instance,  // do i want to make a (deep/shallow) copy of this? it might actually be convenient keeping the same isntance
+      });
+    }
+    return artefact;
+  }
+      // query: Object.fromEntries(
+      //   Object.keys(item.query)
+      //     .filter(K => (item.query as any)[K] instanceof Function)
+      //     .map(K => ([K, (...args: any[]) => ({
+      //       [item.constructor.name]: (item.query as any)[K](...args),
+      //     })]))),
+    // };
+  // }
+
+  static async* stream<
+    TSchema extends { [K in keyof TSchema]: Partial<Model<TModel>> },
+    TModel extends Model<TModel>
+  >(iterable: AsyncIterable<TModel | Error>): AsyncGenerator<Artefact<TSchema, TModel>, void, undefined> {
+    for await (const item of iterable) {
+      if (item instanceof Error) {
+        console.warn(`Warning: Error while Artefact.stream() from iterable=${iterable}: ${item}`);
+        // throw item;
+        continue;
+      }
+      yield new Artefact<TSchema, TModel>(...[item]);
+    }
+  }
 }

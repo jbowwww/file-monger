@@ -5,6 +5,8 @@ import { calculateHash } from "../file";
 import { Collection, WithId } from "mongodb";
 
 import { File, Directory, FileSystem } from "../models/file";
+import { Artefact } from "../models/base/Artefact";
+import { Dir } from "fs";
 
 export interface FileCommandArgv {
     dbUrl: string,
@@ -27,10 +29,13 @@ export const builder = function (yargs: yargs.Argv<FileCommandArgv>) {
             //     const file = await File.findOrCreateFromPath(path, coll);
             // });
             // await db.connect(argv.dbUrl);
-            const store = new db.Store(File, 'files');
-            for await (const fileSystemEntry of FileSystem.walk(path)) {
-                if (fileSystemEntry instanceof File)
-                    await fileSystemEntry.updateOrCreate(store);
+            const store = new db.Store('files', {
+                File: File,
+                Directory: Directory,
+            });
+            for await (const artefact of Artefact.stream<Artefact<{ File: File, Directory: Directory }, File | Directory>, File | Directory>(FileSystem.walk(path))) {
+                await store.updateOrCreate(artefact, { File: { path: artefact.File.path } });
+                    // await fileSystemEntry.updateOrCreate(store);
             }
             await db.close();
         }
