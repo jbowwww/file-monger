@@ -5,12 +5,23 @@ import { calculateHash } from "../file";
 import { Collection, WithId } from "mongodb";
 
 import { File, Directory, FileSystem } from "../models/file";
-import { Artefact } from "../models/base/Artefact";
+import { Artefact, ArtefactAspect, ArtefactAspects } from "../models/base/Artefact2";
 import { Dir } from "fs";
+
+
+export enum CalculateHashEnum {
+    Disable,
+    Wait,
+    Background,
+};
 
 export interface FileCommandArgv {
     dbUrl: string,
     paths: string[],
+    calculateHash?: {
+        type: CalculateHashEnum,
+        default: CalculateHashEnum.Wait,//.Async,
+    },
 }
 
 export const command = 'file';
@@ -24,18 +35,28 @@ export const builder = function (yargs: yargs.Argv<FileCommandArgv>) {
         });
     }, async function (argv) {
         for (const path of argv.paths) {
-            // await db.useConnection(argv.dbUrl, {}, async connection => {
-            //     const coll = connection.db().collection<File>('local');
-            //     const file = await File.findOrCreateFromPath(path, coll);
-            // });
-            // await db.connect(argv.dbUrl);
-            const store = new db.Store('files', {
+
+            const store = new db.Store</* {
                 File: File,
                 Directory: Directory,
-            });
-            for await (const artefact of Artefact.stream<Artefact<{ File: File, Directory: Directory }, File | Directory>, File | Directory>(FileSystem.walk(path))) {
+            } */>('files');
+
+            // This approach might come together. Keep experimenting
+            
+            for await (const artefact of Artefact.stream<{
+                File: File,
+                Directory: Directory,
+                Error: Error
+            }>(
+                FileSystem.walk(path)
+            )) {
                 await store.updateOrCreate(artefact, { File: { path: artefact.File.path } });
-                    // await fileSystemEntry.updateOrCreate(store);
+                
+                if (argv.calculateHash === CalculateHashEnum.Wait) {
+                    await store.update(() => artefact.File.calculateHash());
+                } else if (argv.calculateHash === CalculateHashEnum.Background) {
+                    store.update(() => artefact.File.calculateHash())
+                }
             }
             await db.close();
         }

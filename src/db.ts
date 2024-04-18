@@ -52,7 +52,7 @@ export interface Store<
 };
 
 export class Store<
-    TSchema extends { [K: string]: Partial<Model<TModel>> },
+    TSchema extends SchemaRoot & { [K: string]: Partial<Model<TModel>> },
     TModel extends Partial<Model<TModel>>
 > {
     private _collection: mongo.Collection<TSchema>;
@@ -76,7 +76,12 @@ export class Store<
         return await this._collection.findOneAndUpdate(filter, update, options ?? {});
     }
     
-    async updateOrCreate(instance: Partial<TSchema>, findOneQuery: { [K: string]: Partial<TSchema[typeof K]> }) {
-        
+    async updateOrCreate(instance: Partial<TSchema>, findOneQuery: Filter<TSchema> /* { [K: string]: Partial<TSchema[typeof K]> } */) {
+        console.debug(`db.Store(name='${this._collection?.collectionName ?? ""}, modelClasses=<${Object.keys(this._modelClasses).join(',')}>).updateOrCreate(instance=Artefact<${Object.keys(instance).join(',')}>, findOneQuery=${JSON.stringify(findOneQuery)})`);
+        let dbData = await this._collection.findOne<Partial<TSchema>>(findOneQuery);
+        if (dbData !== null) {
+            if 
+        }
+            console.log(`does not exist yet in local DB`);
     }
 }

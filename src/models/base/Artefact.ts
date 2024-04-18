@@ -1,5 +1,6 @@
 import { ClassConstructor,/* , Model */ 
-Model} from "../base";
+Model,
+Timestamp} from "../base";
 
 import { Directory, File } from "../file";
 
@@ -40,64 +41,88 @@ export const Aspect: ClassDecorator<AspectClass> = (value, { kind, name, addInit
 
 // Artefact<{ file: File }>()
 
-
-export interface ModelOptions {
-  name?: string;
-};
-declare var ModelOptions: {
-  default: ModelOptions;
-};
-ModelOptions.default = {};
-
-type ArtefactSchema = {
-  [aspectName: string]: FunctionConstructor;
-}
-export class Artefact<
-  TSchema extends { [K in keyof TSchema]: Partial<Model<TModel>> },
-  TModel extends Model<TModel>, // extends Model<infer TModel> ? Model<TModel> }> {
-  // TArtefactSchema extends Partial<{ [K in keyof TSchema]: Partial<TModel> }>,
-  // TSchemaKeys extends keyof TSchema
-> {
-
-  private static _schema: ArtefactSchema = {};
-
+// export interface ModelOptions {
+//   name?: string;
+// };
+// declare var ModelOptions: {
+//   default: ModelOptions;
+// };
+// ModelOptions.default = {};
   // decorator factory function for adding model classes to this Artefact type (??!‽!)
-  static Model<TAspect extends FunctionConstructor>(options: ModelOptions = ModelOptions.default) {
-    return <ClassDecorator<TAspect>>((value, { kind, name, addInitializer }) => {
-      const _name = options.name ?? name ?? value.name;
-      this._schema[_name] = value;
-    });
-  }
-
-  public constructor(...instances: TModel[]) {
-    const artefact = Object.create(Artefact.prototype);
-    for (const instance of instances) {
-      Object.assign(artefact, {
-        [instance.constructor.name]: instance,  // do i want to make a (deep/shallow) copy of this? it might actually be convenient keeping the same isntance
-      });
-    }
-    return artefact;
-  }
-      // query: Object.fromEntries(
-      //   Object.keys(item.query)
-      //     .filter(K => (item.query as any)[K] instanceof Function)
-      //     .map(K => ([K, (...args: any[]) => ({
-      //       [item.constructor.name]: (item.query as any)[K](...args),
-      //     })]))),
-    // };
+  // static Model<TAspect extends FunctionConstructor>(options: ModelOptions = ModelOptions.default) {
+  //   return <ClassDecorator<TAspect>>((value, { kind, name, addInitializer }) => {
+  //     const _name = options.name ?? name ?? value.name;
+  //     this._schema[_name] = value;
+  //   });
   // }
 
-  static async* stream<
-    TSchema extends { [K in keyof TSchema]: Partial<Model<TModel>> },
-    TModel extends Model<TModel>
-  >(iterable: AsyncIterable<TModel | Error>): AsyncGenerator<Artefact<TSchema, TModel>, void, undefined> {
-    for await (const item of iterable) {
-      if (item instanceof Error) {
-        console.warn(`Warning: Error while Artefact.stream() from iterable=${iterable}: ${item}`);
-        // throw item;
-        continue;
-      }
-      yield new Artefact<TSchema, TModel>(...[item]);
-    }
-  }
-}
+
+// export type ArtefactSchemaRoot = {
+//   _id?: string;
+//   _ts?: Timestamp;
+// };
+// export type ArtefactSchemaData = {
+//   [K: string]: Partial<Model<any>>; //{ [K in keyof TSchema]: Partial<Model<any>> },
+// };
+// export type Artefact = ArtefactSchemaRoot & ArtefactSchemaData;
+
+// export var Artefact = {
+
+//   prototype: {},  // might come in handy
+
+//   create<TSchema extends ArtefactSchemaData>(...instances: TSchema[]) {
+//     return Object.assign(
+//       Object.create(Artefact.prototype),
+//       ...instances.map(instance => ({
+//         [instance.constructor.name]: instance,  // do i want to make a (deep/shallow) copy of this? it might actually be convenient keeping the same isntance
+//       }))
+//     );
+//   },
+  
+//   async* stream<
+//     TSchema extends { [K in keyof TSchema]: Partial<Model<TModel>> },
+//     TModel extends Model<TModel>
+//   >(iterable: AsyncIterable<TModel | Error>): AsyncGenerator<Artefact<TSchema, TModel>, void, undefined> {
+//     for await (const item of iterable) {
+//       if (item instanceof Error) {
+//         console.warn(`Warning: Error while Artefact.stream() from iterable=${iterable}: ${item}`);
+//         // throw item;
+//         continue;
+//       }
+//       yield Artefact.create<TSchema, TModel>(...[item]);
+//     }
+//   }
+
+// };
+
+// // TypeScript class to define the Artefact
+// class Artefact {
+//   _schema: Record<string, new (...args: any) => any>;
+//   [key: string]: any;
+
+//   constructor(schema: Record<string, new (...args: any) => any>, instances: any) {
+//     this._schema = schema;
+//     Object.assign(this, instances);
+//   }
+// }
+
+// // Updated function
+// type ClassToObject<T> = {
+//   [K in keyof T]: T[K] extends new (...args: any) => any ? InstanceType<T[K]> : T[K];
+// };
+
+// function classesToArtefact<T>(...instances: ClassToObject<T>[]): Artefact {
+//   const schema: Record<string, new (...args: any) => any> = {};
+//   const artefactObj: Record<string, any> = {};
+
+//   instances.forEach((instance) => {
+//     const instanceKeys = Object.getOwnPropertyNames(instance);
+//     instanceKeys.forEach((key) => {
+//       const constructorName = instance[key].constructor.name;
+//       schema[constructorName] = instance[key].constructor;
+//       artefactObj[constructorName] = instance[key];
+//     });
+//   });
+
+//   return new Artefact(schema, artefactObj);
+// }
