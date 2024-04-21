@@ -2,10 +2,99 @@ import * as mongo from 'mongodb';
 import { ClassConstructor, DataProperties, IModel, Model } from './models/base';
 import { Filter, FindCursor, UpdateFilter, UpdateOptions, WithoutId } from 'mongodb';
 import { ToString } from 'yargs';
+import { Artefact } from './models/base/Artefact2';
+import { DbCommandArgv } from './cmds/db';
 
-let client: mongo.MongoClient | null = null;
-let connection: mongo.MongoClient;
-let db: mongo.Db;
+export let client: mongo.MongoClient | null = null;
+export let connection: mongo.MongoClient;
+export let db: mongo.Db;
+
+export let storage: Storage | undefined = undefined;
+
+export function configure(config: () => Storage) {
+    storage = config();
+}
+
+export interface Storage {
+    isConnected(): boolean;
+    connect(): Promise<Storage>;
+    close(): Promise<Storage>;
+    store(name: string, options?: any): Promise<Store>;
+}
+
+export class MongoStorage implements Storage {
+
+    private _client: mongo.MongoClient | null = null;
+    private _connection: mongo.MongoClient | null = null;
+    private _db: mongo.Db | null = null;
+
+    constructor(public readonly url: string, public readonly options?: any) {}
+
+    isConnected(): boolean {
+        return this._client !== null;
+    }
+ 
+    async connect(): Promise<Storage> {
+        if (this._client === null) {
+            process.stdout.write(`Initialising DB connection to ${this.url} ${this.options !== undefined ? ("options=" + JSON.stringify(this.options)) : "" } ... `);
+            this._client = new mongo.MongoClient(this.url, this.options);
+            this._connection = await this._client.connect();
+            this._db = this._connection.db();
+            process.stdout.write("OK\n");
+        }
+        return this as Storage;
+    }
+
+    async close(): Promise<Storage> {
+        await this.connect();
+        process.stdout.write(`Closing DB connection ... `);
+        await this._connection!.close();
+        this._client = null;
+        this._connection = null;
+        this._db = null;
+        process.stdout.write("OK\n");
+        return this as Storage;
+    }
+
+    async store(name: string, options?: any): Promise<Store> {
+        await this.connect();
+        process.stdout.write(`Getting store '${name} ${options !== undefined ? ("options=" + JSON.stringify(options)) : "" } ... `);
+        const store: Store = new MongoStore(this as Storage, name, options, this._db!.collection(name, options));
+        process.stdout.write("OK\n");
+        return store as Store;
+    }
+}
+
+export interface Store {
+    find(query: any): AsyncGenerator;
+    findOne(query: any): Promise<Artefact>;
+    updateOrCreate(artefact: Artefact): Promise<Artefact>;
+}
+
+export class MongoStore implements Store {
+
+    constructor(
+        public readonly storage: Storage,
+        public readonly name: string,
+        public readonly options: any,
+        private _collection: mongo.Collection,
+    ) {}
+
+    async* find(query: any) {
+        for await (const item of this._collection.find(query))
+            yield item;
+    }
+
+    async findOne(query: any): Promise<Artefact> {
+        return new Artefact();//await this._collection.findOne(query));
+    }
+
+    async updateOrCreate(artefact: Artefact): Promise<Artefact> {
+        const query = artefact._T.primary?.prototype.query;
+        return new Artefact();
+    }
+
+}
 
 export function isConnected() {
     return client !== null;
@@ -42,46 +131,46 @@ export async function useConnection(url: string, options: mongo.MongoClientOptio
     }
 }
 
-export interface Store<
-    TSchema extends { [K: string]: Partial<Model<TModel>> },
-    TModel extends Partial<Model<TModel>>
-> {
-    find(filter: Filter<TSchema>, options?: mongo.FindOptions): Promise<FindCursor<{ [K: string]: Model<TModel> }>>;
-    findOne(filter: Filter<TSchema>, options?: mongo.FindOptions): Promise<{ [K: string]: Model<TModel> } | null>;
-    updateOne(filter: Filter<TSchema>, update: UpdateFilter<TSchema>, options?: mongo.FindOneAndUpdateOptions): Promise<mongo.WithId<TSchema> | null>;
-};
+// export interface Store<
+//     TSchema extends { [K: string]: Partial<Model<TModel>> },
+//     TModel extends Partial<Model<TModel>>
+// > {
+//     find(filter: Filter<TSchema>, options?: mongo.FindOptions): Promise<FindCursor<{ [K: string]: Model<TModel> }>>;
+//     findOne(filter: Filter<TSchema>, options?: mongo.FindOptions): Promise<{ [K: string]: Model<TModel> } | null>;
+//     updateOne(filter: Filter<TSchema>, update: UpdateFilter<TSchema>, options?: mongo.FindOneAndUpdateOptions): Promise<mongo.WithId<TSchema> | null>;
+// };
 
-export class Store<
-    TSchema extends SchemaRoot & { [K: string]: Partial<Model<TModel>> },
-    TModel extends Partial<Model<TModel>>
-> {
-    private _collection: mongo.Collection<TSchema>;
-    private _modelClasses: { [K in keyof TSchema]: ClassConstructor<TSchema[K]> };
+// export class Store<
+//     TSchema extends { [K: string]: Partial<Model<TModel>> },
+//     TModel extends Partial<Model<TModel>>
+// > {
+//     private _collection: mongo.Collection<TSchema>;
+//     private _modelClasses: { [K in keyof TSchema]: ClassConstructor<TSchema[K]> };
 
-    constructor(name: string, modelClasses: { [K in keyof TSchema]: ClassConstructor<TSchema[K]> }) {
-        this._collection = db.collection<TSchema>(name, {});
-        this._modelClasses = modelClasses;//new Map(Object.entries(modelClasses)); // .map(([K, ctor]) => ([ctor.name, ctor]) )
-    }
+//     constructor(name: string, modelClasses: { [K in keyof TSchema]: ClassConstructor<TSchema[K]> }) {
+//         this._collection = db.collection<TSchema>(name, {});
+//         this._modelClasses = modelClasses;//new Map(Object.entries(modelClasses)); // .map(([K, ctor]) => ([ctor.name, ctor]) )
+//     }
 
-    async find(filter: Filter<TSchema>, options?: mongo.FindOptions): Promise<FindCursor<{ [K: string]: Model<TModel> }>> {
-        return this._collection.find<TSchema>(filter, options).map(doc => Object.fromEntries(Object.keys(doc).map(K => ([K, new (this._modelClasses as any)[K]((doc as any)[K])]))));
-    }
+//     async find(filter: Filter<TSchema>, options?: mongo.FindOptions): Promise<FindCursor<{ [K: string]: Model<TModel> }>> {
+//         return this._collection.find<TSchema>(filter, options).map(doc => Object.fromEntries(Object.keys(doc).map(K => ([K, new (this._modelClasses as any)[K]((doc as any)[K])]))));
+//     }
 
-    async findOne(filter: Filter<TSchema>, options?: mongo.FindOptions): Promise<{ [K: string]: Model<TModel> } | null> {
-        const doc = await this._collection.findOne<TSchema>(filter, options);
-        return doc !== null ? Object.fromEntries(Object.keys(doc).map(K => ([K, new (this._modelClasses as any)[K]((doc as any)[K])]))) : null;
-    }
+//     async findOne(filter: Filter<TSchema>, options?: mongo.FindOptions): Promise<{ [K: string]: Model<TModel> } | null> {
+//         const doc = await this._collection.findOne<TSchema>(filter, options);
+//         return doc !== null ? Object.fromEntries(Object.keys(doc).map(K => ([K, new (this._modelClasses as any)[K]((doc as any)[K])]))) : null;
+//     }
 
-    async updateOne(filter: Filter<TSchema>, update: UpdateFilter<TSchema>, options?: mongo.FindOneAndUpdateOptions): Promise<mongo.WithId<TSchema> | null> {
-        return await this._collection.findOneAndUpdate(filter, update, options ?? {});
-    }
+//     async updateOne(filter: Filter<TSchema>, update: UpdateFilter<TSchema>, options?: mongo.FindOneAndUpdateOptions): Promise<mongo.WithId<TSchema> | null> {
+//         return await this._collection.findOneAndUpdate(filter, update, options ?? {});
+//     }
     
-    async updateOrCreate(instance: Partial<TSchema>, findOneQuery: Filter<TSchema> /* { [K: string]: Partial<TSchema[typeof K]> } */) {
-        console.debug(`db.Store(name='${this._collection?.collectionName ?? ""}, modelClasses=<${Object.keys(this._modelClasses).join(',')}>).updateOrCreate(instance=Artefact<${Object.keys(instance).join(',')}>, findOneQuery=${JSON.stringify(findOneQuery)})`);
-        let dbData = await this._collection.findOne<Partial<TSchema>>(findOneQuery);
-        if (dbData !== null) {
-            if 
-        }
-            console.log(`does not exist yet in local DB`);
-    }
-}
+//     async updateOrCreate(instance: Partial<TSchema>, findOneQuery: Filter<TSchema> /* { [K: string]: Partial<TSchema[typeof K]> } */) {
+//         console.debug(`db.Store(name='${this._collection?.collectionName ?? ""}, modelClasses=<${Object.keys(this._modelClasses).join(',')}>).updateOrCreate(instance=Artefact<${Object.keys(instance).join(',')}>, findOneQuery=${JSON.stringify(findOneQuery)})`);
+//         let dbData = await this._collection.findOne<Partial<TSchema>>(findOneQuery);
+//         if (dbData !== null) {
+//             if 
+//         }
+//             console.log(`does not exist yet in local DB`);
+//     }
+// }

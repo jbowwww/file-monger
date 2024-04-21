@@ -1,13 +1,8 @@
-import yargs, { ArgumentsCamelCase } from "yargs"
+import yargs from "yargs";
 import * as db from '../db';
 
-import { calculateHash } from "../file";
-import { Collection, WithId } from "mongodb";
-
 import { File, Directory, FileSystem } from "../models/file";
-import { Artefact, ArtefactAspect, ArtefactAspects } from "../models/base/Artefact2";
-import { Dir } from "fs";
-
+import { Artefact } from "../models/base/Artefact2";
 
 export enum CalculateHashEnum {
     Disable,
@@ -36,21 +31,24 @@ export const builder = function (yargs: yargs.Argv<FileCommandArgv>) {
     }, async function (argv) {
         for (const path of argv.paths) {
 
-            const store = new db.Store</* {
-                File: File,
-                Directory: Directory,
-            } */>('files');
+            // const store = new db.Store</* {
+            //     File: File,
+            //     Directory: Directory,
+            // } */>('files');
 
             // This approach might come together. Keep experimenting
             
-            for await (const artefact of Artefact.stream<{
-                File: File,
-                Directory: Directory,
-                Error: Error
-            }>(
-                FileSystem.walk(path)
-            )) {
-                await store.updateOrCreate(artefact, { File: { path: artefact.File.path } });
+            // for await (const artefact of Artefact.stream<{
+            //     File: File,
+            //     Directory: Directory,
+            //     Error: Error
+            // }>(
+            //     FileSystem.walk(path)
+            // )) {
+            //     await store.updateOrCreate(artefact, { File: { path: artefact.File.path } });
+            
+            for await (const artefact of Artefact.stream( FileSystem.walk(path) )) {
+                await store.updateOrCreate(artefact, artefact.File.query.path);
                 
                 if (argv.calculateHash === CalculateHashEnum.Wait) {
                     await store.update(() => artefact.File.calculateHash());

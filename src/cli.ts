@@ -10,7 +10,7 @@ import * as db from './db';
   .option(globalOptions)
   .middleware(async argv => {
       console.log(`cli middleware argv=${JSON.stringify(argv)}`);
-      await db.connect(argv.dbUrl);
+      await db.configure(() => new db.MongoStorage(argv.dbUrl, {}));
   })
   .commandDir('cmds')
   // .onFinishCommand(async (result: any) => {
