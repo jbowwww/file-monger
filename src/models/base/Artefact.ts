@@ -4,14 +4,26 @@ Timestamp} from "../base";
 
 import { Directory, File } from "../file";
 
-type ClassDecorator<TClass extends FunctionConstructor> = (
-    value: Function & TClass,
-    context: {
-      kind: 'class';
-      name: string | undefined;
-      addInitializer(initializer: () => void): void;
-    }
-  ) => Function | void;
+type ClassDecorator<TClass extends FunctionConstructor = FunctionConstructor> = (
+    value: any,
+    context: ClassDecoratorContext
+    // {
+    //   kind: 'class';
+    //   name: string | undefined;
+    //   addInitializer(initializer: () => void): void;
+    // }
+  ) => void;
+
+type ClassPropertyDecorator<TClass extends FunctionConstructor = FunctionConstructor> = (
+    value: any,
+    // propertyKey: string | symbol,
+    context: ClassFieldDecoratorContext,
+    // {
+    //   kind: 'property';
+    //   name: string | undefined;
+    //   addInitializer(initializer: () => void): void;
+    // }:
+  ) => void;
 
 const symbolAspectType = Symbol();
 export type AspectClass = FunctionConstructor & { [symbolAspectType]: string };
@@ -31,7 +43,64 @@ export const Aspect: ClassDecorator<AspectClass> = (value, { kind, name, addInit
   if (kind !== 'class')
     throw new TypeError(`@Aspect decorator called on non-class ${kind} value '${name}'`);
   value[symbolAspectType] = value.name;
+};
+
+export const updatedKeys = (oldData: any, newData: any): string[] => {
+  const updated = (function checkUpdateValues(prev: any, next: any): string[] {
+      const updated: string[] = [];
+      for (const key of Object.keys(prev)) {
+          if (typeof prev[key] === 'object') {
+              const updatedChildren = checkUpdateValues(prev[key], next[key]);
+              if (updatedChildren.length > 0) {
+                  updated.push(...updatedChildren.map(childKey => key + "." + childKey));
+                  updated.push(key);
+              }
+          }
+          else {
+              if (prev[key] !== next[key])
+                  updated.push(key);
+          }
+      }
+      return updated;
+  })(oldData, newData);
+  return updated;
 }
+export const isUpdated = (oldData: any, newData: any) => updatedKeys(oldData, newData).length > 0;
+
+export type TriggerMap = {
+  [K: string]: true | 1 | ((oldValue: any, newValue: any) => boolean);
+};
+
+export const trigger = (targetUpdater: (...args: any[]) => any, triggerMap: TriggerMap) => {
+  return ((target: any, { kind, name, addInitializer }) => {
+    
+    // if (typeof target !== 'object' || typeof target[symbolAspectType] !== 'string')
+    if (kind !== 'field')
+      throw new TypeError(`@trigger decorator called on non-property target=${target}`)
+
+    const triggerDescriptors: PropertyDescriptorMap = Object.fromEntries(
+      Object.keys(triggerMap).map(triggerPropertyKey => ([
+        triggerPropertyKey,
+        Object.getOwnPropertyDescriptor(target, triggerPropertyKey)
+      ])
+    ).filter(descriptor => descriptor !== undefined));
+
+    for (const triggerName in triggerDescriptors) {
+      const triggerDescriptor = triggerDescriptors[triggerName];
+      triggerDescriptor.get = () => triggerDescriptor.value;
+      triggerDescriptor.set = function (value: any) {
+        if (isUpdated(triggerDescriptor.value, value)
+        && (triggerMap[triggerName] === true || triggerMap[triggerName] === 1)
+        || (triggerDescriptor.value, value)) {
+          triggerDescriptor.value = value;
+          (async () => {
+            target[name] = await targetUpdater(target);
+          })();
+        };
+      }
+    }
+  }) as ClassPropertyDecorator;
+};
 
 // export function Artefact<TArtefact extends { [K in keyof TArtefact]: TArtefact[K] extends ClassConstructor<TArtefact[K]> ? ClassConstructor<TArtefact[K]> : never }>()
     

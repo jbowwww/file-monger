@@ -3,7 +3,7 @@ import * as nodePath from 'path';
 import { Collection, UUID, UpdateFilter, WithId } from 'mongodb'; // TODO: An abstracted "Storage" ;ayer/class/types so not tied to mongo
 import { calculateHash } from '../file';
 import { DataProperties, IModel, Model, UpdateOrCreateOptions } from './base';
-import { Aspect } from './base/Artefact';
+import { Aspect, trigger } from './base/Artefact';
 import { Store } from '../db';
 
 /*
@@ -88,7 +88,7 @@ export interface IFile extends IModel {
 export class File extends Model<File, IFile> {
 
     path: string;
-    // @TimeStamped
+    @trigger(async (target: File) => await nodeFs.promises.stat(target.path), { path: true })
     stats: nodeFs.Stats;
     // @TimeStamped
     hash?: string;
