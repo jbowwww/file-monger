@@ -3,7 +3,8 @@ import * as nodePath from 'path';
 import { Collection, UUID, UpdateFilter, WithId } from 'mongodb'; // TODO: An abstracted "Storage" ;ayer/class/types so not tied to mongo
 import { calculateHash } from '../file';
 import { DataProperties, IModel, Model, UpdateOrCreateOptions } from './base';
-import { Aspect, trigger } from './base/Artefact';
+import { /* Aspect, */ trigger } from './base/Artefact';
+import { Aspect } from './base/Artefact2';
 import { Store } from '../db';
 
 /*
@@ -85,16 +86,15 @@ export interface IFile extends IModel {
 }
 
 // @Aspect
-export class File extends Model<File, IFile> {
+export class File extends Aspect<File> { //Model<File, IFile> {
 
     path: string;
-    @trigger(async (target: File) => await nodeFs.promises.stat(target.path), { path: true })
     stats: nodeFs.Stats;
-    // @TimeStamped
+    @trigger(async (target: File) => target.stats.mtimeawait nodeFs.promises.stat(target.path), { stats: true })
     hash?: string;
     previousHashes: string[] = [];
 
-    constructor(file: IFile) {
+    constructor(file: DataProperties<File>) {
         super(file);
 
         this.path = file.path;
@@ -103,11 +103,22 @@ export class File extends Model<File, IFile> {
         this.previousHashes = file.previousHashes ?? [];
     }
 
-    query = {
-        findOne: (): UpdateFilter<File> => (this._id !== undefined ? { _id: this._id } : { path: this.path }),
-    };
+    public get query() {
+        return ({
+            ...super.query,
+            byPath  :   () => ({ path: this.path }),
+            findOne :   () => (this._id !== undefined ? this.query.byId() : this.query.byPath() ),
+        });
+    }
 
-    async updateOrCreate(store: Store<{ File: File, Directory: Directory }, File | Directory>, options: UpdateOrCreateFileOptions = UpdateOrCreateFileOptions.default) {
+    static query = {
+        ...super.query,
+        ...{
+
+        },
+    }
+
+    async updateOrCreate(store: Store, options: UpdateOrCreateFileOptions = UpdateOrCreateFileOptions.default) {
         process.stdout.write(`File '${this.path}' `);
         let dbFile = await store.findOne(this.query.findOne());
         if (dbFile === null)
@@ -162,13 +173,13 @@ export interface IDirectory extends IModel {
     stats: nodeFs.Stats;
 }
 
-export class Directory extends Model<Directory> {
+export class Directory extends Aspect<Directory> { // Model<Directory> {
     
     path: string;
     stats: nodeFs.Stats;
 
-    constructor(directory: IDirectory) {
-        super(Directory, directory);
+    constructor(directory: DataProperties<Directory>) {
+        super(directory);
         this.path = directory.path;
         this.stats = directory.stats;
     }

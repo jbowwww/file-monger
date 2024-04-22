@@ -1,3 +1,5 @@
+import { EventEmitter } from "stream";
+import { DataProperties } from "../base";
 
 export function isAsyncIterable<T>(obj: any): obj is AsyncIterable<T> {
     return obj.hasOwnProperty(Symbol.asyncIterator);
@@ -5,104 +7,20 @@ export function isAsyncIterable<T>(obj: any): obj is AsyncIterable<T> {
 export function isIterable<T>(obj: any): obj is Iterable<T> {
     return obj.hasOwnProperty(Symbol.iterator);
 }
-// export function isArtefactAspects<T extends ArtefactAspects<T>>(obj: any): obj is ArtefactAspects<T> {
-//     return typeof obj === 'object'; // literally each input item is really just a POJO (a class will also have prototype and ctor though)
-// }
 
 export interface ClassConstructor<TClass, TCtorArgs extends Array<any> = [TClass]> {
     new (...args: TCtorArgs): TClass;
 };
 
-export type ArtefactAspect<T> = (T extends new (...args: any[]) => any ? InstanceType<T> : T)
-    | Promise<any>
-    | ((...args: any[]) => any)
-    | ((...args: any[]) => Promise<any>)
-//     | object;
-
-// export type ArtefactAspects<T> = {
-//     [K in keyof T]: (T[K] extends new (...args: any[]) => any ? InstanceType<T[K]> : T[K]) | undefined;
-// };
-
 export type AspectData<TData = any> = {
     [K in keyof TData]: any;
 };
-
-// export abstract class Aspect<TAspectData extends AspectData, K extends string> {
-    // [K: keyof TAspectData]: TAspectData[typeof k];
-    // constructor(data: TAspectData) {
-//         Object.assign(this, dat
-
-// export type AspectConstructor<TAspectData extends AspectData> = ClassConstructor<Aspect<TAspectData>, [TAspectData]>;
-
+export type AspectConstructor<TAspect extends Aspect<TAspect>> = ClassConstructor<Aspect<TAspect>, [DataProperties<Aspect<TAspect>>]>;
 
 export type ArtefactData<TData extends { [K: string]: AspectData<TData[typeof K]> }> = {
     [K in keyof TData]: AspectData<TData[K]>;
 };
-
-// export type ArtefactSchema = { [K: string]: AspectConstructor<AspectData>; };
-
-// export class Artefact<TSchema extends ArtefactSchema, K extends keyof TSchema> {
-//     [K: keyof TSchema]: InstanceType<TSchema[typeof K]> | undefined;
-//     constructor(...instances: AspectData[]) {}
-// }
-
-// export type ArtefactType<TSchema extends ArtefactSchema> = {
-//     new (...instances: InstanceType<TSchema[keyof TSchema]>[]): ArtefactType<TSchema>;
-// };// & Artefact<TSchema>;
-
-// declare var Artefact: {
-//     Type: <TSchema extends ArtefactSchema>(schema: TSchema) => ArtefactType<TSchema>;
-// } = {
-//     Type: <TSchema extends ArtefactSchema>(schema: TSchema) => {
-//         return class implements ArtefactType<TSchema> {
-//             constructor(...instances: ArtefactType<TSchema>[]) {
-//                 return Object.assign(this, instances);//Object.fromEntries(aspects.map(aspect => new schema[aspect.prototype.constructor.name](aspect)([aspect.name, new aspect()])))
-//             }
-//         };
-//     };
-//         for (const key in schema) {
-//             artefactType.prototype[key] = 
-//         }
-// });
-
-// Artefact.Type = ()
-// Artefact.prototype = {
-    
-//     _schema: undefined,
-
-//     constructor: Artefact,
-//     add<T>(...instances: ArtefactAspect<T>[]): Artefact {
-//         for (const instance of instances) {
-//             const constructorName = instance[key].constructor.name;
-//             this._schema[constructorName] = instance[key].constructor;
-//             this[constructorName] = instance[key];
-//         }
-//         return this;
-//     },
-
-//     // Absorbs all the input items into one Artefact.
-//     // Yields this same Artefact instance each time it absorbs another item,
-//     // but this can be ignored and just await the final result if wanted.
-//     async* absorb<T>(input: AsyncIterable<ArtefactAspect<T>> | Iterable<ArtefactAspect<T>> | AsyncGenerator<ArtefactAspect<T>>) {
-//         if (isAsyncIterable(input)) {
-//             for await (const instance of input) {
-//                 yield this.add(instance);
-//             }
-//         } else if (isIterable(input)) {
-//             for (const instance of input) {
-//                 yield this.add(instance);
-//             }
-//         }
-//         return this;
-//     },
-
-//     async* stream<T extends { [K: string]: any }>(iterable: AsyncIterable<ArtefactAspect<T>> | AsyncGenerator<ArtefactAspect<T>>) {
-//         for await (const instance of iterable) {
-//             yield Artefact(instance) as Artefact<Partial<T>>;
-//         }
-//     }
-
-// };
+export type ArtefactSchema<TSchema> = { [K in keyof TSchema]: Aspect<any>; };
 
 export class Timestamp {
     public created: Date;
@@ -115,24 +33,45 @@ export class Timestamp {
     }
 }
 
-export abstract class Aspect {
+export type TimestampTreeNode = {
+    [K: string |  symbol]: Date | TimestampTreeNode; 
+};
 
+export type TimestampTree = Timestamp & TimestampTreeNode;
+
+export type AspectUpdateEventArgs = { updated: string[], _ts: Date };
+
+export abstract class Aspect<TAspect extends Aspect<TAspect> & { [K: string]: any }> extends (EventEmitter) {
+
+    static updateSymbol = Symbol('An event named by this symbol is emitted when Aspect.update() is called');
+
+    public _A?: Artefact;
     public get _T(): string { return this.constructor.name; }
     
     public _id?: string;// InferIdType<this>;
-    public _ts?: Timestamp;
+    public _ts: Timestamp & TimestampTreeNode;
     
-    constructor({ _id, _ts }: { _id?: string, _ts?: Timestamp }) {
+    constructor({ _id, _ts }: { _id?: string, _ts?: Timestamp & TimestampTreeNode }) {
+        super();
         this._id = _id ?? undefined;
-        this._ts = _ts ?? new Timestamp();
+        this._ts = _ts ?? new Timestamp() as Timestamp & TimestampTreeNode;
+        // this.query = {
+        //     byId: () => ({ _id: this._id }),
+        // };
     }
 
     get isNew() { return this._id === null; }
     
-    query = ((_this: this = this) => ({
-        get _id(): any { return ({ _id: _this._id }); },
-    }))();
-    
+    public get query() {
+        return ({
+            byId: () => ({ _id: this._id }),
+        });
+    }
+    //: { [K: string]: (...args: any[]) => any };
+    public static query = {
+        modifiedAfter: (time: Date) => ({ "_ts.modified": { $gt: time.getTime() } }),
+    };
+
     update(newData: this): string[] {
         const updated = (function checkUpdateValues(prev: any, next: any): string[] {
             const updated: string[] = [];
@@ -151,55 +90,89 @@ export abstract class Aspect {
             }
             return updated;
         })(this, newData);
+        this.emit(Aspect.updateSymbol, { updated, _ts: new Date() });
         return updated;
     }
 
 }
-
-
-export class Artefact/* <T extends { [K: string]: Aspect } = {}> */ {
+/* 
+export function mapObject<S extends object, T extends object>(source: S): T {
+    return Object.fromEntries(
+        Object.entries(source)
+            .filter(([K, V]) => typeof V !== 'symbol' && typeof V !== 'function')
+            .filter(([K, V]) => target[K] !== V)
+        .map(([K, V]) => ([K, V !== null && typeof V === 'object' ? mapObject(V) : V]))
+}
+ */
+export class Artefact {
 
     _T: {
-        primary?: ClassConstructor<Aspect>,
+        primary?: ClassConstructor<Aspect<any>>,
+        primaryName?: string,
     } & {
-        [K: string]: ClassConstructor<Aspect>,
+        [K: string]: ClassConstructor<Aspect<any>>,
     } = {};
 
-    primary?: Aspect;
+    [K: string]: AspectData<any>;
 
-    static create(artefact: { [K: string]: Aspect }) {
+    // public get primaryAspectName() { return this._T.primary?.name ?? ""; }
 
-    }
-
-    constructor(...instances: InstanceType<ClassConstructor<Aspect>>[]) {
-        Object.assign(
-            this,
-            ...instances.map((instance, index) => ({
-                _T: {
-                    ...(index === 0 ? { primary: instance.constructor } : { }),
-                    [instance.constructor.name]: instance.constructor,
-                },
-                ...(index === 0 ? { primary: instance } : { }),
-                [instance.constructor.name]: instance,
-            }))
-        );
+    public get query() {
+        return ({
+            byPrimary: () => this[this._T.primaryName ?? ""].query.findOne(),
+        });
     }
     
-    add(...instances: InstanceType<ClassConstructor<Aspect>>[]): Artefact {
+    constructor(artefact?: Artefact | null) {
+        if (artefact !== undefined && artefact !== null)
+            Object.assign(this, artefact);
+    }
+    
+    update(artefact: Artefact) {
+        (function testAndAssign(target: any, source: any): string[] {
+            const objectModifiedKeys = [];
+            const modifiedKeys = [];
+            for (const K in source) {
+                const V = source[K];
+                if (typeof V !== 'function' && typeof V !== 'symbol') {
+                    if (typeof V === 'object') {
+                        const subModifiedKeys = testAndAssign(target[K] = {}, V).map(k => K + '.' + k);
+                        if (subModifiedKeys.length > 0) {
+                            objectModifiedKeys.push(...subModifiedKeys);
+                            modifiedKeys.push(K);
+                        }
+                    } else if (target[K] !== V) {
+                        modifiedKeys.push(K);
+                        target[K] = V;
+                    }
+                }
+            }
+            return modifiedKeys.concat(objectModifiedKeys);
+        })({}, artefact);
+    }
+
+    add(...instances: InstanceType<ClassConstructor<Aspect<any>>>[]): Artefact {
         return Object.assign(
             this,
             ...instances.map((instance, index) => ({
                 _T: {
-                    ...(index === 0 ? { primary: instance.constructor } : { }),
+                    ...(index === 0 ? {
+                        primary: instance.constructor,
+                        primaryName: instance.constructor.name
+                    } : { }),
                     [instance.constructor.name]: instance.constructor,
                 },
                 ...(index === 0 ? { primary: instance } : { }),
-                [instance.constructor.name]: instance,
+                [instance.constructor.name]: Object.assign(instance, { _A: this }),
             }))
         );
     }
 
-    async* absorb(input: AsyncIterable<InstanceType<ClassConstructor<Aspect>>> | Iterable<InstanceType<ClassConstructor<Aspect>>> | AsyncGenerator<InstanceType<ClassConstructor<Aspect>>>) {
+    async* absorb(
+        input: AsyncIterable<InstanceType<ClassConstructor<Aspect<any>>>> |
+            Iterable<InstanceType<ClassConstructor<Aspect<any>>>> |
+            AsyncGenerator<InstanceType<ClassConstructor<Aspect<any>>>>
+    ) {
         if (isAsyncIterable(input)) {
             for await (const instance of input) {
                 yield this.add(instance);
@@ -212,9 +185,14 @@ export class Artefact/* <T extends { [K: string]: Aspect } = {}> */ {
         return this;
     }
 
-    static async* stream(iterable: AsyncIterable<InstanceType<ClassConstructor<Aspect>>> | AsyncGenerator<InstanceType<ClassConstructor<Aspect>>>) {
+    static async* stream<TSchema>(
+        iterable: AsyncIterable<InstanceType<ClassConstructor<Aspect<any>>> | Error> | AsyncGenerator<InstanceType<ClassConstructor<Aspect<any>>> | Error>
+    ) {
         for await (const instance of iterable) {
-            yield new Artefact(instance);
+            if (instance instanceof Error)
+                throw instance;
+            else
+                yield new Artefact().add(instance) as Artefact & TSchema;
         }
     }
 

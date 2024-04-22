@@ -91,7 +91,7 @@ export abstract class Model<
 
     toArtefact() {
         return {
-            [this._T]: this.toData,
+            [this._T.name]: this.toData,
         }
     }
     query = {
@@ -144,13 +144,13 @@ export class Timestamped<
 
 };
 
-export class TimeStampedHistoricValue<TValue> extends Timestamped<TValue> {
+// export class TimeStampedHistoricValue<TValue> extends Timestamped<TValue> {
 
-}
+// }
 
-const n = new Timestamped<Number>();
+// const n = new Timestamped<Number>();
 
-export type TimestampedHash = Timestamped<string>;
+// export type TimestampedHash = Timestamped<string>;
 
 
 

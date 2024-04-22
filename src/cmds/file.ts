@@ -2,7 +2,8 @@ import yargs from "yargs";
 import * as db from '../db';
 
 import { File, Directory, FileSystem } from "../models/file";
-import { Artefact } from "../models/base/Artefact2";
+import { Artefact, ArtefactSchema } from "../models/base/Artefact2";
+import { Dir } from "fs";
 
 export enum CalculateHashEnum {
     Disable,
@@ -19,6 +20,11 @@ export interface FileCommandArgv {
     },
 }
 
+export type FileSystemArtefactSchema = ArtefactSchema<{
+    File: File,
+    Directory: Directory
+}>;
+
 export const command = 'file';
 export const description = 'File commands';
 export const builder = function (yargs: yargs.Argv<FileCommandArgv>) {
@@ -28,28 +34,14 @@ export const builder = function (yargs: yargs.Argv<FileCommandArgv>) {
             array: true,
             demandOption: true
         });
-    }, async function (argv) {
+    }, async function (argv): Promise<void> {
         for (const path of argv.paths) {
 
-            // const store = new db.Store</* {
-            //     File: File,
-            //     Directory: Directory,
-            // } */>('files');
-
-            // This approach might come together. Keep experimenting
-            
-            // for await (const artefact of Artefact.stream<{
-            //     File: File,
-            //     Directory: Directory,
-            //     Error: Error
-            // }>(
-            //     FileSystem.walk(path)
-            // )) {
-            //     await store.updateOrCreate(artefact, { File: { path: artefact.File.path } });
-            
-            for await (const artefact of Artefact.stream( FileSystem.walk(path) )) {
-                await store.updateOrCreate(artefact, artefact.File.query.path);
+            const store = await db.storage.store('files', {});
+            for await (const artefact of Artefact.stream<FileSystemArtefactSchema>( FileSystem.walk(path) )) {
                 
+                await store.findOneAndUpdate({ File: artefact.query.byPrimary() }, artefact);    //, artefact.File.query.path);
+
                 if (argv.calculateHash === CalculateHashEnum.Wait) {
                     await store.update(() => artefact.File.calculateHash());
                 } else if (argv.calculateHash === CalculateHashEnum.Background) {
