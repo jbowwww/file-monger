@@ -85,7 +85,7 @@ export interface IFile extends IModel {
 }
 
 // @Aspect
-export class File extends Model<File, IFile> {
+export class File_ extends Model<File_, IFile> {
 
     path: string;
     // @TimeStamped
@@ -162,41 +162,85 @@ export interface IDirectory extends IModel {
     stats: nodeFs.Stats;
 }
 
-export class Directory extends Model<Directory> {
+export class FileSystemEntry {
     
-    path: string;
-    stats: nodeFs.Stats;
+    constructor(
+        public path: string,
+        public stats: nodeFs.Stats,
+    ) {}
 
-    constructor(directory: IDirectory) {
-        super(Directory, directory);
-        this.path = directory.path;
-        this.stats = directory.stats;
+    static async* walk(path: string): AsyncGenerator<File | Directory | Error, void, undefined> {
+        const rootEntry = FileSystemEntry.create(path);
+        yield rootEntry;
+        if (rootEntry instanceof Directory)
+            yield* (rootEntry as Directory).walk();
     }
+
+    // static async create(path: string): Promise<File | Directory | Error> {
+    //     const stats = await nodeFs.promises.stat(path);
+    //     return stats.isFile() ? new File({ path, stats })
+    //         : stats.isDirectory() ? new Directory({ path, stats })
+    //         : new Error(`Unknown stat entry type for path '${path}'`);
+    // }
+
+    // load = ({ path, stats, ...rest }: { path: string, stats?: nodeFs.Stats, rest: any[] }) => {
+    //     Object.assign(this, {
+    //         path,
+    //         stats: ,
+    //         ...rest,
+    //     });
+    // }
+
+    @trigger/*(...??)*/
+    apply(entry: FileSystemEntry) {}
+    stats_ = async ({ path }: { path: string }) => ({
+        path,
+        stats: await nodeFs.promises.stat(path),
+    })
+
+    buildPipe = [
+        
+        async function stats({ path, stats }: { path: string, stats?: nodeFs.Stats }) {
+            return !stats ? await nodeFs.promises.stat(path)
+                 : stats instanceof nodeFs.Stats ? stats
+                 : Object.assign(new nodeFs.Stats(), stats);
+        },
+        
+        async function hash({ path, stats }: { path: string, stats?: nodeFs.Stats }) {
+            return await calculateHash(path);
+        },
+        
+    ];
+    
+    create = ({ path, stats }: { path: string, stats?: nodeFs.Stats }) => this.buildPipe[0]({ path, stats })
+
+    newPipelineInstance = async ({ path }: { path: string }) => (this.buildPipe[0])({ path })
+    
+};
+
+export class Directory extends FileSystemEntry {
 
     async* walk(): AsyncGenerator<File | Directory | Error, void, undefined> {
         const entries = await nodeFs.promises.readdir(this.path);
-        const newFsEntries = await Promise.all(entries.map(entry => FileSystem.create(nodePath.join(this.path, entry))));
+        const newFsEntries = await Promise.all(entries.map(entry => FileSystemEntry.create(nodePath.join(this.path, entry))));
         const subDirs = newFsEntries.filter(entry => entry instanceof Directory) as Directory[];
         yield* newFsEntries;
         for (const subDir of subDirs)
             yield* subDir.walk();
     }
+
 }
 
-export const FileSystem = {
+export class File extends FileSystemEntry {
 
-    async create(path: string): Promise<File | Directory | Error> {
-        const stats = await nodeFs.promises.stat(path);
-        return stats.isFile() ? new File({ path, stats })
-            : stats.isDirectory() ? new Directory({ path, stats })
-            : new Error(`Unknown stat entry type for path '${path}'`);
-    },
+    hash = async ({ path, stats }: { path: string, stats?: nodeFs.Stats }) => ({
+        path,
+        stats,
+        hash: await calculateHash(path),
+    })
 
-    async* walk(path: string): AsyncGenerator<File | Directory | Error, void, undefined> {
-        const rootEntry = FileSystem.create(path);
-        yield rootEntry;
-        if (rootEntry instanceof Directory)
-            yield* (rootEntry as Directory).walk();
-    },
-
-};
+}
+    
+function trigger(target?: object, context: object) {
+   
+}
