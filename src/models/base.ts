@@ -6,64 +6,31 @@ import * as nodePath from 'path';
 export type DataProperties<T> = { [P in keyof T]: T[P] extends (...args: any[]) => any ? never : T[P]; };//Pick<T, NonMethodKeys<T>>; 
 
 export interface ClassConstructor<TClass, TCtorArgs extends Array<any> = [TClass]> {
-    new (...args: TCtorArgs): Model<TClass>;
+    new (...args: TCtorArgs): TClass;
 };
 
 export type Optional<T, K extends keyof T> = Pick<Partial<T>, K> & Omit<T, K>;
-
-export class Timestamp {
-    public created: Date;
-    public updated: Date;
-    public modified: Date;
-    constructor() {
-        this.created = new Date();
-        this.updated = this.created;
-        this.modified = this.updated;
-    }
-}
 
 export class ModelTimestampTree {
     [K: string]: Timestamp | ModelTimestampTree;
 }
 
-export class TimeStampedValue<TValue, TValueGetter = () => Promise<TValue>> {
-
-    value?: TValue;
-    version: number;
-    mTimeMs: number;
-    
-    constructor(value?: TValue) {
-        this.value = value;
-        this.version = this.value === undefined ? 0 : 1;
-        this.mTimeMs = Date.now();
+export class Timestamp {
+    public created: Date;
+    public updated: Date;
+    // public modified: Date;   // this doesn't make sense, means same as updated?
+    // public? deleted: Date;    // might want this at some point?
+    constructor() {
+        this.created = new Date();
+        this.updated = this.created;
+        // this.modified = this.updated;
     }
-
-    get timestamp(): Date {
-        return new Date(this.mTimeMs);
-    }
-
-    valueOf(): TValue | undefined { return this.value; }
-};
-
-const n = new TimeStampedValue<Number>();
-
-export type TimeStampedHash = TimeStampedValue<string>;
+}
 
 // export function Model<TSchema>(modelClass: ClassConstructor<TSchema>, store: Store) {
-// Model.create<File>({ path: "" })
-// export interface Model<TModel extends Model<TModel>> {
-//     public _id?: string;// InferIdType<this>;
-//     public _ts?: Timestamp;
-//     constructor: ModelStatic<TModel>;
-//     static abstract create<TModel extends Model<TModel>>(): void;
-// }
-
-// const 
-// const Model = zod.object({
-//     _id: zod.string().optional();
+// Model.create<File>({ path: "" })Model<
 //     _ts: 
 // })
-
 
 function copyProperties<T, K extends keyof DataProperties<T>>(s: Pick<T, K>, d: T, ks: K[]) {
     ks.forEach(k => d[k] = s[k]);
@@ -78,22 +45,33 @@ export var UpdateOrCreateOptions: {
     default: {},
 };
 
+export interface ModelConstructor<
+    TModel extends Model<TModel, TModelData>,
+    TModelData extends IModel = DataProperties<TModel>,
+    TRestArgs extends Array<any> = any[]
+> {
+    new (data: TModelData, ...args: TRestArgs): Model<TModel, TModelData>;
+};
+
+
 export interface IModel {
-    _T: string;
-    _id?: string;// InferIdType<this>;
+    readonly _id?: string;// InferIdType<this>;
     _ts?: Timestamp;
 }
 
-export abstract class Model<TModel> {
+export abstract class Model<
+    TModel extends Model<TModel, TModelData>,
+    TModelData extends IModel = DataProperties<TModel>
+> {
 
-    public _T: string;
+    public _T: ModelConstructor<TModel, TModelData>;
     public _id?: string;// InferIdType<this>;
     public _ts?: Timestamp;
     
     get isNew() { return this._id === null; }
     
-    constructor(modelCtor: ClassConstructor<TModel>, data?: IModel) {
-        this._T = modelCtor.name;
+    constructor(data?: TModelData) {            //modelCtor: ModelConstructor<TModel, TModelData>
+        this._T = this.constructor as ModelConstructor<TModel, TModelData>;     //modelCtor;
         this._id = data?._id ?? undefined;
         this._ts = data?._ts ?? new Timestamp();
     }
@@ -144,6 +122,37 @@ export abstract class Model<TModel> {
         return updated;
     }
 };
+
+
+export class Deleteable<
+    TModel extends Model<TModel, TModelData>,
+    TModelData extends IModel = DataProperties<TModel>
+> extends Model<TModel, TModelData> {
+
+    public isDeleted: boolean = false;
+
+}
+
+export class Timestamped<
+    TModel extends Model<TModel, TModelData>,
+    TModelData extends IModel = DataProperties<TModel>
+> extends Model<TModel, TModelData> {
+
+    public version: number = 1;
+    public timeMs: number = Date.now();
+    public get time(): Date { return new Date(this.timeMs); }
+
+};
+
+export class TimeStampedHistoricValue<TValue> extends Timestamped<TValue> {
+
+}
+
+const n = new Timestamped<Number>();
+
+export type TimestampedHash = Timestamped<string>;
+
+
 
 // export interface ModelStatic<TModel extends Model<TModel>> {
 //     new (...args: any[]): Model<TModel>;

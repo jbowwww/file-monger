@@ -85,7 +85,7 @@ export interface IFile extends IModel {
 }
 
 // @Aspect
-export class File extends Model<File> {
+export class File extends Model<File, IFile> {
 
     path: string;
     // @TimeStamped
@@ -95,7 +95,7 @@ export class File extends Model<File> {
     previousHashes: string[] = [];
 
     constructor(file: IFile) {
-        super(File, file);
+        super(file);
 
         this.path = file.path;
         this.stats = file.stats;
