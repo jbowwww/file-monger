@@ -1,0 +1,70 @@
+import { Aspect, AspectUpdateEventArgs, ClassConstructor, Timestamp } from "./Artefact2";
+
+type ClassDecorator<TClass extends FunctionConstructor = FunctionConstructor> = (
+    value: any,
+    context: ClassDecoratorContext
+    // {
+    //   kind: 'class';
+    //   name: string | undefined;
+    //   addInitializer(initializer: () => void): void;
+    // }
+  ) => void;
+
+type ClassPropertyDecorator<TClass extends FunctionConstructor = FunctionConstructor> = (
+    value: any,
+    // propertyKey: string | symbol,
+    context: ClassFieldDecoratorContext,
+    // {
+    //   kind: 'property';
+    //   name: string | undefined;
+    //   addInitializer(initializer: () => void): void;
+    // }:
+  ) => void;
+
+export type TriggerMap/* <TAspect extends Aspect<TAspect>> */ = {
+    [K: string]: true | 1 | ((target: any/* TAspect */) => boolean) | ((target: any/* TAspect */) => Promise<boolean>);
+};
+
+export const trigger = <
+/*     TAspect extends Aspect<TAspect>,*/
+    TUpdater extends (target: any) => any,
+>(updater: TUpdater, triggerMap: TriggerMap/* <TAspect> */) =>
+
+    (function (this: any, target: ClassConstructor<Aspect<any>>/* any *//* TAspect */, propertyKey: string /*{ kind, name, addInitializer }: ClassFieldDecoratorContext*/, ...args: any[]) {
+        
+        console.log(`this=${JSON.stringify(this)} target=${JSON.stringify(target)} propertyKey=${propertyKey} ...args=${JSON.stringify(args)}`);
+        for (const trigger of Object.entries(triggerMap)) {
+            const [K, V] = trigger;
+            console.log(`trigger=${JSON.stringify(trigger)} trigger.stats=${triggerMap.stats}`);
+            const triggerDescriptor = Object.getOwnPropertyDescriptor(target.constructor, K) ?? {};
+            if (triggerDescriptor?.set === undefined) {
+                triggerDescriptor!.set = function(this: Aspect<any>/* TAspect */, value: any) {
+                    this.update({ [K]: value });
+                };
+            }
+        }
+
+        // return a new ctor function (i think equivalent to returning a class expression ?) that wraps the old one
+        // F it just return a derived class
+        const ctor = class extends target {
+            constructor(aspect: Aspect<any>) {
+                super(aspect);
+                
+            }
+        }
+        
+        // addInitializer(function (this: unknown) {
+            const _this = /* this */ target as Aspect<any>/* TAspect */;
+            _this.on(Aspect.updateEventSymbol, async function (updateEventArgs: AspectUpdateEventArgs) {
+                if (updateEventArgs.updated.findIndex(updatedKey =>
+                    Object.entries(triggerMap).findIndex(([triggerKey, triggerValue]) =>
+                        triggerKey.startsWith(updatedKey)
+                    && (triggerValue === 1 || triggerValue === true
+                    || (triggerValue instanceof Function && triggerValue(_this)))
+                    ) >= 0
+                ) >= 0) {
+                    _this.update({ [propertyKey]: updater(_this) })
+                }
+            });
+        // });
+    });

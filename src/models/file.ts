@@ -3,9 +3,7 @@ import * as nodePath from 'path';
 import { Collection, UUID, UpdateFilter, WithId } from 'mongodb'; // TODO: An abstracted "Storage" ;ayer/class/types so not tied to mongo
 import { calculateHash } from '../file';
 import { DataProperties, IModel, Model, UpdateOrCreateOptions } from './base';
-import { /* Aspect, */ trigger } from './base/Artefact';
-import { Aspect } from './base/Artefact2';
-import { Store } from '../db';
+import { Aspect, IAspect } from './base/Artefact2';
 
 /*
  * Ongoing reminder of the things I want File aspects / models /classes/modules(<-less OOP more FP?)
@@ -78,23 +76,27 @@ export var UpdateOrCreateFileOptions: {
     },
 };
 
-export interface IFile extends IModel {
+export interface IFile extends IAspect {
     path: string;
     stats: nodeFs.Stats;
     hash?: string;
     previousHashes?: string[];
 }
 
-// @Aspect
+@Aspect.PropertyUpdates
 export class File extends Aspect<File> { //Model<File, IFile> {
 
     path: string;
     stats: nodeFs.Stats;
-    @trigger(async (target: File) => target.stats.mtimeawait nodeFs.promises.stat(target.path), { stats: true })
+    @Aspect.PropertyUpdater(
+        async (/* stats) */ file : File ) => await nodeFs.promises.stat(file.path),
+        { stats: /* async  */(file: File) => file.stats.mtime > (file._ts.hash?.updated ?? 0) }
+    )
     hash?: string;
     previousHashes: string[] = [];
 
-    constructor(file: DataProperties<File>) {
+    constructor(...args: any[]) { //file: IFile) {
+        const file = args[0] as IFile;
         super(file);
 
         this.path = file.path;
@@ -118,43 +120,43 @@ export class File extends Aspect<File> { //Model<File, IFile> {
         },
     }
 
-    async updateOrCreate(store: Store, options: UpdateOrCreateFileOptions = UpdateOrCreateFileOptions.default) {
-        process.stdout.write(`File '${this.path}' `);
-        let dbFile = await store.findOne(this.query.findOne());
-        if (dbFile === null)
-            console.log(`does not exist yet in local DB`);
-        else if (!dbFile.hash)
-            console.log(`has a local DB entry without a hash: ${JSON.stringify(dbFile)}`);
-        else if (this.stats.size !== dbFile.stats.size || this.stats.mtimeMs > dbFile.stats.mtimeMs) {
-            console.log(`has an expired hash in the local DB: ${JSON.stringify(dbFile)}\n\tFile.stat=${JSON.stringify(this.stats)}`);
-            this.previousHashes.push(dbFile.hash);
-        } else {
-            console.log(`has a valid hash in the local DB: ${JSON.stringify(dbFile)}`);
-            return;
-        }
-        if (dbFile !== null)
-            this._id = dbFile._id;
-        else if (this._id === undefined)
-            this._id = new UUID().toHexString();
-        const result = await store.updateOne(this.query.findOne(), { $set: this.toData() }, { upsert: true });
-        if (/* result.upsertedCount > 0 &&  */result.upsertedId)
-            this._id = result.upsertedId;
-        const thisDoc = await store.findOne(this.query.findOne());
-        console.log(`updateOrCreate: thisDoc=${JSON.stringify(thisDoc)}`);
-        if (options.calculateHash === CalculateHashEnum.Inline) {
-            await this.calculateHash();
-            await store.updateOne(this.query.findOne(), { $set: this.toData() }, { upsert: true });
-            const thisDoc = await store.findOne(this.query.findOne());
-            console.log(`updateOrCreate: thisDoc=${JSON.stringify(thisDoc)}`);
-        } else if (options.calculateHash === CalculateHashEnum.Async) {
-            (async () => {
-                await this.calculateHash();
-                await store.updateOne(this.query.findOne(), { $set: this.toData() }, { upsert: true });
-                const thisDoc = await store.findOne(this.query.findOne());
-                console.log(`updateOrCreate: thisDoc=${JSON.stringify(thisDoc)}`);
-            })();
-        }
-    }
+    // async updateOrCreate(store: Store, options: UpdateOrCreateFileOptions = UpdateOrCreateFileOptions.default) {
+    //     process.stdout.write(`File '${this.path}' `);
+    //     let dbFile = await store.findOne(this.query.findOne());
+    //     if (dbFile === null)
+    //         console.log(`does not exist yet in local DB`);
+    //     else if (!dbFile.hash)
+    //         console.log(`has a local DB entry without a hash: ${JSON.stringify(dbFile)}`);
+    //     else if (this.stats.size !== dbFile.stats.size || this.stats.mtimeMs > dbFile.stats.mtimeMs) {
+    //         console.log(`has an expired hash in the local DB: ${JSON.stringify(dbFile)}\n\tFile.stat=${JSON.stringify(this.stats)}`);
+    //         this.previousHashes.push(dbFile.hash);
+    //     } else {
+    //         console.log(`has a valid hash in the local DB: ${JSON.stringify(dbFile)}`);
+    //         return;
+    //     }
+    //     if (dbFile !== null)
+    //         this._id = dbFile._id;
+    //     else if (this._id === undefined)
+    //         this._id = new UUID().toHexString();
+    //     const result = await store.updateOne(this.query.findOne(), { $set: this.toData() }, { upsert: true });
+    //     if (/* result.upsertedCount > 0 &&  */result.upsertedId)
+    //         this._id = result.upsertedId;
+    //     const thisDoc = await store.findOne(this.query.findOne());
+    //     console.log(`updateOrCreate: thisDoc=${JSON.stringify(thisDoc)}`);
+    //     if (options.calculateHash === CalculateHashEnum.Inline) {
+    //         await this.calculateHash();
+    //         await store.updateOne(this.query.findOne(), { $set: this.toData() }, { upsert: true });
+    //         const thisDoc = await store.findOne(this.query.findOne());
+    //         console.log(`updateOrCreate: thisDoc=${JSON.stringify(thisDoc)}`);
+    //     } else if (options.calculateHash === CalculateHashEnum.Async) {
+    //         (async () => {
+    //             await this.calculateHash();
+    //             await store.updateOne(this.query.findOne(), { $set: this.toData() }, { upsert: true });
+    //             const thisDoc = await store.findOne(this.query.findOne());
+    //             console.log(`updateOrCreate: thisDoc=${JSON.stringify(thisDoc)}`);
+    //         })();
+    //     }
+    // }
 
     async calculateHash() {
         process.stdout.write(`Calculating hash for file '${this.path}' ... `);
@@ -168,7 +170,7 @@ export class File extends Aspect<File> { //Model<File, IFile> {
     }
 }
 
-export interface IDirectory extends IModel {
+export interface IDirectory extends IAspect {
     path: string;
     stats: nodeFs.Stats;
 }
@@ -178,12 +180,20 @@ export class Directory extends Aspect<Directory> { // Model<Directory> {
     path: string;
     stats: nodeFs.Stats;
 
-    constructor(directory: DataProperties<Directory>) {
+    constructor(directory: IDirectory) {
         super(directory);
         this.path = directory.path;
         this.stats = directory.stats;
     }
 
+    public get query() {
+        return ({
+            ...super.query,
+            byPath  :   () => ({ path: this.path }),
+            findOne :   () => (this._id !== undefined ? this.query.byId() : this.query.byPath() ),
+        });
+    }
+    
     async* walk(): AsyncGenerator<File | Directory | Error, void, undefined> {
         const entries = await nodeFs.promises.readdir(this.path);
         const newFsEntries = await Promise.all(entries.map(entry => FileSystem.create(nodePath.join(this.path, entry))));

@@ -3,7 +3,7 @@ import { Store } from "../db";
 import * as nodePath from 'path';
 
 // export type NonMethodKeys<T> = { [P in keyof T]: T[P] extends () => void ? never : P; }[keyof T];
-export type DataProperties<T> = { [P in keyof T]: T[P] extends (...args: any[]) => any ? never : T[P]; };//Pick<T, NonMethodKeys<T>>; 
+export type DataProperties<T> = { [P in keyof T]: T[P] extends () => void ? never : T[P]; };//Pick<T, NonMethodKeys<T>>; 
 
 export interface ClassConstructor<TClass, TCtorArgs extends Array<any> = [TClass]> {
     new (...args: TCtorArgs): TClass;
