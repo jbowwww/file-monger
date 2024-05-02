@@ -89,7 +89,8 @@ export class File extends Aspect<File> { //Model<File, IFile> {
     path: string;
     stats: nodeFs.Stats;
     @Aspect.PropertyUpdater(
-        async (/* stats) */ file : File ) => await nodeFs.promises.stat(file.path),
+        File.prototype.calculateHash,
+        // async (/* stats) */ file : File ) => await file.calculateHash(),
         { stats: /* async  */(file: File) => file.stats.mtime > (file._ts.hash?.updated ?? 0) }
     )
     hash?: string;

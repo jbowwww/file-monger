@@ -13,7 +13,7 @@ export interface ClassConstructor<TClass = any, TCtorArgs extends Array<any> = a
 };
 
 export type AspectData<TData = any> = {
-    [K in keyof TData]: any;
+    [K in keyof TData]: TData[K];
 };
 export type AspectConstructor<TAspect extends Aspect<TAspect>> = ClassConstructor<Aspect<TAspect>, [DataProperties<Aspect<TAspect>>]>;
 
@@ -23,34 +23,38 @@ export type ArtefactData<TData extends { [K: string]: AspectData<TData[typeof K]
 export type ArtefactSchema<TSchema> = { [K in keyof TSchema]: Aspect<any>; };
 
 export interface Timestamp {
-    created: Date;
-    updated: Date;
-    modified: Date;
+    _created: Date;
+    _updated: Date;
+    _modified: Date;
 }
 export class Timestamp {
-    public created: Date;
-    public updated: Date;
-    public modified: Date;
+    public _created: Date;
+    public _updated: Date;
+    public _modified: Date;
     constructor() {
-        this.created = new Date();
-        this.updated = this.created;
-        this.modified = this.updated;
+        this._created = new Date();
+        this._updated = this._created;
+        this._modified = this._updated;
     }
-    update(time: Date) {
-        this.updated = time;
+    update(time?: Date) {
+        this._updated = time ?? new Date();
     }
 }
 
-export type TimestampTreeNode = {
-    [K: string | symbol]: Partial<Timestamp> & Partial<TimestampTreeNode>;
+export function isTimestamp(obj: any): obj is Timestamp {
+    return obj instanceof Timestamp;
+}
+
+export type TimestampTreeNode<TAspectSlice = any> = {
+    [K in keyof TAspectSlice]: (Timestamp & TimestampTreeNode<TAspectSlice[K]>) | TimestampTreeNode<TAspectSlice[K]>;
 };
-export type TimestampTree = Timestamp & Partial<TimestampTreeNode>;
+export type TimestampTree<TAspectSlice = any> = (Timestamp & TimestampTreeNode<TAspectSlice>) | TimestampTreeNode<TAspectSlice>;
 
 const AspectPropertyUpdateEventSymbol = Symbol('An event named by this symbol is emitted when Aspect.update() is called');
 export type AspectUpdateEventArgs = { updated: string[], _ts: Date };
 
 const AspectPropertyUpdaterMapSymbol = Symbol('@Aspect.trigger populates a property with this key on the Aspect-derived class prototype with update handler methods and their TriggerMap\'s');
-export type TUpdater = (oldPropertyValue: any) => any;
+export type TUpdater<TValue = any> = (oldPropertyValue: TValue) => any;
 export type TriggerMap/* <TAspect extends Aspect<TAspect>> */ = {
     [K: string]: true | 1 | ((target: any/* TAspect */) => boolean) | ((target: any/* TAspect */) => Promise<boolean>);
 };
@@ -62,7 +66,12 @@ export interface IAspect {
     _T?: string;
 }
 
-export abstract class Aspect<TAspect extends Aspect<TAspect> & { [K: string]: any }> extends EventEmitter implements IAspect {
+export abstract class Aspect<
+    TAspect extends Aspect<TAspect> & AspectData<TAspect>
+>
+    extends EventEmitter
+    implements IAspect
+{
 
     static [AspectPropertyUpdaterMapSymbol]: { [K: string]: { updater: TUpdater, triggers: TriggerMap }} = {};
 
@@ -73,7 +82,7 @@ export abstract class Aspect<TAspect extends Aspect<TAspect> & { [K: string]: an
         aspectCtor: any
     ) => {
 
-        const ctor = class extends aspectCtor {
+        return class extends aspectCtor {
             constructor(...args: any[]) {
                 super(args[0]);
                 this.on(
@@ -94,7 +103,6 @@ export abstract class Aspect<TAspect extends Aspect<TAspect> & { [K: string]: an
                     });
             }
         };
-        return ctor as any;
     };
 
     static PropertyUpdater = /* <
@@ -118,12 +126,12 @@ export abstract class Aspect<TAspect extends Aspect<TAspect> & { [K: string]: an
     public get _T(): string { return this.constructor.name; }
     
     public _id?: string;
-    public _ts: TimestampTree;
-    
-    constructor({ _id, _ts }: { _id?: string, _ts?: TimestampTree }) {
+    public _ts: TimestampTree<TAspect>;
+
+    constructor({ _id, _ts }: { _id?: string, _ts?: TimestampTree<TAspect> }) {
         super();
         this._id = _id ?? undefined;
-        this._ts = _ts ?? new Timestamp() as TimestampTree;
+        this._ts = _ts ?? new Timestamp() as TimestampTree<TAspect>;
     }
 
     get isNew() { return this._id === null; }
@@ -138,30 +146,43 @@ export abstract class Aspect<TAspect extends Aspect<TAspect> & { [K: string]: an
     };
 
     update(diff: Partial<Aspect<TAspect>>, checkOnly = false): string[] {
-        const setIfUpdated = !checkOnly ?
+        const setIfUpdated = checkOnly ?
             () => {} :
             (target: any, _ts: TimestampTree, key: string, value: any) => {
                 target[key] = value;
-                _ts[key] = Object.assign(new Timestamp(), _ts[key]);
+                if (_ts[key] === undefined) {
+                    _ts[key] = new Timestamp();
+                } else {
+                    _ts[key]?.update();
+                }
             }
-        const updated = (function checkAndUpdateValues(target: any, _ts: TimestampTree, next: any): string[] {
+        const updated = (function checkAndUpdateValues<TAspectSlice = TAspect>(target: TAspectSlice, _ts: TimestampTreeNode<TAspectSlice>, source: Partial<TAspectSlice>): string[] {
+            const recurse = (key: keyof TAspectSlice) => checkAndUpdateValues<TAspectSlice[typeof key]>(target[key], _ts[key], source[key]!);
             const updated: string[] = [];
-            for (const key of Object.keys(next).filter(key => !key.startsWith('_'))) {
-                if (target[key] !== next[key]) {
-                    if (typeof target[key] === 'object' && typeof next[key] === 'object') {
+            for (const key of Object.keys(source).filter(key => !key.startsWith('_')) as Array<keyof TAspectSlice>) {
+                if (target[key] !== source[key]) {
+                    if (typeof target[key] === 'object' && typeof source[key] === 'object') {
+                        if (_ts[key] === undefined) {
+                            _ts[key] = {};
+                        }
                         const updatedChildren = checkAndUpdateValues(
                             target[key],
-                            (_ts[key] !== undefined ? _ts[key] : _ts[key] = {}) as TimestampTree,
-                            next[key]
+                            (_ts[key] !== undefined ? _ts[key] : _ts[key] = {}) as TimestampTreeNode,
+                            source[key]
                         );
                         if (updatedChildren.length > 0) {
                             updated.push(key);
                             updated.push(...updatedChildren.map(childKey => key + "." + childKey));
-                            setIfUpdated(target, _ts, key, next[key]);
+                            setIfUpdated(target, _ts, key, source[key]);
                         }
                     } else {     
+                        target[key] = source[key];
+                        if (_ts[key] === undefined) {
+                            _ts[key] = new Timestamp();
+                        } else {
+                            _ts[key]?.update();
+                        }        
                         updated.push(key);
-                        setIfUpdated(target, _ts, key, next[key]);
                     }
                 }
             }
