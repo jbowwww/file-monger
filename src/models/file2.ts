@@ -2,6 +2,7 @@ import * as nodeFs from 'fs';
 import * as nodePath from 'path';
 import { calculateHash } from '../file';
 import { isAsyncIterable, isIterable } from './base/Artefact2';
+import { Timestamped } from './base';
 
 namespace FileSystem {
 
@@ -29,15 +30,15 @@ namespace FileSystem {
  *  */
 
 // Adds a setter and getter function to a property, allowing  same name, with type TimeStampedValue
-export function TimeStamped<T>(target: any, property: ClassFieldDecoratorContext) {
-    const descriptor = Object.getOwnPropertyDescriptor(target.prototype, property.name);
-    if (descriptor !== undefined) {
-        descriptor.set = (v: T) => {
-            descriptor.value = v;
-            descriptor.value._ts = Date.now();
-        };
-    }
-}
+// export function TimeStamped<T>(target: any, property: ClassFieldDecoratorContext) {
+//     const descriptor = Object.getOwnPropertyDescriptor(target.prototype, property.name);
+//     if (descriptor !== undefined) {
+//         descriptor.set = (v: T) => {
+//             descriptor.value = v;
+//             descriptor.value._ts = Date.now();
+//         };
+//     }
+// }
 
 export enum CalculateHashEnum {
     Disable,
@@ -102,7 +103,7 @@ export enum CalculateHashEnum {
 
 export type FileSystemEntryBase = {
     path: string;
-    stats: nodeFs.Stats;
+    stats?: TimeStamped<nodeFs.Stats>;
     // type: 'file' | 'dir' | 'unknown';
 };
 
@@ -124,8 +125,8 @@ export const isUnknown = (obj: any): obj is Unknown => obj.type === 'unknown';
 
 export type FileSystemEntry = File | Directory | Unknown;
 
-export type Stage<TIn = any, TOut = any> = (arg: TIn) => TOut | Promise<TOut>;
-export type Test<T = any> = (obj: T) => boolean;
+    export type Stage<TIn = any, TOut = any> = (arg: TIn) => TOut | Promise<TOut>;
+    export type Test<T = any> = (obj: T) => boolean;
 export type TypeGuard<T> = (obj: any) => obj is T;
 
 export type PipelineClosureFunction<T = any> = (pipe: Pipeline<T>) => void;
@@ -212,13 +213,47 @@ export class Pipeline<TInput> {
     // ...
 }
 
-export const FileSystemEntryPipeline = new Pipeline<{ path: string }>(pipe => pipe
-    .map( async ({ path }) => (<FileSystemEntryBase>{ path, stats: await nodeFs.promises.stat(path) }) )
-    .map( async ({ path, stats }) => (<FileSystemEntry>{ path, stats, type: stats.isFile() ? 'file' : stats.isDirectory() ? 'dir' : 'unknown' }) )
-    .if( isDirectory, async directory => await pipe.run((await nodeFs.promises.readdir(directory.path)).map(subDir => ({ path: nodePath.join(directory.path, subDir) }))))
-    .if( isFile, file => ({ ...file, hash: file.hash === undefined || file.stats.mtime > file.hash._ts.updated ?await calculateHash(file.path) }) )
-    .if( isUnknown, unknown => unknown )
+export class Timestamp {
+    public _created: Date;
+    public _updated: Date;
+    public _modified: Date;
+    constructor() {
+        this._created = new Date();
+        this._updated = this._created;
+        this._modified = this._updated;
+    }
+    update(time?: Date) {
+        this._updated = time ?? new Date();
+    }
+}
 
-);
+export type TimeStamped<T = any> = {
+    value: T;
+    _ts: Timestamp;
+    valueOf(): Object;
+};
+export function TimeStamped<T = any>(previousValue?: TimeStamped<T>, value: T): TimeStamped<T> {
+    return ({ value, _ts: new Timestamp(), valueOf() { return this.value as Object; } });
+}
+
+export const FileSystemEntryPipeline =
+
+    // Pipeline input is FS path strings inside POJO objects (e.g. { path: string })
+    new Pipeline<{
+        path: string,
+        stats?: TimeStamped<nodeFs.Stats>,
+    }>( pipe => { pipe
+
+        // Perform a stat() on the FS path, then we can also use this to classify the items (i.e. { type: 'file' | 'dir' | 'unknown' })
+        .map( async ({ path, stats }) => (<FileSystemEntryBase>{ path, stats: TimeStamped(stats, await nodeFs.promises.stat(path)) }) )
+        .map( async ({ path, stats }) => (<FileSystemEntry>{ path, stats, type: stats?.isFile() ? 'file' : stats?.value.isDirectory() ? 'dir' : 'unknown' }) )
+        
+
+        .if( isDirectory, async directory => await pipe.run((await nodeFs.promises.readdir(directory.path)).map(subDir => ({ path: nodePath.join(directory.path, subDir) }))))
+        .if( isFile, file => ({ ...file, hash: file.hash === undefined || file.stats.mtime > file.hash._ts.updated ?await calculateHash(file.path) }) )
+        .if( isUnknown, unknown => unknown )
+            .run({ path: './' });
+    
+    });
 
 };
