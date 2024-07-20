@@ -32,12 +32,11 @@
   "homepage": "https://github.com/jbowwww/file-monger#readme",
   "dependencies": {
     "mongodb": "^6.5.0",
-    "rxjs": "^7.8.1",
     "yargs": "^17.7.2",
     "zod": "^3.22.4"
   },
   "devDependencies": {
-    "@types/node": "^20.11.28",
+    "@types/node": "^20.12.12",
     "@types/yargs": "^17.0.32",
     "typescript": "^5.4.5"
   }

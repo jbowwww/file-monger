@@ -1,7 +1,6 @@
 import * as nodeFs from 'fs';
 import * as nodePath from 'path';
 import { calculateHash } from '../file';
-import { BehaviorSubject, Observable, forkJoin, from, observeOn } from 'rxjs';
 
 namespace FileSystem {
 

@@ -89,10 +89,7 @@ export abstract class Aspect<
                     AspectPropertyUpdateEventSymbol,
                     async (/* this: TAspect,  */updateEventArgs: AspectUpdateEventArgs) => {
                         this.update( Object.fromEntries(
-                            Object.entries(Aspect[AspectPropertyUpdaterMapSymbol])
-                            .filter(([propertyKey, { updater, triggers }]) => (
-                                updateEventArgs.updated.findIndex(updatedKey => (
-                                    Object.entries(triggers).findIndex(([triggerKey, triggerValue]) => (
+                            Obje, [DataMembers<T>]    Object.entries(triggers).findIndex(([triggerKey, triggerValue]) => (
                                         triggerKey.startsWith(updatedKey) && (
                                         triggerValue === 1 || triggerValue === true || (
                                         triggerValue instanceof Function && triggerValue(this/* [propertyKey] */)))
@@ -168,7 +165,7 @@ export abstract class Aspect<
                         const updatedChildren = checkAndUpdateValues(
                             target[key],
                             (_ts[key] !== undefined ? _ts[key] : _ts[key] = {}) as TimestampTreeNode,
-                            source[key]
+                            source, [DataMembers<T>][key]
                         );
                         if (updatedChildren.length > 0) {
                             updated.push(key);

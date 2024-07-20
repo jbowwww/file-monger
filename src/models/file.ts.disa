@@ -59,32 +59,7 @@ export function TimeStamped<T>(target: any, property: ClassFieldDecoratorContext
     }
 }
 
-export enum CalculateHashEnum {
-    Disable,
-    Inline,
-    Async,
-};
-
-export interface UpdateOrCreateFileOptions extends UpdateOrCreateOptions {
-    calculateHash?: CalculateHashEnum;
-};
-export var UpdateOrCreateFileOptions: {
-    default: UpdateOrCreateFileOptions;
-} = {
-    default: {
-        calculateHash: CalculateHashEnum.Inline,//.Async,
-    },
-};
-
-export interface IFile extends IAspect {
-    path: string;
-    stats: nodeFs.Stats;
-    hash?: string;
-    previousHashes?: string[];
-}
-
-@Aspect.PropertyUpdates
-export class File extends Aspect<File> { //Model<File, IFile> {
+export class File extends Model {   // Aspect<File> { //Model<File, IFile> {
 
     path: string;
     stats: nodeFs.Stats;

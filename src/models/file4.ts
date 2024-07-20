@@ -1,10 +1,8 @@
 import * as nodeFs from 'fs';
 import * as nodePath from 'path';
 import { calculateHash } from '../file';
-import { BehaviorSubject, Observable, forkJoin, from, observeOn } from 'rxjs';
-import { set } from 'zod';
-
-namespace FileSystem {
+import { createAsync, isAsyncIterable, isIterable } from './types';
+import { Model } from './Model';
 
 /*
  * Ongoing reminder of the things I want File aspects / models /classes/modules(<-less OOP more FP?)
@@ -29,88 +27,66 @@ namespace FileSystem {
  *
  *  */
 
-
-export type Test<T = any> = (obj: T) => boolean;
-
-export const PropertyTriggerTableSymbol = Symbol('PropertyTriggerTableSymbol');
-
-// Generic parameter T on methods in this object is the type of the Aspect type definition e.g. File | Directory, etc
-export const Aspect = <T extends object>(aspectCtor: new (...args: any[]) => T) => {
+export const FileSystem = {
+   
+    async create(path: string): Promise<File | Directory /* | Error */> {
+        const stats = await nodeFs.promises.stat(path);
+        return stats.isFile() ? new File({ path, stats })
+            : stats.isDirectory() ? new Directory({ path, stats }) : null;
+            // : new Error(`Unknown stat entry type for path '${path}'`);
+    },
     
-    return class {
-        
-        [PropertyTriggerTableSymbol]: {
-            [K: keyof T]: {
-                triggerPropertyName: string,
-                triggerConditionTest: Test<T>,
-            },
-        } = {};
-
-        constructor(...args: any[]) {
-            const proxy = new Proxy(new aspectCtor(...args), {
-                set(target: any, p: string | symbol, newValue: any, receiver: any): boolean {
-                    const oldValue = target[p];
-                    if (newValue === oldValue) {
-                        return false;
-                    } else {
-
-                        return true;
-                    }
-                },
-            });
-            return proxy;
-        }
-    };
-
+    async* walk(path: string): AsyncGenerator<File | Directory/*  | Error */, void, undefined> {
+        const rootEntry = FileSystem.create(path);
+        yield rootEntry;
+        if (rootEntry instanceof Directory)
+            yield* (rootEntry as Directory).walk();
+    }
+    
 };
 
-// decorator for specifying properties that trigger updates on the property the decorator is being applied to
-Aspect.Trigger = <T extends object & { [PropertyTriggerTableSymbol]: /* & Function */>(triggerPropertyName: string | symbol, triggerConditionTest: Test<T> = (aspect: T) => true) => {
-        return function (target: T, propertyName: string | symbol) {
-            if (!(target instanceof Function)) {
-                throw new TypeError(`target is not a Function instance in decorator Aspect.Trigger`);
-            }
-            if (!Object.hasOwn(target, PropertyTriggerTableSymbol)) {
-                Object.defineProperty(target, PropertyTriggerTableSymbol, { configurable: true, value: (target[PropertyTriggerTableSymbol] ?? []).push() });
-            }
-            target[PropertyTriggerTableSymbol].push();
+export abstract class FileSystemEntryBase extends Model {
 
-        };
-    }
-
-    Type<T extends object>(aspectCtor: new (...args: any[]) => T) {
-        return function (...args: any[]) {
-            const proxy = new Proxy(new aspectCtor(...args), {
-                set(target: any, p: string | symbol, newValue: any, receiver: any): boolean {
-                    const oldValue = target[p];
-                    if (newValue === oldValue) {
-                        return false;
-                    } else {
-
-                        return true;
-                    }
-                },
-            });
-            return proxy;
-        };
-    }
-};
-
-export class File {
     path: string;
     stats: nodeFs.Stats;
-    @Aspect.Trigger('stats', _this => _this.stats.mtime > 
-        File.prototype.calculateHash,
-        // async (/* stats) */ file : File ) => await file.calculateHash(),
-        { stats: /* async  */(file: File) => file.stats.mtime > (file._ts.hash?.updated ?? 0) }
-    )
+
+    constructor({ path, stats }: FileSystemEntryBase) {
+        super();
+        this.path = path;
+        this.stats = stats;
+    }
+
+    static async createAsync<FileSystemEntry>({ path, stats }: { path: string, stats?: nodeFs.Stats}) {
+        stats ??= await nodeFs.promises.stat(path);
+        const newEntry =
+            stats.isFile()      ? { _type: 'file', path, stats } :
+            stats.isDirectory() ? { _type: 'dir' , path, stats } :
+            { _type: 'unknown', path, stats };
+        return newEntry as FileSystemEntry;
+    }
+}
+
+export class Directory extends FileSystemEntryBase {
+
+    async* walk(): AsyncGenerator<File | Directory/*  | Error */, void, undefined> {
+        const entries = await nodeFs.promises.readdir(this.path);
+        const newFsEntries = await Promise.all(entries.map(entry => FileSystem.create(nodePath.join(this.path, entry))));
+        const subDirs = newFsEntries.filter(entry => entry instanceof Directory) as Directory[];
+        yield* newFsEntries;
+        for (const subDir of subDirs)
+            yield* subDir.walk();
+    }
+
+}
+
+export class Unknown extends FileSystemEntryBase { }
+
+export class File extends FileSystemEntryBase {
     hash?: string;
     previousHashes: string[] = [];
 
-    constructor(...args: any[]) { //file: IFile) {
-        const file = args[0] as IFile;
+    constructor(file: Omit<File, "previousHashes"> & { previousHashes?: string[] }) {
         super(file);
-
         this.path = file.path;
         this.stats = file.stats;
         this.hash = file.hash;
@@ -118,27 +94,4 @@ export class File {
     }
 }
 
-export const FileSystemEntryPipeline =
-
-    // Pipeline input is FS path strings inside POJO objects (e.g. { path: string })
-    new Pipeline<{
-        path: string,
-        stats: Observable<nodeFs.Stats>,
-    }>( pipe => { pipe
-
-        // Perform a stat() on the FS path, then we can also use this to classify the items (i.e. { type: 'file' | 'dir' | 'unknown' })
-        .map( async ({ path, stats }) => (<FileSystemEntryBase>{ path, stats: new BehaviorSubject(await nodeFs.promises.stat(path)) }) )
-        .map( async ({ path, stats }) => (<FileSystemEntry>{
-            path,
-            stats,
-            type: Promise.(stats).subscribe(stats => stats.isFile() ? 'file' : stats?.value.isDirectory() ? 'dir' : 'unknown' ). )
-        
-
-        .if( isDirectory, async directory => await pipe.run((await nodeFs.promises.readdir(directory.path)).map(subDir => ({ path: nodePath.join(directory.path, subDir) }))))
-        .if( isFile, file => ({ ...file, hash: file.hash === undefined || file.stats.mtime > file.hash._ts.updated ?await calculateHash(file.path) }) )
-        .if( isUnknown, unknown => unknown )
-            .run({ path: './' });
-    
-    });
-
-};
+export type FileSystemEntry = File | Directory | Unknown;

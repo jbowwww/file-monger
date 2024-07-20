@@ -1,0 +1,27 @@
+import { Primitive } from "zod";
+
+export type Constructor<T = any, TArgs extends Array<any> = Array<any>> = new (...args: TArgs) => T;
+
+export type AspectClass<T extends AspectSchema> = {
+    [K in keyof T]: T[K];
+};
+
+export type AspectSchemaPropertyDescriptor = {
+    type: Primitive | Constructor | ObjectConstructor;
+};
+
+export type AspectSchema = {
+    [K: string]: AspectSchemaPropertyDescriptor;
+};
+
+export const Aspect = <
+    TSchema extends AspectSchema,
+    T = AspectClass<TSchema>
+>( ctor: T ) => {
+
+    return class {
+        [K: keyof TSchema]: TSchema[K];
+    };
+
+};
+
