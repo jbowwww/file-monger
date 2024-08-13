@@ -2,7 +2,7 @@ import * as mongo from 'mongodb';
 // import { ClassConstructor, DataProperties, IModel } from './models/base';
 import { Filter, FindCursor, UpdateFilter, UpdateOptions, WithoutId } from 'mongodb';
 import { ToString } from 'yargs';
-import { Artefact, Model/* , Model */ } from './models/Model';
+import { Artefact, ArtefactData, Model } from './models/Model';
 import { DbCommandArgv } from './cmds/db';
 
 export let client: mongo.MongoClient | null = null;
@@ -19,7 +19,7 @@ export interface Storage {
     isConnected(): boolean;
     connect(): Promise<Storage>;
     close(): Promise<Storage>;
-    store<TSchema extends { [K: string]: Model }>(name: string, options?: any): Promise<Store<TSchema>>;
+    store<TSchema extends ArtefactData>(name: string, options?: any): Promise<Store<Artefact<TSchema>>>;
 }
 
 export class MongoStorage implements Storage {
@@ -56,63 +56,61 @@ export class MongoStorage implements Storage {
         return this as Storage;
     }
 
-    async store<TSchema extends { [K: string]: Model }>(name: string, options?: any): Promise<Store<TSchema>> {
+    async store<TSchema extends Artefact>(name: string, options?: any): Promise<Store<Artefact<TSchema>>> {
         await this.connect();
         process.stdout.write(`Getting store '${name} ${options !== undefined ? ("options=" + JSON.stringify(options)) : "" } ... `);
-        const store: Store<TSchema> = new MongoStore(this as Storage, name, options, this._db!.collection(name, options));
+        const store: Store<TSchema> = new MongoStore<TSchema>(this as Storage, name, options, this._db!.collection(name, options));
         process.stdout.write("OK\n");
         return store as Store<TSchema>;
     }
 }
 
-export interface Store<TSchema extends { [K: string]: Model }> {
-    find(query: any): AsyncGenerator;
-    findOne(query: any): Promise<Artefact | undefined>;
-    findOneAndUpdate(query: TSchema, update: Artefact): Promise<Artefact | undefined>;
-    updateOne(artefact: Artefact & TSchema, query?: TSchema): Promise<(Artefact & TSchema) | undefined>;
-    updateOrCreate(artefact: Artefact & TSchema, query?: TSchema): Promise<(Artefact & TSchema) | undefined>;
+export interface Store<TSchema extends Artefact> {
+    find(query: Filter<TSchema>): AsyncGenerator<Artefact<TSchema>>;
+    findOne(query: Filter<mongo.WithId<TSchema>>): Promise<Artefact<TSchema> | null>;
+    findOneAndUpdate(query: Filter<TSchema>, update: TSchema): Promise<mongo.WithId<Artefact<TSchema>> | null>;
+    updateOne(artefact: Artefact<TSchema>, query?: TSchema): Promise<mongo.UpdateResult<Artefact<TSchema>> | null>;
+    updateOrCreate(artefact: Artefact<TSchema>, query?: TSchema): Promise<mongo.WithId<Artefact<TSchema>>>;
 }
 
-export class MongoStore<TSchema extends { [K: string]: Model }> implements Store<TSchema> {
+export class MongoStore<TSchema extends ArtefactData> implements Store<TSchema> {
 
     constructor(
         public readonly storage: Storage,
         public readonly name: string,
         public readonly options: any,
-        private _collection: mongo.Collection,
+        private _collection: mongo.Collection<Artefact<TSchema>>,
     ) {}
 
-    async* find(query: any) {
+    async* find(query: Filter<TSchema>) {
         for await (const item of this._collection.find(query))
             yield item;
     }
 
-    async findOne(query: any): Promise<Artefact | undefined> {
-        return new Artefact();//await this._collection.findOne(query));
+    async findOne(query: Filter<TSchema>) {
+        return await this._collection.findOne(query);
     }
 
-    async findOneAndUpdate(query: TSchema, update: Artefact): Promise<Artefact | undefined> {
-        const dbArtefact = new Artefact(await this._collection.findOne<Artefact>(query));
-        dbArtefact.update(update);
+    async findOneAndUpdate(query: Filter<TSchema>, update: UpdateFilter<TSchema>) {
+        return await this._collection.findOneAndUpdate(query, update);
+    }
+
+    async updateOne(artefact: Artefact<TSchema>, query?: Filter<TSchema>, options: any = {}) {
+        // if (query === undefined) {
+        //     if (artefact._T.primary === undefined)
+        //         throw new Error(`MongoStore.updateOrCreate(): artefact does not have a primary Model, so query parameter must be specified. artefact=${artefact}`);
+        //     const primaryModelName = artefact._T.primary.name;
+        //     query = { [primaryModelName]: artefact[primaryModelName].query } as any;
+        // }
+        const dbArtefact = await this._collection.updateOne(query!, { $set: artefact }, options);
         return dbArtefact;
     }
 
-    async updateOne(artefact: Artefact & TSchema, query?: TSchema, options: any = {}): Promise<(Artefact & TSchema) | undefined> {
+    async updateOrCreate(artefact: Artefact<TSchema>, query?: any) {
         if (query === undefined) {
-            if (artefact._T.primary === undefined)
-                throw new Error(`MongoStore.updateOrCreate(): artefact does not have a primary Model, so query parameter must be specified. artefact=${artefact}`);
-            const primaryModelName = artefact._T.primary.name;
-            query = { [primaryModelName]: artefact[primaryModelName].query } as any;
+            query = Artefact.query.byPrimary();
         }
-        const dbArtefact = await this._collection.findOneAndUpdate(query!, { $set: artefact }, options) as unknown as Artefact & TSchema;
-        return dbArtefact;
-    }
-
-    async updateOrCreate(artefact: Artefact & TSchema, query?: any): Promise<(Artefact & TSchema) | undefined> {
-        if (query === undefined) {
-            query = artefact.query.byPrimary();
-        }
-        const dbArtefact = await this.findOne(query) as Artefact & TSchema;
+        const dbArtefact = await this.findOne(query);
         if (dbArtefact !== undefined) {
             // update
         }

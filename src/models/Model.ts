@@ -1,5 +1,6 @@
-import { UUID } from "crypto";
 import { ClassConstructor } from "./base";
+import { Storage, Store } from "../db";
+import { Filter } from "mongodb";
 
 export type DataProperties<T> = { [P in keyof T]: T[P] extends () => void ? never : T[P]; };//Pick<T, NonMethodKeys<T>>; 
 
@@ -21,7 +22,7 @@ export class Timestamps {
 }
 
 export class ModelMeta {
-    a: Artefact;
+    a: ArtefactBase;
     ts: Timestamps;
     constructor(meta: ModelMetaInit) {
         this.a = meta.a;
@@ -31,7 +32,8 @@ export class ModelMeta {
 
 export type ModelMetaInit = Required<Pick<ModelMeta, 'a'>> & Partial<Pick<ModelMeta, 'ts'>>;
 
-export type Model<T> = T & {
+export class Model {
+    get _type(): string { return this.constructor.name; }
     // maybe no model on id?? Artefact can have an _id and be responsible for running queries. 
     // And at that level Artefact could probably select which of its member model(s) to include
     // in the query return
@@ -44,60 +46,120 @@ export type Model<T> = T & {
      // ok so i should have a constructor or what ..
      // nah just set model(aka this)._A from the Artefact when it is creating Model isntances
      // oh but ok that's a prop.
-     _: ModelMeta;
+    _!: ModelMeta;
+    static buildModelQueries<Q extends { [K: string]: (...args: any[]) => Filter<Model>; }>(queries: Q) {
+        const modelName = this.name;
+        const prefix = (query: Filter<Model>) =>
+            Object.fromEntries(Object.entries(query).map(([K, V]) =>
+                ([K.startsWith('$') ? K : `${modelName}.${K}`, V])));
+        return Object.fromEntries(Object.entries(queries).map(([K, V]) =>
+            ([K, (...args: any[]) => prefix(V(...args))])));
+    }
+    static query = this.buildModelQueries({});
+    // getQuery: (m: Model) => Filter<Model>) {
+    //     return ({ [this.constructor.name]: getQuery() })
+    // };
+    
+    //  constructor: ModelStatic;
 };
+
+export type ModelStatic = {
+    name: string;
+}
 
 export type ModelInit<T> = Partial<T> & {
     _: ModelMeta;
 };
 
-export class Artefact {
+export type ArtefactData<T = Model> = {
+    [K: string]: T | undefined;
+};
 
+export type OptionalId<T extends ArtefactData = ArtefactData> = T & {
+    _id?: string
+};
+
+// export type ArtefactModels<TArtefact extends Artefact> = {
+//     [K in keyof TArtefact]: TArtefact[K] extends Model ? TArtefact[K] : never;
+// };
+
+export type ArtefactModelConstructors = {
+    [K: string]: new (data: DataProperties<Model>) => Model;
+};
+
+export class ArtefactBase {
+    static newId = () => crypto.randomUUID();
     _id?: string;
     get isNew(): boolean { return this._id === undefined; }
-    // private set isNew(value: boolean) { this.isNew}
-    static newId = () => crypto.randomUUID();
+};
 
-    // private modelMap = new Map<string, Model>;
-    
-    // constructor(private models: { [K: string]: Model }) {
-    //     for (const modelName in models) {
-    //         this.add(models[modelName]);
-    //     }
-    // }
+export type QueryBuilderFunction<A extends ArtefactData> = (a: Artefact<A>) => Filter<A>;
 
-    add<TModel>(modelCtor: new (...args: any[]) => any, modelData?: ModelInit<TModel>) {
-        const model = Object.assign(
-            new modelCtor(modelData ?? {}),
-            { _: new ModelMeta({ ...(modelData?._ ?? {}), a: this }) }
-        ) as TModel;
-        // this.modelMap.set(model.constructor.name, model);
-    }
+// export const makeArtefactType = (models: { [K: string]: new (...args: any[]) => Model; }, keyFn: (data: ArtefactData) => string) => {
 
-    static async* stream(iterable: AsyncGenerator<Model>) {
-        for await (const model of iterable) {
-            yield new Artefact({ [model.constructor.name]: model });
+export class Artefact<A extends ArtefactData> extends ArtefactBase {
+
+    getKey<A extends ArtefactData>(): Filter<Artefact<A>> { return ({ _id: this._id }); }
+    private modelMap = new Map<keyof A, Model>;
+
+    constructor(artefact?: A) {
+        super();
+        if (artefact !== undefined) {
+            for (const [modelName, modelData] of Object.entries(artefact)) {
+                if (modelData !== undefined) {
+                    this.add(modelData);
+                }
+            }
         }
     }
 
-    async save(db: Storage) {
+    static createFromModel<A extends ArtefactData>(model: Model): Artefact<A> {
+        return new Artefact<A>({ [model.constructor.name]: model } as A);
+    }
+
+    add<M extends Model>(model: M) {
+        model._ ??= new ModelMeta({ a: this });
+        model._.a = this;
+        this.modelMap.set(model.constructor.name, model);
+    }
+
+    get<M extends Model>(modelCtor: new (...args: any[]) => M) {
+        return this.modelMap.get(modelCtor.name) as M | undefined;//modelCtor.name);
+    }
+
+    static async* stream<M extends Model, A extends ArtefactData>(iterable: AsyncGenerator<M>) {
+        for await (const model of iterable) {
+            yield Artefact.createFromModel(model) as Artefact<A>;
+        }
+    }
+
+    toData(options?: any): OptionalId<A> {
+        return ({ _id: this._id, ...Object.fromEntries(this.modelMap.entries()) as A });
+    }
+
+    async save(db: Store<A>) {
         if (this.isNew) {
             this._id = Artefact.newId();
         }
-        await db.save(this);
+        await db.updateOrCreate(this.toData());
+        return this;
     }
 
-    async load(db: Storage) {
-        Object.assign(await db.load());
+    static async load<A extends ArtefactData>(db: Store<A>, query: Filter<A>) {
+        const artefactData = await db.findOne(query) || undefined;
+        return new Artefact(artefactData);
     }
 
     /* todo: query objects */
-    static query = {
-        findOne<T extends { _id?: string }>({ _id }: { _id?: string }) { return _id !== undefined ? ({ _id }) : ({}); },
-        find<T extends { _id?: string }>() { },
-        updateOne<T extends { _id?: string }>() { },
-        update<T extends { _id?: string }>() { },
-
+    query(qbFunc: QueryBuilderFunction<A>) {
+        return qbFunc(this);
     }
+    
+    // = {
+    //     findOne<T extends { _id?: string }>({ _id }: { _id?: string }) { return _id !== undefined ? ({ _id }) : ({}); },
+    //     find<T extends { _id?: string }>() { },
+    //     updateOne<T extends { _id?: string }>() { },
+    //     update<T extends { _id?: string }>() { },
+    // }
 
 }

@@ -189,7 +189,7 @@ declare var FileOptions: { default: FileOptions; };
 FileOptions.default = {
     hashFn: async (file, dbFile, fileOptions) =>
         dbFile && file.stats.equals(dbFile.stats) &&
-        (dbFile._ts.hash?.updateElapsed ?? 0) > new Date(0, 0, 0, 12, 0, 0, 0)
+        (dbFile._ts.hash?.updateElapsed ?? 0) < new Date(0, 0, 0, 12, 0, 0, 0)
      ?  dbFile.hash
      :  (file.stats?.size ?? 0) > 1024
      ? await calculateHash(file.path)
