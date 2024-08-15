@@ -9,7 +9,7 @@ class TimestampedValue<T> {
     updateTime: Date = new Date();
     createTime: Date = new Date();
     modifyTime: Date = new Date();
-    constructor(private value: T) {}
+    constructor(private value: T) { }
     valueOf() { return this.value; }
     get updateElapsed() { return new Date(Date.now() - this.updateTime.valueOf()); }
     get createElapsed() { return new Date(Date.now() - this.createTime.valueOf()); }
@@ -19,9 +19,12 @@ class TimestampedValue<T> {
 interface ComparableValue<T> {
     equals(other: T): boolean;
 }
+function isComparableValue<T = any>(value: any): value is ComparableValue<T> {
+    return typeof value === 'object' && typeof value.equals === 'function';
+}
 
 class Stats extends fs.Stats implements ComparableValue<fs.Stats> {
- 
+
     constructor(value: Stats | fs.Stats) {
         super();
         Object.assign(this, value);
@@ -49,22 +52,33 @@ class Stats extends fs.Stats implements ComparableValue<fs.Stats> {
 }
 
 class Timestamp {
-    createTime: Date;
-    updateTime: Date;
-    modifyTime: Date;
-    constructor() {
-        this.createTime = 
-        this.updateTime =
-        this.modifyTime = new Date();
+    createTime?: Date;   // time the value was first created
+    updateTime?: Date;   // time the value was "updated" - i.e. *checked* - the value itself may not have changed (and shouldn't get set if hasn't changed), but this timestamp indicates the value has been verified/validated/checked/tested to see if it *needs* an update (which it may not)
+    modifyTime?: Date;   // time the value was modified - i.e. actually set, and set to a different value than previously
+    accessTime?: Date;  // time the value was accessed
+    get createElapsed() { return this.createTime ? new Date(Date.now() - this.createTime.getTime()) : Infinity; }
+    get updateElapsed() { return this.updateTime ? new Date(Date.now() - this.updateTime.getTime()) : Infinity; }
+    get modifyElapsed() { return this.modifyTime ? new Date(Date.now() - this.modifyTime.getTime()) : Infinity; }
+    get accessElapsed() { return this.accessTime ? new Date(Date.now() - this.accessTime.getTime()) : Infinity; }
+    setCreateTime() { this.createTime = new Date(Date.now()); }
+    setUpdateTime() { this.updateTime = new Date(Date.now()); }
+    setModifyTime() { this.modifyTime = new Date(Date.now()); }
+    setAccessTime() { this.accessTime = new Date(Date.now()); }
+    setUpdateTimes(isModified: boolean = false) {
+        if (this.createTime === undefined) {
+            this.setCreateTime();
+        } else {
+            this.setUpdateTime();
+            if (isModified) {
+                this.setModifyTime();
+            }
+        }
     }
-    get createElapsed() { return new Date(Date.now() - this.createTime.getTime()); }
-    get updateElapsed() { return new Date(Date.now() - this.updateTime.getTime()); }
-    get modifyElapsed() { return new Date(Date.now() - this.modifyTime.getTime()); }
 }
 
 type Aspect<T, TTimeStamped> = {
     [K in keyof (T & TTimeStamped)]: (T & TTimeStamped)[K];
- } & {
+} & {
     _ts: { [K in keyof TTimeStamped]: Timestamp | undefined; };
 };
 
@@ -75,12 +89,13 @@ type AspectSchema = {
 };
 type AspectPropertySchema = {
     type: TypeFunction;
-    timestamps: boolean | AspectPropertyTimestampsSchema;
+    timestamps?: AspectPropertyTimestampsSchema;
 };
-type AspectPropertyTimestampsSchema = {
+type AspectPropertyTimestampsSchema = boolean | {
     create: boolean;
     update: boolean;
     modify: boolean;
+    access: boolean;
 };
 type TimestampedProperties/* <T extends AspectSchema> */ = {
     // [K in keyof T]: T[K]["timestamps"] extends true ? Timestamp : T[K]["timestamps"] extends AspectPropertyTimestampsSchema ? Timestamp : never;
@@ -89,6 +104,7 @@ type TimestampedProperties/* <T extends AspectSchema> */ = {
 
 export const Aspect = {
     Model<TAspect extends AspectSchema>(schema: TAspect): TypeFunction {
+
         type AspectData = {
             [K: string /* in keyof TAspect */]: any;//ReturnType<TAspect[K]["type"]>;
         };
@@ -96,27 +112,52 @@ export const Aspect = {
             _ts: TimestampedProperties/* <TAspect> */;
         };
         type AspectModel = AspectData & AspectDataTimestamps;
-        return (aspectData: AspectData): AspectModel => {
-            const aspectPrototype = { _ts: {} as TimestampedProperties/* <TAspect> */ } as AspectModel;
-            Object.defineProperties(
-                aspectPrototype,
-                Object.fromEntries( Object.entries(schema).map/* <[keyof AspectData, any]> */(([K, V]/* : [keyof AspectData, any] */) => ([ K, ({
-                    writable: true,
-                    enumerable: true,
-                    .../* ( */V.timestamps/*  && V.timestamps === 'object') */ ? ({
-                        get: function(this: AspectModel) { return this[K]; },
-                        set: function(this: AspectModel, value: any) { this._ts[K] = new Timestamp(); this[K] = value; },
-                    }) : ({
-                        value: V,
-                    })
-                }) ]), ) )
-            );
-            const aspect = Object.assign(
-                aspectPrototype,
-                aspectData
-            ) as AspectModel;
-            return aspect;
-        };
+
+        const enableAllTimestamps = (timestamps?: AspectPropertyTimestampsSchema) => timestamps === true;
+        const enableAnyTimestamps = (timestamps?: AspectPropertyTimestampsSchema) => timestamps === true || (typeof timestamps === 'object' && (timestamps.create || timestamps.modify || timestamps.update || timestamps.access));
+        const enableCreateTimestamp = (timestamps?: AspectPropertyTimestampsSchema) => timestamps === true || (typeof timestamps === 'object' && timestamps.create === true);
+        const enableUpdateTimestamp = (timestamps?: AspectPropertyTimestampsSchema) => timestamps === true || (typeof timestamps === 'object' && timestamps.update === true);
+        const enableModifyTimestamp = (timestamps?: AspectPropertyTimestampsSchema) => timestamps === true || (typeof timestamps === 'object' && timestamps.modify === true);
+        const enableAccessTimestamp = (timestamps?: AspectPropertyTimestampsSchema) => timestamps === true || (typeof timestamps === 'object' && timestamps.access === true);
+
+        const makeGetAccessor = (K: string, timestamps?: AspectPropertyTimestampsSchema) => enableAccessTimestamp(timestamps) ?
+            function (this: AspectModel) { this._ts[K].setUpdateTime(); return this[K]; } :
+            function (this: AspectModel) { return this[K]; };
+        const makeSetAccessor = (K: string, timestamps?: AspectPropertyTimestampsSchema) => enableAccessTimestamp(timestamps) ?
+            function (this: AspectModel, value: any) {
+                const isModified = !(isComparableValue(this[K]) ? this[K].equals(value) : this[K] === value);
+                this._ts[K].setUpdateTimes(isModified);
+                if (isModified) {
+                    this[K] = value;
+                }
+                return this[K];
+            } :
+            function (this: AspectModel, value: any) {
+                this[K] = value;
+                return this[K];
+            };
+
+        const aspectCtor = (aspectData: AspectData): AspectModel => Object.create(
+            aspectPrototype,
+            aspectData
+        ) as AspectModel;
+
+        const aspectPrototype = {
+            constructor: aspectCtor,
+            _ts: Object.fromEntries(Object.entries(schema)
+                .filter(([K, V]) => enableAnyTimestamps(V.timestamps))
+                .map(([K, V]) => ([K, new Timestamp()]))),
+            ...(Object.fromEntries(Object.entries(schema).map/* <[keyof AspectData, any]> */(([K, V]/* : [keyof AspectData, any] */) => ([K, ({
+                writable: true,
+                enumerable: true,
+                get: makeGetAccessor(K, V.timestamps),
+                set: makeSetAccessor(K, V.timestamps),
+            })]),))),
+        } as AspectModel;
+
+        aspectCtor.prototype = aspectPrototype;
+
+        return aspectCtor;
     }
 };
 
@@ -144,7 +185,7 @@ const makeAspectFn = <T, TTimeStamped, TOptions>(
         Object.fromEntries(timestampedProperties.map(timestampedPropertyName => ([timestampedPropertyName, {
             writable: true,
             enumerable: true,
-            get: function() { return (this as any)['_' + (timestampedPropertyName as string)]; },
+            get: function () { return (this as any)['_' + (timestampedPropertyName as string)]; },
             set(value: any) {
                 (this as any)._ts['_' + (timestampedPropertyName as string)] = new Timestamp();
                 (this as any)['_' + (timestampedPropertyName as string)] = value;
@@ -154,7 +195,7 @@ const makeAspectFn = <T, TTimeStamped, TOptions>(
 
     type Ctor<T> = { new(aspectData?: TAll): any };
 
-    return async function(aspectData: TAll, options: TOptions): Promise<TAll> {
+    return async function (aspectData: TAll, options: TOptions): Promise<TAll> {
         const aspect = aspectData instanceof aspectClass ? aspectData : new aspectClass(aspectData);
         return await aspectFn(aspect as Aspect<T, TTimeStamped>, options);
     };
@@ -189,11 +230,11 @@ declare var FileOptions: { default: FileOptions; };
 FileOptions.default = {
     hashFn: async (file, dbFile, fileOptions) =>
         dbFile && file.stats.equals(dbFile.stats) &&
-        (dbFile._ts.hash?.updateElapsed ?? 0) < new Date(0, 0, 0, 12, 0, 0, 0)
-     ?  dbFile.hash
-     :  (file.stats?.size ?? 0) > 1024
-     ? await calculateHash(file.path)
-     : undefined,
+            (dbFile._ts.hash?.updateElapsed ?? 0) < new Date(0, 0, 0, 12, 0, 0, 0)
+            ? dbFile.hash
+            : (file.stats?.size ?? 0) > 1024
+                ? await calculateHash(file.path)
+                : undefined,
 };
 
 // Supply plugin with a storage collection to operate on and other options
@@ -217,7 +258,7 @@ export default (pluginOptions: FileSystemPluginOptions = { storage: StorageOptio
 
             file.stats ??= new Stats(await fs.promises.stat(file.path));
             file.hash = await options.file.hashFn?.(file, dbFile ?? undefined, options.file);
-            
+
             return file;
         }
     );

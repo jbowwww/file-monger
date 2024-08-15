@@ -1,8 +1,10 @@
-import { File, Directory, Unknown, FileSystem, FileSystemEntry, FileSystemEntryBase } from "./fs";
+import * as nodeFs from 'fs';
+import * as nodePath from 'path';
+
+import { File, Directory, Unknown, FileSystem, FileSystemEntry } from "./fs";
 import * as db from "../db";
 import { isFile } from "../models/file5";
-import { unknown } from "zod";
-import { Artefact } from "../models/Model";
+import { Artefact, ArtefactData } from "../models/Model";
 
 // abstract class Artefact<T> {
 //     constructor(init: Partial<T> = {}) {
@@ -43,17 +45,16 @@ import { Artefact } from "../models/Model";
 // });
 
 
-type FileArtefact = {
-    file: File;
-    dir: Directory;
-    unknown: Unknown;
-    // audio: Audio,
+class FileArtefact extends Artefact<ArtefactData> {
+    get fsEntry() { return this.get(FileSystemEntry); }
+    get file() { return this.get(File); }
+    get dir() { return this.get(Directory); }
 };
 
 async function main() {
     const store = await db.storage.store<FileArtefact>('fileSystemEntries');
     for await (const fsEntry of /* Artefact.stream<FileSystemEntry,FileArtefact>( */FileSystem.walk(".")) {
-        const dbEntry = await store.findOne(fsEntry.query(FileSystemEntryBase.byPath));
+        const dbEntry = await store.findOne(fsEntry.query(FileSystemEntry.byPath));
         if (
             dbEntry === undefined ||
             dbEntry!.get().stats.mtime !== fsEntry.stats.mtime ||

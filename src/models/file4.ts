@@ -2,7 +2,7 @@ import * as nodeFs from 'fs';
 import * as nodePath from 'path';
 import { calculateHash } from '../file';
 import { createAsync, isAsyncIterable, isIterable } from './types';
-import { Model } from './Model';
+import Model from './Model';
 
 /*
  * Ongoing reminder of the things I want File aspects / models /classes/modules(<-less OOP more FP?)
@@ -28,21 +28,21 @@ import { Model } from './Model';
  *  */
 
 export const FileSystem = {
-   
+
     async create(path: string): Promise<File | Directory /* | Error */> {
         const stats = await nodeFs.promises.stat(path);
         return stats.isFile() ? new File({ path, stats })
             : stats.isDirectory() ? new Directory({ path, stats }) : null;
-            // : new Error(`Unknown stat entry type for path '${path}'`);
+        // : new Error(`Unknown stat entry type for path '${path}'`);
     },
-    
+
     async* walk(path: string): AsyncGenerator<File | Directory/*  | Error */, void, undefined> {
         const rootEntry = FileSystem.create(path);
         yield rootEntry;
         if (rootEntry instanceof Directory)
             yield* (rootEntry as Directory).walk();
     }
-    
+
 };
 
 export abstract class FileSystemEntryBase extends Model {
@@ -56,12 +56,12 @@ export abstract class FileSystemEntryBase extends Model {
         this.stats = stats;
     }
 
-    static async createAsync<FileSystemEntry>({ path, stats }: { path: string, stats?: nodeFs.Stats}) {
+    static async createAsync<FileSystemEntry>({ path, stats }: { path: string, stats?: nodeFs.Stats }) {
         stats ??= await nodeFs.promises.stat(path);
         const newEntry =
-            stats.isFile()      ? { _type: 'file', path, stats } :
-            stats.isDirectory() ? { _type: 'dir' , path, stats } :
-            { _type: 'unknown', path, stats };
+            stats.isFile() ? { _type: 'file', path, stats } :
+                stats.isDirectory() ? { _type: 'dir', path, stats } :
+                    { _type: 'unknown', path, stats };
         return newEntry as FileSystemEntry;
     }
 }

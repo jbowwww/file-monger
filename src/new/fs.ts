@@ -1,6 +1,6 @@
 import * as nodeFs from 'fs';
 import * as nodePath from 'path';
-import { Artefact, ArtefactData, buildModelQueries, Model, QueryBuilderFunction } from '../models/Model';
+import Model, { Artefact, ArtefactData, buildModelQueries, QueryBuilderFunction } from '../models/Model';
 
 /*
  * Ongoing reminder of the things I want File aspects / models /classes/modules(<-less OOP more FP?)
@@ -44,10 +44,10 @@ export const FileSystem = {
         const stats = await nodeFs.promises.stat(path);
         return stats.isFile() ? new File({ path, stats })
             : stats.isDirectory() ? new Directory({ path, stats })
-            : new Unknown({ path, stats });
-            // : new Error(`Unknown stat entry type for path '${path}'`);
+                : new Unknown({ path, stats });
+        // : new Error(`Unknown stat entry type for path '${path}'`);
     },
-    
+
     async* walk(path: string): AsyncGenerator<FileSystemEntry, void, undefined> {
         const rootEntry = FileSystem.create(path);
         yield rootEntry;
@@ -56,14 +56,14 @@ export const FileSystem = {
     }
 };
 
-export abstract class FileSystemEntryBase extends Model {
+export abstract class FileSystemEntry extends Model {
 
     // static _type: string = 'unknown';
-    
+
     path: string;
     stats: nodeFs.Stats;
 
-    constructor({ path, stats }: DataProperties<FileSystemEntryBase>) {
+    constructor({ path, stats }: DataProperties<FileSystemEntry>) {
         super();
         this.path = path;
         this.stats = stats instanceof nodeFs.Stats ? stats : Object.assign(new nodeFs.Stats(), stats);
@@ -71,12 +71,12 @@ export abstract class FileSystemEntryBase extends Model {
 
     isFile() { return this.stats?.isFile(); }
     isDirectory() { return this.stats?.isDirectory(); }
-    
+
 
     static query = this.buildModelQueries({
         byPath: (path: string) => ({ path }),
     });
-    
+
     //query(ies)
     // static byPath<A extends ArtefactData>(this: typeof FileSystemEntryBase | typeof File | typeof Directory) : QueryBuilderFunction<A> {
     //     return (artefact: Artefact<A>) => 
@@ -88,7 +88,7 @@ export abstract class FileSystemEntryBase extends Model {
     // }    
 }
 
-export class Directory extends FileSystemEntryBase {
+export class Directory extends FileSystemEntry {
 
     static _type: string = 'directory';
 
@@ -107,9 +107,9 @@ export class Directory extends FileSystemEntryBase {
     });
 }
 
-export class Unknown extends FileSystemEntryBase { }
+export class Unknown extends FileSystemEntry { }
 
-export class File extends FileSystemEntryBase {
+export class File extends FileSystemEntry {
 
     static _type: string = 'file';
 
@@ -119,10 +119,10 @@ export class File extends FileSystemEntryBase {
         super(file);
         this.hash = file.hash;
     }
-    
+
     static query = super.buildModelQueries({
         byPath: (path: string) => ({ path }),
     });
 }
 
-export type FileSystemEntry = File | Directory | Unknown;
+// export type FileSystemEntry = File | Directory | Unknown;

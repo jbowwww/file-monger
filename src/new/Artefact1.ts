@@ -1,5 +1,5 @@
 import { Filter } from "mongodb";
-import { ArtefactData, ArtefactModelConstructors, Model } from "../models/Model";
+import Model, { ArtefactData, ArtefactModelConstructors } from "../models/Model";
 import { Artefact } from "../models/export class Artefact {";
 
 export type ClassConstructor<T = any, TArgs = any[]> = new (...args: any[]) => T;

@@ -2,7 +2,7 @@ import * as mongo from 'mongodb';
 // import { ClassConstructor, DataProperties, IModel } from './models/base';
 import { Filter, FindCursor, UpdateFilter, UpdateOptions, WithoutId } from 'mongodb';
 import { ToString } from 'yargs';
-import { Artefact, ArtefactData, Model } from './models/Model';
+import Model, { Artefact, ArtefactData } from './models/Model';
 import { DbCommandArgv } from './cmds/db';
 
 export let client: mongo.MongoClient | null = null;

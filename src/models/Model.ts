@@ -32,7 +32,14 @@ export class ModelMeta {
 
 export type ModelMetaInit = Required<Pick<ModelMeta, 'a'>> & Partial<Pick<ModelMeta, 'ts'>>;
 
-export class Model {
+export type ModelConstructor = {
+    new(...args: any[]): Model;
+};
+export type AbstractModelConstructor = {
+    new(...args: any[]): Model;
+};
+
+export default class Model {
     get _type(): string { return this.constructor.name; }
     // maybe no model on id?? Artefact can have an _id and be responsible for running queries. 
     // And at that level Artefact could probably select which of its member model(s) to include
@@ -42,10 +49,10 @@ export class Model {
 
     // do i even need a constructor without having any fields or props to init?
 
-     // there WILL (?) be some static fn's or getters to return query objects for the Artefact (this._A again?)
-     // ok so i should have a constructor or what ..
-     // nah just set model(aka this)._A from the Artefact when it is creating Model isntances
-     // oh but ok that's a prop.
+    // there WILL (?) be some static fn's or getters to return query objects for the Artefact (this._A again?)
+    // ok so i should have a constructor or what ..
+    // nah just set model(aka this)._A from the Artefact when it is creating Model isntances
+    // oh but ok that's a prop.
     _!: ModelMeta;
     static buildModelQueries<Q extends { [K: string]: (...args: any[]) => Filter<Model>; }>(queries: Q) {
         const modelName = this.name;
@@ -59,8 +66,8 @@ export class Model {
     // getQuery: (m: Model) => Filter<Model>) {
     //     return ({ [this.constructor.name]: getQuery() })
     // };
-    
-    //  constructor: ModelStatic;
+
+    // new(): ModelConstructor;
 };
 
 export type ModelStatic = {
@@ -88,24 +95,25 @@ export type ArtefactModelConstructors = {
 };
 
 export class ArtefactBase {
-    static newId = () => crypto.randomUUID();
-    _id?: string;
-    get isNew(): boolean { return this._id === undefined; }
 };
 
-export type QueryBuilderFunction<A extends ArtefactData> = (a: Artefact<A>) => Filter<A>;
+export type QueryBuilderFunction<A extends Artefact> = (a: A) => Filter<A>;
 
 // export const makeArtefactType = (models: { [K: string]: new (...args: any[]) => Model; }, keyFn: (data: ArtefactData) => string) => {
 
-export class Artefact<A extends ArtefactData> extends ArtefactBase {
+export class Artefact extends ArtefactBase {
 
-    getKey<A extends ArtefactData>(): Filter<Artefact<A>> { return ({ _id: this._id }); }
-    private modelMap = new Map<keyof A, Model>;
+    static newId = () => crypto.randomUUID();
+    _id?: string;
+    get isNew(): boolean { return this._id === undefined; }
 
-    constructor(artefact?: A) {
+    getKey(): Filter<Artefact> { return ({ _id: this._id }); }
+    private modelMap = new Map<ModelConstructor | AbstractModelConstructor, Model>;
+
+    constructor(artefactData?: Iterable<Model>) {
         super();
-        if (artefact !== undefined) {
-            for (const [modelName, modelData] of Object.entries(artefact)) {
+        if (artefactData !== undefined) {
+            for (const modelData of artefactData) {
                 if (modelData !== undefined) {
                     this.add(modelData);
                 }
@@ -113,23 +121,23 @@ export class Artefact<A extends ArtefactData> extends ArtefactBase {
         }
     }
 
-    static createFromModel<A extends ArtefactData>(model: Model): Artefact<A> {
-        return new Artefact<A>({ [model.constructor.name]: model } as A);
+    static createFromModel(model: Model): Artefact {
+        return new Artefact([model]); //{ [model.constructor.name]: model } as A);
     }
 
     add<M extends Model>(model: M) {
         model._ ??= new ModelMeta({ a: this });
         model._.a = this;
-        this.modelMap.set(model.constructor.name, model);
+        this.modelMap.set(model.constructor as ModelConstructor, model);
     }
 
-    get<M extends Model>(modelCtor: new (...args: any[]) => M) {
-        return this.modelMap.get(modelCtor.name) as M | undefined;//modelCtor.name);
+    get<M extends Model>(modelCtor: (new (...args: any[]) => M) | (abstract new (...args: any[]) => M)) {
+        return this.modelMap.get(modelCtor as ModelConstructor | AbstractModelConstructor) as M | undefined;//modelCtor.name);
     }
 
-    static async* stream<M extends Model, A extends ArtefactData>(iterable: AsyncGenerator<M>) {
+    static async* stream<M extends Model>(this: typeof Artefact, iterable: AsyncGenerator<M>) {
         for await (const model of iterable) {
-            yield Artefact.createFromModel(model) as Artefact<A>;
+            yield Artefact.createFromModel(model) as Artefact;
         }
     }
 
@@ -154,7 +162,7 @@ export class Artefact<A extends ArtefactData> extends ArtefactBase {
     query(qbFunc: QueryBuilderFunction<A>) {
         return qbFunc(this);
     }
-    
+
     // = {
     //     findOne<T extends { _id?: string }>({ _id }: { _id?: string }) { return _id !== undefined ? ({ _id }) : ({}); },
     //     find<T extends { _id?: string }>() { },
