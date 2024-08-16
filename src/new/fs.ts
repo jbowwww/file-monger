@@ -1,6 +1,7 @@
 import * as nodeFs from 'fs';
 import * as nodePath from 'path';
-import Model, { Artefact, ArtefactData, buildModelQueries, QueryBuilderFunction } from '../models/Model';
+import Model, { Artefact, ArtefactData, /* buildModelQueries, */ QueryBuilderFunction } from '../models/Model';
+import { Filter } from 'mongodb';
 
 /*
  * Ongoing reminder of the things I want File aspects / models /classes/modules(<-less OOP more FP?)
@@ -24,7 +25,6 @@ import Model, { Artefact, ArtefactData, buildModelQueries, QueryBuilderFunction 
  *                                
  *
  *  */
-
 
 export function isAsyncIterable<T>(obj: any): obj is AsyncIterable<T> {
     return obj.hasOwnProperty(Symbol.asyncIterator);
@@ -74,7 +74,7 @@ export abstract class FileSystemEntry extends Model {
 
 
     static query = this.buildModelQueries({
-        byPath: (path: string) => ({ path }),
+        byPath: (path: string) => ({ path }) as Filter<Model>,
     });
 
     //query(ies)

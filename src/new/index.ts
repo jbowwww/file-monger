@@ -4,7 +4,8 @@ import * as nodePath from 'path';
 import { File, Directory, Unknown, FileSystem, FileSystemEntry } from "./fs";
 import * as db from "../db";
 import { isFile } from "../models/file5";
-import { Artefact, ArtefactData } from "../models/Model";
+import { Artefact, ArtefactData, makeArtefactView } from "../models/Model";
+import { makeArtefactType } from './Artefact1';
 
 // abstract class Artefact<T> {
 //     constructor(init: Partial<T> = {}) {
@@ -45,16 +46,22 @@ import { Artefact, ArtefactData } from "../models/Model";
 // });
 
 
-class FileArtefact extends Artefact<ArtefactData> {
-    get fsEntry() { return this.get(FileSystemEntry); }
-    get file() { return this.get(File); }
-    get dir() { return this.get(Directory); }
-};
+// class FileArtefact extends Artefact {
+//     get fsEntry() { return this.get(FileSystemEntry); }
+//     get file() { return this.get(File); }
+//     get dir() { return this.get(Directory); }
+// };
+
+// class FileArtefactView = makeArtefactView({
+//     fsEntry: FileSystemEntry,
+//     file: File,
+//     dir: Directory,
+// });
 
 async function main() {
-    const store = await db.storage.store<FileArtefact>('fileSystemEntries');
+    const store = await db.storage.store('fileSystemEntries');
     for await (const fsEntry of /* Artefact.stream<FileSystemEntry,FileArtefact>( */FileSystem.walk(".")) {
-        const dbEntry = await store.findOne(fsEntry.query(FileSystemEntry.byPath));
+        const dbEntry = await store.findOne(FileSystemEntry.query.byPath());
         if (
             dbEntry === undefined ||
             dbEntry!.get().stats.mtime !== fsEntry.stats.mtime ||
