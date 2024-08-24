@@ -45,7 +45,7 @@ import { Artefact, ArtefactData } from "../models/Model";
 // });
 
 
-class FileArtefact extends Artefact<ArtefactData> {
+class FileArtefact extends Artefact {
     get fsEntry() { return this.get(FileSystemEntry); }
     get file() { return this.get(File); }
     get dir() { return this.get(Directory); }
@@ -53,8 +53,8 @@ class FileArtefact extends Artefact<ArtefactData> {
 
 async function main() {
     const store = await db.storage.store<FileArtefact>('fileSystemEntries');
-    for await (const fsEntry of /* Artefact.stream<FileSystemEntry,FileArtefact>( */FileSystem.walk(".")) {
-        const dbEntry = await store.findOne(fsEntry.query(FileSystemEntry.byPath));
+    for await (const fsEntry of FileArtefact.stream(FileSystem.walk("."))) {
+        const dbEntry = await store.updateOrCreate(fsEntry);
         if (
             dbEntry === undefined ||
             dbEntry!.get().stats.mtime !== fsEntry.stats.mtime ||

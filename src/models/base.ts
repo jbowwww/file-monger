@@ -6,7 +6,7 @@ import * as nodePath from 'path';
 export type DataProperties<T> = { [P in keyof T]: T[P] extends () => void ? never : T[P]; };//Pick<T, NonMethodKeys<T>>; 
 
 export interface ClassConstructor<TClass, TCtorArgs extends Array<any> = [TClass]> {
-    new (...args: TCtorArgs): TClass;
+    new(...args: TCtorArgs): TClass;
 };
 
 export type Optional<T, K extends keyof T> = Pick<Partial<T>, K> & Omit<T, K>;
@@ -50,7 +50,7 @@ export interface ModelConstructor<
     TModelData extends IModel = DataProperties<TModel>,
     TRestArgs extends Array<any> = any[]
 > {
-    new (data: TModelData, ...args: TRestArgs): Model<TModel, TModelData>;
+    new(data: TModelData, ...args: TRestArgs): Model<TModel, TModelData>;
 };
 
 
@@ -67,9 +67,9 @@ export abstract class Model<
     public _T: ModelConstructor<TModel, TModelData>;
     public _id?: string;// InferIdType<this>;
     public _ts?: Timestamp;
-    
+
     get isNew() { return this._id === null; }
-    
+
     constructor(data?: TModelData) {            //modelCtor: ModelConstructor<TModel, TModelData>
         this._T = this.constructor as ModelConstructor<TModel, TModelData>;     //modelCtor;
         this._id = data?._id ?? undefined;
@@ -159,27 +159,27 @@ export class Timestamped<
 //     async create<TModel extends Model<TModel>>(): Promise<TModel | null>;
 //     prototype: TModel;
 //  };
-     //     ,
-    //     TAsyncCreator extends new () => TModel, //({ path }: { path: string }) => Promise<TModel>,
-    //     // TModel = TAsyncCreator extends ({ path }: { path: string }) => Promise<infer TModel> ? ReturnType<TAsyncCreator> : never
-    // >(
-    //     { path }: { path: string }
-    // ) {
-    //     return await new typeof TAsyncCreator()
-    // }
+//     ,
+//     TAsyncCreator extends new () => TModel, //({ path }: { path: string }) => Promise<TModel>,
+//     // TModel = TAsyncCreator extends ({ path }: { path: string }) => Promise<infer TModel> ? ReturnType<TAsyncCreator> : never
+// >(
+//     { path }: { path: string }
+// ) {
+//     return await new typeof TAsyncCreator()
+// }
 // }
 
-    // static WrapCollection<TSchema extends Model<TSchema>>(collection: Collection<Model<TSchema>>, ctor: ClassConstructor<DataProperties<Model<TSchema>>>) {
-    //     return Object.assign(collection, {
-    //         find(...args: Parameters<typeof collection.find>) {
-    //             return collection.find(...args).map(doc => new ctor(doc));
-    //         },
-    //         async findOne(...args: Parameters<typeof collection.findOne>) {
-    //             const doc = await collection.findOne(...args);
-    //             return doc ? new ctor(doc) : null;
-    //         },
-    //         async updateOne(...args: Parameters<typeof collection.updateOne>) {
-    //             const result = await collection.updateOne(...args);
-    //         }
-    //     })
-    // }
+// static WrapCollection<TSchema extends Model<TSchema>>(collection: Collection<Model<TSchema>>, ctor: ClassConstructor<DataProperties<Model<TSchema>>>) {
+//     return Object.assign(collection, {
+//         find(...args: Parameters<typeof collection.find>) {
+//             return collection.find(...args).map(doc => new ctor(doc));
+//         },
+//         async findOne(...args: Parameters<typeof collection.findOne>) {
+//             const doc = await collection.findOne(...args);
+//             return doc ? new ctor(doc) : null;
+//         },
+//         async updateOne(...args: Parameters<typeof collection.updateOne>) {
+//             const result = await collection.updateOne(...args);
+//         }
+//     })
+// }
