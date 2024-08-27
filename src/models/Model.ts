@@ -1,36 +1,41 @@
+import { isMap } from "util/types";
 import { Store } from "../db";
 import { Filter } from "mongodb";
 
-export type DataProperties<T> = { [P in keyof T]: T[P] extends () => void ? never : T[P]; };
+export function isFunction(value: any): value is Function {
+    return typeof value === 'function';
+}
 
-// export type ClassConstructor<TClass, TCtorArgs extends Array<any> = Array<any>> = {
-//     new(...args: TCtorArgs): TClass;
-//     prototype: TClass & {
-//         constructor: ClassConstructor<TClass>,
-//     }
-// };
+export type DataPropertyNames<T> = { [K in keyof T]: T[K] extends Function ? never : K }[keyof T];
+export type DataProperties<T> = Pick<T, DataPropertyNames<T>>;
 
-export type ClassConstructor<T, TCtorArgs extends Array<any> = Array<any>> = new (...args: TCtorArgs) => T;
-export type AbstractConstructor<T, TCtorArgs extends Array<any> = Array<any>> = abstract new (...args: TCtorArgs) => T;
-// export type AbstractConstructor<T> = ClassConstructor<T> & { prototype: T; };
-// export type AbstractModelConstructor<M extends Model = Model> = {
-//     new(...args: any[]): M;
-// };
+export type ClassConstructor<T, TCtorArgs extends Array<any> = Array<any>> = 
+    (new (...args: TCtorArgs) => T) & {
+        name: string;
+        prototype: T & {
+            constructor: Function;
+        };
+    };
+export type AbstractConstructor<T> = {
+    name: string;
+    prototype: T;
+};
 
 export type Optional<T, K extends keyof T> = Pick<Partial<T>, K> & Omit<T, K>;
 
-export function mapObject<S extends object, T extends object>(source: S): T {
-    return Object.fromEntries<S>(
-        Object.entries(source)
-            .filter(([K, V]) => typeof K !== 'symbol' && typeof V !== 'function')
-            .map(([K, V]) => ([
-                K,
-                V !== null && typeof V === 'object' ?
-                    mapObject(V) :
-                    V
-            ]))
-    ) as T;
-};
+// export type ObjectMapFunction = ([K, V]: [string, any]) => ([string, any]);
+// export function mapObject(source: {}, mapFn: ObjectMapFunction | undefined): {} {
+//     return Object.fromEntries<any>(
+//         (isMap(source) ? Array.from(source.entries()) : Object.entries(source))
+//             .filter<[string, any]>(([K, V]: [string, any]) => typeof K === 'string' && typeof V !== 'function')
+//             .map(mapFn ?? (([K, V]: [string, any]) => ([
+//                 K,
+//                 V !== null && typeof V === 'object' ?
+//                     mapObject(V, mapFn) :
+//                     V
+//             ])))
+//     );
+// };
 
 export class Timestamps {
     created: Date;
@@ -49,51 +54,50 @@ export class Timestamps {
     }
 };
 
-export class ModelMeta<TSchema extends Artefact = Artefact> {
-    a: TSchema;
+export class ModelMeta<A extends Artefact = Artefact> {
+    a: A;
     ts: Timestamps;
-    constructor(meta: ModelMetaInit<TSchema>) {
+    pending: Array<Promise<any>>;
+    constructor(meta: ModelMetaInit<A>) {
         this.a = meta.a;
         this.ts = new Timestamps(meta.ts);
+        this.pending = [];
+    }
+    queueTask(task: Promise<any> | (() => Promise<any>)) {
+        this.pending.push(isFunction(task) ? task() : task);
     }
 };
 
-export type ModelMetaInit<TSchema extends Artefact = Artefact> =
-    Required<Pick<ModelMeta<TSchema>, 'a'>> &
-    Partial<Pick<ModelMeta<TSchema>, 'ts'>>;
+export type ModelMetaInit<A extends Artefact = Artefact> =
+    Required<Pick<ModelMeta<A>, 'a'>> &
+    Partial<Pick<ModelMeta<A>, 'ts'>>;
 
-export type ModelConstructor<M extends Model = Model> = ClassConstructor<M, [Partial<DataProperties<M>>]>;
+export type ModelProperties<T> = Omit<DataProperties<T>, '_'>;
+export type ModelConstructor<M extends Model = Model> = ClassConstructor<M, [ModelProperties<M>]>;
 export type AbstractModelConstructor<M extends Model = Model> = AbstractConstructor<M>;
 
-export default class Model {
-    get _type(): string { return this.constructor.name; }
-    // maybe no model on id?? Artefact can have an _id and be responsible for running queries. 
-    // And at that level Artefact could probably select which of its member model(s) to include
-    // in the query return
+export type ModelQueries<M extends Model = Model> = {
+    [K: string]: (...args: any[]) => Filter<M>;
+    // byId: () => Filter<M>,
+    // byIdOrPrimary: () => Filter<M>,
+};
 
-    // already have a .name( ) which static on the Model class function/ctor(>!)
-
-    // do i even need a constructor without having any fields or props to init?
-
-    // there WILL (?) be some static fn's or getters to return query objects for the Artefact (this._A again?)
-    // ok so i should have a constructor or what ..
-    // nah just set model(aka this)._A from the Artefact when it is creating Model isntances
-    // oh but ok that's a prop.
+export default abstract class Model {
+    
     _!: ModelMeta;
-    static buildModelQueries<Q extends { [K: string]: (...args: any[]) => Filter<Model>; }>(queries: Q) {
+    queueTask(task: Promise<any> | (() => Promise<any>)) {
+        this._.queueTask(task);
+    }
+
+    query(): ModelQueries<Model> { return {}; };
+    static buildModelQueries<Q extends ModelQueries>(queries: Q) {
         const modelName = this.name;
-        const prefix = (query: Filter<Model>) =>
+        const prefix = (query: Filter<Model>): Filter<Model> =>
             Object.fromEntries(Object.entries(query).map(([K, V]) =>
-                ([K.startsWith('$') ? K : `${modelName}.${K}`, V])));
+                ([ (K.startsWith('$') ? K : `${modelName}.${K}`) as string, V ])));
         return Object.fromEntries(Object.entries(queries).map(([K, V]) =>
             ([K, (...args: any[]) => prefix(V(...args))])));
     }
-    static query = this.buildModelQueries({});
-    // getQuery: (m: Model) => Filter<Model>) {
-    //     return ({ [this.constructor.name]: getQuery() })
-    // };
-
-    // new(): ModelConstructor;
 };
 
 export type ModelStatic = {
@@ -112,15 +116,9 @@ export type OptionalId<T extends ArtefactData = ArtefactData> = {
     _id?: string
 } & T;
 
-// export type ArtefactModels<TArtefact extends Artefact> = {
-//     [K in keyof TArtefact]: TArtefact[K] extends Model ? TArtefact[K] : never;
-// };
-
 export type ArtefactModelConstructors = {
     [K: string]: new (data: DataProperties<Model>) => Model;
 };
-
-// export type QueryBuilderFunction<A extends Artefact> = (a: A) => Filter<A>;
 
 export class Artefact {
 
@@ -128,7 +126,7 @@ export class Artefact {
     _id?: string;
     get isNew(): boolean { return this._id === undefined; }
 
-    getKey(): Filter<Artefact> { return ({ _id: this._id }); }
+    getKey/* <A extends Artefact> */(/* this: A */) { return ({ "_id": { "$eq": this._id } } as Filter<typeof this>); }
 
     private _modelMap = new Map<ModelConstructor | AbstractModelConstructor, Model>;
 
@@ -142,44 +140,41 @@ export class Artefact {
         }
     }
 
-    static {
-        this.createFromModel = (<
-            TSchema extends Artefact,
-            TSchemaClass extends typeof Artefact,   //ClassConstructor<TSchema>,
-            M extends Model
+    static createFromModel<
+        M extends Model,
+        A extends Artefact,
+        ACtor extends ClassConstructor<A, [Iterable<Model>?]> = typeof this,
         >(
-            this: ClassConstructor<TSchema>, //TSchemaClass,
+        this: ACtor,
             modelData: M
         ) {
-            return (new this()).add<TSchema, M>(modelData);
-        }).bind(this);
+        return new this().add<A, M>(modelData);
     }
 
-    // static create<TSchema extends Artefact>(artefactData: { [K: string]: Model }) {
-
-    // }
-
-    add<TSchema extends Artefact, M extends Model = Model>(this: TSchema, model: M) {
+    add<A extends Artefact, M extends Model = Model>(this: A, model: M) {
         model._ ??= new ModelMeta({ a: this });
         model._.a = this;
         this._modelMap.set(model.constructor as ClassConstructor<M>, model);
         return this;
     }
 
-    get<M extends Model>(modelCtor: ClassConstructor<M> | AbstractModelConstructor<M>) {
-        return this._modelMap.get(modelCtor) as M | undefined;//modelCtor.name);
+    get<M extends Model>(modelCtor: ModelConstructor<M> | AbstractModelConstructor<M>) {
+        return this._modelMap.get(modelCtor as ModelConstructor | AbstractModelConstructor) as M | undefined;
+    }
+
+    has<M extends Model>(modelCtor: ModelConstructor<M> | AbstractModelConstructor<M>) {
+        return this._modelMap.has(modelCtor as ModelConstructor | AbstractModelConstructor);
     }
 
     static async* stream<
-        TSchema extends Artefact,
-        TSchemaClass extends ClassConstructor<TSchema> & { prototype: TSchema }, //TSchemaClass,typeof Artefact,
+        A extends Artefact,
         M extends Model
     >(
-        this: TSchemaClass,
+        this: ClassConstructor<A>,
         iterable: AsyncGenerator<M>
     ) {
         for await (const model of iterable) {
-            yield this.createFromModel<TSchema, TSchemaClass, M>(model);
+            yield new this([model]) as A;
         }
     }
 
@@ -196,7 +191,7 @@ export class Artefact {
         });
     }
 
-    async save<TSchema extends Artefact>(this: TSchema, db: Store<TSchema>) {
+    async save<A extends Artefact>(this: A, db: Store<A>) {
         if (this.isNew) {
             this._id = Artefact.newId();
         }
@@ -205,21 +200,15 @@ export class Artefact {
     }
 
     /* todo: query objects */
-    query = {
-        byId: <TSchema extends Artefact>(): Filter<TSchema> => ({ _id: this._id } as Filter<TSchema>),
+    get query() {
+        return ({
+            byId: () => ({ _id: this._id } as Filter<typeof this>),            // Use this when you definitely only want to use the _id (and it exists i.e. this.isNew === false)
+            byIdOrPrimary: () => this.query.byId(),   // Use this when you want to use the _id, if present, or fallback to a unique index(key) as defined by the Artefact's primary Model
+        });
     }
 
-    //     (qbFunc: QueryBuilderFunction<Artefact>) {
-    // return qbFunc(this);
-
-    static query = {
-        byId: (a: Artefact) => ({ _id: a._id }),
-    }
-    // = {
-    //     findOne<T extends { _id?: string }>({ _id }: { _id?: string }) { return _id !== undefined ? ({ _id }) : ({}); },
-    //     find<T extends { _id?: string }>() { },
-    //     updateOne<T extends { _id?: string }>() { },
-    //     update<T extends { _id?: string }>() { },
+    // static query = {
+    //     byId: (a: Artefact) => ({ _id: a._id }),
     // }
 
 };
@@ -229,7 +218,7 @@ export function makeArtefactType(models: ModelConstructor[]) {
 
     return class ArtefactTyped extends Artefact {
 
-        static async load<TSchema extends Artefact>(store: Store<TSchema>, query: Filter<TSchema>) {
+        static async load<A extends Artefact>(store: Store<A>, query: Filter<A>) {
             const artefactData = await store.findOne(query) || {};
             return new this(
                 Object.entries(artefactData as ArtefactData)

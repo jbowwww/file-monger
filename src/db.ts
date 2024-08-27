@@ -107,15 +107,15 @@ export class MongoStore<TSchema extends Artefact> implements Store<TSchema> {
 
     async updateOrCreate(artefact: TSchema, query?: Filter<TSchema>, options: any = {}) {
         const data = artefact.toData();
-        query ??= artefact.query.byId();
+        query ??= artefact.query.byIdOrPrimary();
         const dbArtefact = await this._collection.findOneAndUpdate(query, artefact.isNew ? {
             $set: artefact,
             // $setOnInsert: { },//artefact.isNew ? { _id: artefact._id = Artefact.newId(), } : undefined,
         } : {
             $set: artefact,
         }, { ...options, upsert: true });
-        if (dbArtefact.value === null) {
-            throw new Error(`updateOrCreate: dbArtefact should not be null, artefact=${artefact}, query=${query} options=${options}`)
+        if (dbArtefact.value === null || dbArtefact.ok === 0) {
+            throw new Error(`updateOrCreate: Error: dbArtefact=${dbArtefact} should not be null or have .ok===0, artefact=${artefact}, query=${query} options=${options}`)
         }
         return dbArtefact.value;
     }

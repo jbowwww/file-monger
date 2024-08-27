@@ -1,67 +1,35 @@
-import * as nodeFs from 'fs';
-import * as nodePath from 'path';
 
-import { File, Directory, Unknown, FileSystem, FileSystemEntry } from "./fs";
+import { File, Directory, FileSystem, FileSystemEntry } from "./fs";
 import * as db from "../db";
-import { isFile } from "../models/file5";
-import { Artefact, ArtefactData } from "../models/Model";
-
-// abstract class Artefact<T> {
-//     constructor(init: Partial<T> = {}) {
-//         Object.assign(this, Object.fromEntries(
-//             Object.entries(init).map(([K, V]) => ([K, V]))
-//         ));
-//     }
-// }
-
-// class Artefact<T extends Artefact<T>> {
-//     constructor(init: Partial<T> = {}) {
-//         Object.assign(this, Object.fromEntries(
-//             Object.entries(init).map(([K, V]) => ([K, V]))
-//         ));
-//     }
-
-//     static async* stream<T extends Artefact<T>>(this: { new (): T } & typeof Artefact<T>, source: AsyncGenerator<T>) {
-//         for await (const item of source) {
-//             yield new this(item);
-//         }
-//     }
-// }
-
-// class FileArtefact extends Artefact<FileArtefact> {
-//     file!: File;
-//     dir!: Directory;
-//     unknown!: Unknown;
-//     constructor(init: Partial<FileArtefact>) {
-//         super(init);
-//     }
-// }
-
-// const FileArtefact = makeArtefactType({
-//     file: File,
-//     dir: Directory,
-//     unknown: Unknown,
-//     // audio: Audio,
-// });
-
+import { Artefact } from "../models/Model";
+import { Filter } from 'mongodb';
 
 class FileArtefact extends Artefact {
     get fsEntry() { return this.get(FileSystemEntry); }
     get file() { return this.get(File); }
     get dir() { return this.get(Directory); }
+    override getKey() {
+        return (this._id !== undefined ?
+            ({ _id: { $eq: this._id } }) :
+            ({ $or: [
+                { "file.path": { $eq: this.file?.path } },
+                { "dir.path": { $eq: this.dir?.path } },
+            ]})) as Filter<typeof this>;
+    }
+    // get query() {
+    //     return ({
+    //         ...super.query,
+    //         byIdOrPrimary: () => ({ _id: this._id }) as Filter<typeof this>,
+    //     })
+    // }
 };
 
 async function main() {
     const store = await db.storage.store<FileArtefact>('fileSystemEntries');
     for await (const fsEntry of FileArtefact.stream(FileSystem.walk("."))) {
         const dbEntry = await store.updateOrCreate(fsEntry);
-        if (
-            dbEntry === undefined ||
-            dbEntry!.get().stats.mtime !== fsEntry.stats.mtime ||
-            dbEntry!.file.stats.size !== fsEntry.stats.size
-        ) {
-            fileSystemEntries.updateOne({ path: fsEntry.path }, fsEntry, { upsert: true });
-            if (fsEntry.isFile() && dbEntry!.file.hash === undefined)
+        if (dbEntry.get(File)?.hash === undefined) {
+            
         }
     }
 }
