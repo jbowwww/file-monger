@@ -1,21 +1,15 @@
-import { isMap } from "util/types";
 import { Store } from "../db";
 import { Filter } from "mongodb";
+import { is } from "./types";
 
-export function isFunction(value: any): value is Function {
-    return typeof value === 'function';
-}
+export const isFunction = (value: any): value is Function => typeof value === 'function';
+export const isAsyncIterable = <T>(obj: any): obj is AsyncIterable<T> => obj.hasOwnProperty(Symbol.asyncIterator);
+export const isIterable = <T>(obj: any): obj is Iterable<T> => obj.hasOwnProperty(Symbol.iterator);
 
 export type DataPropertyNames<T> = { [K in keyof T]: T[K] extends Function ? never : K }[keyof T];
 export type DataProperties<T> = Pick<T, DataPropertyNames<T>>;
 
-export type ClassConstructor<T, TCtorArgs extends Array<any> = Array<any>> = 
-    (new (...args: TCtorArgs) => T) & {
-        name: string;
-        prototype: T & {
-            constructor: Function;
-        };
-    };
+export type ClassConstructor<T = any, TCtorArgs extends Array<any> = Array<any>> = (new (...args: TCtorArgs) => T);
 export type AbstractConstructor<T> = {
     name: string;
     prototype: T;
@@ -37,6 +31,14 @@ export type Optional<T, K extends keyof T> = Pick<Partial<T>, K> & Omit<T, K>;
 //     );
 // };
 
+// function mapObject(object, fn) {
+//     return Object.entries(object)
+//         .reduce((carry, [key, value], index, array) => {
+//             carry[key] = fn(value, key, array)
+//             return carry
+//         }, {})
+// }
+
 export class Timestamps {
     created: Date;
     updated: Date;
@@ -55,14 +57,23 @@ export class Timestamps {
 };
 
 export class ModelMeta<A extends Artefact = Artefact> {
+
     a: A;
     ts: Timestamps;
+
+    unique: Array<string>;
+    depend: Map<string, string[]>;
+
     pending: Array<Promise<any>>;
+
     constructor(meta: ModelMetaInit<A>) {
         this.a = meta.a;
         this.ts = new Timestamps(meta.ts);
+        this.unique = [];
+        this.depend = new Map();
         this.pending = [];
     }
+
     queueTask(task: Promise<any> | (() => Promise<any>)) {
         this.pending.push(isFunction(task) ? task() : task);
     }
@@ -77,27 +88,49 @@ export type ModelConstructor<M extends Model = Model> = ClassConstructor<M, [Mod
 export type AbstractModelConstructor<M extends Model = Model> = AbstractConstructor<M>;
 
 export type ModelQueries<M extends Model = Model> = {
-    [K: string]: (...args: any[]) => Filter<M>;
-    // byId: () => Filter<M>,
-    // byIdOrPrimary: () => Filter<M>,
+    // [K: string]: (...args: any[]) => Filter<M>;
+    get byPrimary(): Filter<M>,
 };
 
 export default abstract class Model {
     
     _!: ModelMeta;
-    queueTask(task: Promise<any> | (() => Promise<any>)) {
-        this._.queueTask(task);
+    // queueTask(task: Promise<any> | (() => Promise<any>)) {
+    //     this._.queueTask(task);
+    // }
+
+    static query: ModelQueries<Model> = {
+        byPrimary: () => { throw new TypeError(`Model '${this.name}' does not provide a query.byPrimary`); },
     }
 
-    query(): ModelQueries<Model> { return {}; };
-    static buildModelQueries<Q extends ModelQueries>(queries: Q) {
-        const modelName = this.name;
-        const prefix = (query: Filter<Model>): Filter<Model> =>
-            Object.fromEntries(Object.entries(query).map(([K, V]) =>
-                ([ (K.startsWith('$') ? K : `${modelName}.${K}`) as string, V ])));
-        return Object.fromEntries(Object.entries(queries).map(([K, V]) =>
-            ([K, (...args: any[]) => prefix(V(...args))])));
+    // static buildModelQueries<
+    //     MCtor extends typeof Model,
+    //     M extends InstanceType<MCtor> = InstanceType<MCtor>,
+    // >(this: MCtor, queries: ModelQueries<M>/* Q */) {     /*< M extends typeof Model *//* Q extends ModelQueries >*/
+    //     const modelName = this.name;
+    //     const prefix = (query: Filter<M>): Filter<Artefact> =>
+    //         Object.fromEntries(Object.entries(query).map(([K, V]) =>
+    //             ([ (K.startsWith('$') ? K : `${modelName}.${K}`) as string, V ])));
+    //     return Object.fromEntries(Object.entries(queries).map(([K, V]) =>
+    //         ([K, (...args: any[]) => prefix(V(...args))])));
+    // }
+
+    // decorators for specifying model indexes
+    static Index = {
+        unique(target: Model, propertyKey: string): void {
+            target._.unique.push(propertyKey);
+        },
     }
+
+    // decorators for specifying model data attributes and behaviour
+    static Data = {
+        depend(...dependencies: string[]) {
+            return function (target: Model, propertyKey: string) {
+                target._.depend.set(propertyKey, Array.from(dependencies));
+            };
+        },
+    }
+    
 };
 
 export type ModelStatic = {
@@ -120,22 +153,30 @@ export type ArtefactModelConstructors = {
     [K: string]: new (data: DataProperties<Model>) => Model;
 };
 
+export type ArtefactQueries<A extends Artefact = Artefact> = {
+    readonly [K: string]: Filter<A> | undefined;
+};
+
 export class Artefact {
 
     static newId = (): string => crypto.randomUUID();
     _id?: string;
     get isNew(): boolean { return this._id === undefined; }
 
-    getKey/* <A extends Artefact> */(/* this: A */) { return ({ "_id": { "$eq": this._id } } as Filter<typeof this>); }
+    getKey() { return ({ "_id": { "$eq": this._id } }); }
 
     private _modelMap = new Map<ModelConstructor | AbstractModelConstructor, Model>;
 
-    constructor(artefactData?: Iterable<Model>) {
+    constructor(artefactData?: Iterable<Model> | Model) {
         if (artefactData !== undefined) {
-            for (const modelData of artefactData) {
-                if (modelData !== undefined) {
-                    this.add(modelData);
+            if (isIterable(artefactData)) {
+                for (const modelData of artefactData) {
+                    if (modelData !== undefined) {
+                        this.add(modelData);
+                    }
                 }
+            } else {
+                this.add(artefactData);
             }
         }
     }
@@ -154,16 +195,16 @@ export class Artefact {
     add<A extends Artefact, M extends Model = Model>(this: A, model: M) {
         model._ ??= new ModelMeta({ a: this });
         model._.a = this;
-        this._modelMap.set(model.constructor as ClassConstructor<M>, model);
+        this._modelMap.set(model.constructor, model);
         return this;
     }
 
     get<M extends Model>(modelCtor: ModelConstructor<M> | AbstractModelConstructor<M>) {
-        return this._modelMap.get(modelCtor as ModelConstructor | AbstractModelConstructor) as M | undefined;
+        return this._modelMap.get(modelCtor) as M | undefined;
     }
 
     has<M extends Model>(modelCtor: ModelConstructor<M> | AbstractModelConstructor<M>) {
-        return this._modelMap.has(modelCtor as ModelConstructor | AbstractModelConstructor);
+        return this._modelMap.has(modelCtor);
     }
 
     static async* stream<
@@ -200,18 +241,21 @@ export class Artefact {
     }
 
     /* todo: query objects */
-    get query() {
-        return ({
-            byId: () => ({ _id: this._id } as Filter<typeof this>),            // Use this when you definitely only want to use the _id (and it exists i.e. this.isNew === false)
-            byIdOrPrimary: () => this.query.byId(),   // Use this when you want to use the _id, if present, or fallback to a unique index(key) as defined by the Artefact's primary Model
-        });
+    static query = {
+        byId: (id: string | undefined) => ({ _id: id }),            // Use this when you definitely only want to use the _id (and it exists i.e. this.isNew === false)
+        // byPrimary: () => { throw new TypeError(`Artefact type '${this.name}' does not provide a query.byPrimary`); },
     }
 
-    // static query = {
-    //     byId: (a: Artefact) => ({ _id: a._id }),
-    // }
-
+    get query(): ArtefactQueries {
+        return ({
+            byId: Artefact.query.byId(this._id),
+            byIdOrPrimary: this._id !== undefined ? this.query.byId : this.query.byPrimary,
+            // byPrimary() { throw new TypeError(`Artefact type '${this.constructor.name}' does not provide a query.byPrimary`); },
+        });
+    }
 };
+
+export const isArtefact = is(Artefact);
 
 // export const makeArtefactType = (models: { [K: string]: new (...args: any[]) => Model; }, keyFn: (data: ArtefactData) => string) => {
 export function makeArtefactType(models: ModelConstructor[]) {

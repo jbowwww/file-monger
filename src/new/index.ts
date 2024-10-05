@@ -8,20 +8,20 @@ class FileArtefact extends Artefact {
     get fsEntry() { return this.get(FileSystemEntry); }
     get file() { return this.get(File); }
     get dir() { return this.get(Directory); }
-    override getKey() {
-        return (this._id !== undefined ?
-            ({ _id: { $eq: this._id } }) :
-            ({ $or: [
-                { "file.path": { $eq: this.file?.path } },
-                { "dir.path": { $eq: this.dir?.path } },
-            ]})) as Filter<typeof this>;
-    }
-    // get query() {
-    //     return ({
-    //         ...super.query,
-    //         byIdOrPrimary: () => ({ _id: this._id }) as Filter<typeof this>,
-    //     })
+    // override getKey() {
+    //     return (this._id !== undefined ?
+    //         ({ _id: { $eq: this._id } }) :
+    //         ({ $or: [
+    //             { "file.path": { $eq: this.file?.path } },
+    //             { "dir.path": { $eq: this.dir?.path } },
+    //         ]}));
     // }
+    get query() {
+        return ({
+            ...super.query,
+            byPrimary: () => File.query.byPath(this.fsEntry!.path),
+        })
+    }
 };
 
 async function main() {
@@ -29,7 +29,7 @@ async function main() {
     for await (const fsEntry of FileArtefact.stream(FileSystem.walk("."))) {
         const dbEntry = await store.updateOrCreate(fsEntry);
         if (dbEntry.get(File)?.hash === undefined) {
-            
+
         }
     }
 }

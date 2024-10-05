@@ -1,3 +1,6 @@
+import { ClassConstructor } from "./Model";
+
+export const is = <TCtor extends ClassConstructor>(ctor: TCtor) => (value: any): value is InstanceType<TCtor> => value instanceof ctor;
 
 export function isAsyncIterable<T>(obj: any): obj is AsyncIterable<T> {
     return obj.hasOwnProperty(Symbol.asyncIterator);
@@ -8,7 +11,7 @@ export function isIterable<T>(obj: any): obj is Iterable<T> {
 }
 
 // export type ClassConstructor<TClass = any, TCtorArgs extends any[] = any[]> = new (...args: TCtorArgs) => TClass;
-export type ClassConstructor = new (...args: any[]) => any;
+// export type ClassConstructor = new (...args: any[]) => any;
 
 export type DataMembers<TClass> = Exclude<TClass, Function>;
 

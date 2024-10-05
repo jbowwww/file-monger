@@ -1,6 +1,7 @@
-import * as nodeFs from 'fs';
-import * as nodePath from 'path';
-import Model, { ModelProperties } from '../models/Model';
+import nodeCrypto from 'node:crypto';
+import * as nodeFs from 'node:fs';
+import * as nodePath from 'node:path';
+import { AspectClass, AspectProperties } from './Model';
 
 /*
  * Ongoing reminder of the things I want File aspects / models /classes/modules(<-less OOP more FP?)
@@ -31,7 +32,6 @@ export const FileSystem = {
         return stats.isFile() ? new File({ path, stats })
             : stats.isDirectory() ? new Directory({ path, stats })
                 : new Unknown({ path, stats });
-        // : new Error(`Unknown stat entry type for path '${path}'`);
     },
 
     async* walk(path: string): AsyncGenerator<FileSystemEntry, void, undefined> {
@@ -42,22 +42,21 @@ export const FileSystem = {
     }
 };
 
-export abstract class FileSystemEntry extends Model {
-
-    // static _type: string = 'unknown';
-
-    @Model.Index.unique
+export interface FileSystemEntryProps {
     path: string;
-
     stats?: nodeFs.Stats;
+}
 
-    constructor({ path, stats }: ModelProperties<FileSystemEntry>) {
-        super();
+export abstract class FileSystemEntry extends AspectClass implements FileSystemEntryProps {
+    path: string;
+    stats?: nodeFs.Stats;
+    constructor({ _, path, stats }: AspectProperties<FileSystemEntryProps>) {
+        super(_);
         this.path = path;
         if (stats === undefined) {
-            this._.queueTask(async() => {
+            /* this._.queueTask */(async() => {
                 this.stats = await nodeFs.promises.stat(path);
-            });
+            })();
         } else {
             this.stats = stats instanceof nodeFs.Stats ?
                 stats :
@@ -68,12 +67,12 @@ export abstract class FileSystemEntry extends Model {
     isFile() { return this.stats?.isFile(); }
     isDirectory() { return this.stats?.isDirectory(); }
 
-    static query = {
-        ...Model.query,
-        // this.buildModelQueries({
-        byPath: (path: string) => ({ path }),
-    // });
-    };
+    // static query = {
+    //     ...Model.query,
+    //     // this.buildModelQueries({
+    //     byPath: (path: string) => ({ path }),
+    // // });
+    // };
 
     //query(ies)
     // static byPath<A extends ArtefactData>(this: typeof FileSystemEntryBase | typeof File | typeof Directory) : QueryBuilderFunction<A> {
@@ -87,9 +86,6 @@ export abstract class FileSystemEntry extends Model {
 }
 
 export class Directory extends FileSystemEntry {
-
-    static _type: string = 'directory';
-
     async* walk(): AsyncGenerator<FileSystemEntry, void, undefined> {
         const entries = await nodeFs.promises.readdir(this.path);
         const newFsEntries = await Promise.all(entries.map(entry => FileSystem.create(nodePath.join(this.path, entry))));
@@ -99,21 +95,37 @@ export class Directory extends FileSystemEntry {
             if (entry instanceof Directory)
                 yield* entry.walk();
     }
-
 }
 
 export class Unknown extends FileSystemEntry { }
 
+export interface FileProps {
+    path: string;
+    stats?: nodeFs.Stats;
+}
+
 export class File extends FileSystemEntry {
-
-    static _type: string = 'file';
-
-    @Model.Data.depend('stats')
     hash?: string;
-
-    constructor(file: ModelProperties<File>) {
-        super(file);
-        this.hash = file.hash;
+    constructor(aspect: AspectProperties<FileProps>) {
+        super(aspect);
     }
+}
 
+export async function calculateHash(path: string) {
+    try {
+        const hashDigest = nodeCrypto.createHash('sha256');
+        const input = nodeFs.createReadStream(path);
+        const hash = await new Promise((resolve: (value: string) => void, reject): void => {
+            input.on('end', () => resolve(hashDigest.digest('hex')));
+            input.on('error', () => reject(`Error hashing file '${path}'`));
+            input.on('readable', () => {
+                const data = input.read();
+                if (data)
+                    hashDigest.update(data);
+            });
+        });
+        return hash;
+    } catch (error) {
+        throw new Error(`Error hashing file '${path}': ${error}`);
+    }
 }

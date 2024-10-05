@@ -1,7 +1,7 @@
 import yargs, { ArgumentsCamelCase } from "yargs";
 import * as db from '../db';
 
-import { FileSystem, File, Directory, Unknown } from "../models/file4";
+import { File, Directory, FileSystem, FileSystemEntry } from "../new/fs";
 import { Artefact } from "../models/Model";
 
 export enum CalculateHashEnum {
@@ -24,6 +24,26 @@ export interface FileCommandArgv {
 //     Directory: Directory
 // }>;
 
+class FileArtefact extends Artefact {
+    get fsEntry() { return this.get(FileSystemEntry); }
+    get file() { return this.get(File); }
+    get dir() { return this.get(Directory); }
+    // override getKey() {
+    //     return (this._id !== undefined ?
+    //         ({ _id: { $eq: this._id } }) :
+    //         ({ $or: [
+    //             { "file.path": { $eq: this.file?.path } },
+    //             { "dir.path": { $eq: this.dir?.path } },
+    //         ]}));
+    // }
+    get query() {
+        return ({
+            ...super.query,
+            byPrimary: () => File.query.byPath(this.fsEntry!.path),
+        })
+    }
+};
+
 export const command = 'file';
 export const description = 'File commands';
 export const builder = (yargs: yargs.Argv) => yargs
@@ -37,16 +57,10 @@ export const builder = (yargs: yargs.Argv) => yargs
         async function (argv): Promise<void> {
             for (const path of argv.paths) {
 
-                const store = await db.storage.store('files', {});
-                for await (const artefact of Artefact.stream/* <FileSystemArtefactSchema> */( FileSystem.walk(path) )) {
+                const store = await db.storage.store<FileArtefact>('fileSystemEntries');
+                for await (const artefact of FileArtefact.stream( FileSystem.walk(path) )) {
                     console.log(`artefact=${(artefact)}`);
-                    await store.findOneAndUpdate(Artefact.query.findOne(artefact), artefact);    //, artefact.File.query.path);
-
-                    // if (argv.calculateHash === CalculateHashEnum.Wait) {
-                    //     await store.update(() => artefact.File.calculateHash());
-                    // } else if (argv.calculateHash === CalculateHashEnum.Background) {
-                    //     store.update(() => artefact.File.calculateHash())
-                    // }
+                    await store.updateOrCreate(artefact);
                 }
             }
             console.log(`Closing db=${db}`);
