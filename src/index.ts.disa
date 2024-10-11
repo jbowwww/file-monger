@@ -1,7 +1,6 @@
-
-import { File, Directory, FileSystem, FileSystemEntry, calculateHash } from "./fs.js";
-import * as db from "./db.js";
-import { Artefact, Aspect, AspectProperties, mapObject, runAsync } from "./Model.js";
+import { File, Directory, FileSystem, FileSystemEntry, calculateHash } from "./fs";
+import * as db from "./db";
+import { Artefact, Aspect, AspectProperties, mapObject, runAsync } from "./Model";
 
 export interface HashProps {
     sha256?: string;
@@ -18,8 +17,6 @@ class Hash extends Aspect implements HashProps {
             });
         }
     }
-    async calculate() {
-    }
 }
 
 // export interface HashProps {
@@ -33,9 +30,9 @@ class Hash extends Aspect implements HashProps {
 // });
 
 class FileArtefact extends Artefact {
-    get fileEntry() { return this.getAspect(FileSystemEntry) || this.getAspect(File) || this.getAspect(Directory); }
-    get file() { return this.getAspect(File); }
-    get directory() { return this.getAspect(Directory); }
+    get fileEntry(): FileSystemEntry { return this.getAspect(FileSystemEntry) || this.getAspect(File) || this.getAspect(Directory); }
+    get file(): File { return this.getAspect(File); }
+    get directory(): Directory { return this.getAspect(Directory); }
     async hash() {
         const task = async () => new Hash({ _: this, sha256: await calculateHash(this.file.path) });
         if ((this.file.stats?.size ?? 0) < (1024*1024)) {
@@ -50,6 +47,7 @@ class FileArtefact extends Artefact {
 }
 
 async function main() {
+    db.configure(() => new db.MongoStorage("mongodb://mongo:mongo@localhost:27017/"));
     const store = await db.storage.store<FileArtefact>(FileArtefact, 'fileSystemEntries');
     for await (const fsEntry of FileArtefact.stream(FileSystem.walk("."))) {
         const dbEntry = await store.updateOrCreate(fsEntry);

@@ -1,5 +1,6 @@
 import { Filter } from "mongodb";
-import pProps from "p-props";
+let pProps: any;
+import("p-props").then(value => pProps = value);
 
 export type ClassConstructor<T = any, TCtorArgs extends Array<any> = Array<any>> = (new (...args: TCtorArgs) => T);
 export type AbstractConstructor<T> = {
@@ -14,7 +15,7 @@ export function runAsync<R>(asyncFn: (...args: any[]) => Promise<R>, ...args: an
 }
 
 export type CtorParameters<T> = T extends { new (...args: infer P): T } ? P extends (Array<any> | undefined) ? P : never : never;
-export type Ctor<T> = new (...args: CtorParameters<T> | Array<any>) => any;//T;
+export type Ctor<T> = new (...args: CtorParameters<T> | Array<any>) => T;
 export type AbstractCtor<T> = abstract new (...args: CtorParameters<T> | Array<any>) => T;
 export type PossiblyAbstractCtor<T> = Ctor<T> | AbstractCtor<T>;
 
@@ -70,7 +71,7 @@ export class Artefact {
         this.aspects.set(aspect.constructor as Ctor<A>, Object.assign(aspect, { _: this }));
         return this;
     }
-    getAspect<A extends Aspect>(aspectCtor: AbstractCtor<A>) {
+    getAspect<A extends Aspect>(aspectCtor: PossiblyAbstractCtor<A>): A {
         return this.aspects.get(aspectCtor) as A;
     }
     getAspects() {
@@ -117,7 +118,7 @@ export class Artefact {
 export class DummyArtefact extends Artefact {
     override createAspect<A extends Aspect>(aspectCtor: Ctor<A>, aspectArgs: CtorParameters<A>): this { throw new TypeError("Attempt to use DummyArtefact.createAspect"); }
     override addAspect<A extends Aspect>(aspect: A): this { throw new TypeError("Attempt to use DummyArtefact.addAspect"); }
-    override getAspect<A extends Aspect>(aspectCtor: Ctor<Aspect>): A { throw new TypeError("Attempt to use DummyArtefact.getAspect"); }
+    override getAspect<A extends Aspect>(aspectCtor: PossiblyAbstractCtor<Aspect>): A { throw new TypeError("Attempt to use DummyArtefact.getAspect"); }
     static override addAspectType<A extends Aspect>(aspectCtor: Ctor<A>, dependencies: Ctor<Aspect>[]): void { throw new TypeError("Attempt to use DummyArtefact.addAspectType"); }
     static override getAspectType<A extends Aspect>(aspectCtor: Ctor<A>): Ctor<Aspect>[] | undefined { throw new TypeError("Attempt to use DummyArtefact.getAspectType"); }
 }

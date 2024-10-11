@@ -1,11 +1,10 @@
-import * as mongo from 'mongodb';
-// import { ClassConstructor, DataProperties, IModel } from './models/base';
-import { Filter, OptionalId, UpdateFilter, WithId } from 'mongodb';
-import Model, { Artefact, ArtefactData, isArtefact } from './models/Model';
+// import * as mongo from 'mongodb';
+import { ChangeStreamDocument, ChangeStreamInsertDocument, ChangeStreamUpdateDocument, Collection, Db, Filter, MongoClient, MongoClientOptions, OptionalId, UpdateFilter, UpdateResult, WithId } from 'mongodb';
+import { Artefact, Aspect, ClassConstructor, Ctor } from './Model';
 
-export let client: mongo.MongoClient | null = null;
-export let connection: mongo.MongoClient;
-export let db: mongo.Db;
+export let client: MongoClient | null = null;
+export let connection: MongoClient;
+export let db: Db;
 
 export let storage: Storage;
 
@@ -17,14 +16,21 @@ export interface Storage {
     isConnected(): boolean;
     connect(): Promise<Storage>;
     close(): Promise<Storage>;
-    store<TSchema extends Artefact>(name: string, options?: any): Promise<Store<TSchema>>;
+    store<TSchema extends Artefact>(artefactClass: typeof Artefact, name: string, options?: any): Promise<Store<TSchema>>;
+}
+
+export function isChangeInsert(value: ChangeStreamDocument): value is ChangeStreamInsertDocument {
+    return value.operationType === "insert";
+}
+export function isChangeUpdate(value: ChangeStreamDocument): value is ChangeStreamUpdateDocument {
+    return value.operationType === "update";
 }
 
 export class MongoStorage implements Storage {
 
-    private _client: mongo.MongoClient | null = null;
-    private _connection: mongo.MongoClient | null = null;
-    private _db: mongo.Db | null = null;
+    private _client: MongoClient | null = null;
+    private _connection: MongoClient | null = null;
+    private _db: Db | null = null;
 
     constructor(public readonly url: string, public readonly options?: any) { }
 
@@ -35,7 +41,7 @@ export class MongoStorage implements Storage {
     async connect(): Promise<Storage> {
         if (this._client === null) {
             process.stdout.write(`Initialising DB connection to ${this.url} ${this.options !== undefined ? ("options=" + JSON.stringify(this.options)) : ""} ... `);
-            this._client = new mongo.MongoClient(this.url, this.options);
+            this._client = new MongoClient(this.url, this.options);
             this._connection = await this._client.connect();
             this._db = this._connection.db();
             process.stdout.write("OK\n");
@@ -54,12 +60,13 @@ export class MongoStorage implements Storage {
         return this as Storage;
     }
 
-    async store<TSchema extends Artefact>(name: string, options?: any): Promise<Store<TSchema>> {
+    async store<TSchema extends Artefact>(artefactClass: typeof Artefact, name: string, options?: any): Promise<Store<TSchema>> {
         await this.connect();
         process.stdout.write(`Getting store '${name} ${options !== undefined ? ("options=" + JSON.stringify(options)) : ""} ... `);
-        const store: Store<TSchema> = new MongoStore<TSchema>(this as Storage, name, options, this._db!.collection(name, options));
+        const collection = this._db!.collection<TSchema>(name, options);
+        const store: Store<TSchema> = new MongoStore<TSchema>(this as Storage, name, options, collection);
         process.stdout.write("OK\n");
-        return store as Store<TSchema>;
+        return store;
     }
 
 }
@@ -68,9 +75,8 @@ export interface Store<TSchema extends Artefact> {
     find(query: Filter<TSchema>): AsyncGenerator<WithId<TSchema>>;
     findOne(query: Filter<TSchema>): Promise<WithId<TSchema> | null>;
     findOneAndUpdate(query: Filter<TSchema>, update: TSchema): Promise<WithId<TSchema> | null>;
-    updateOne(artefact: TSchema, query?: Filter<TSchema>): Promise<mongo.UpdateResult<TSchema> | null>;
+    updateOne(artefact: TSchema, query?: Filter<TSchema>): Promise<UpdateResult<TSchema> | null>;
     updateOrCreate(artefact: TSchema): Promise<WithId<TSchema>>;
-    watch(): AsyncGenerator<mongo.ChangeStreamDocument<TSchema>>;
 }
 
 export class MongoStore<TSchema extends Artefact> implements Store<TSchema> {
@@ -79,7 +85,7 @@ export class MongoStore<TSchema extends Artefact> implements Store<TSchema> {
         public readonly storage: Storage,
         public readonly name: string,
         public readonly options: any,
-        private _collection: mongo.Collection<TSchema>, //mongo.Collection<ArtefactData>
+        private _collection: Collection<TSchema>, //Collection<ArtefactData>
     ) { }
 
     async* find(query: Filter<TSchema>) {
@@ -99,25 +105,12 @@ export class MongoStore<TSchema extends Artefact> implements Store<TSchema> {
         return await this._collection.updateOne(query!, { $set: artefact }, options);
     }
 
-    async updateOrCreate(artefactOrModel: TSchema | Model, options: any = {}) {
-        const artefact = isArtefact(artefactOrModel) ? artefactOrModel : new Artefact([artefactOrModel]) as TSchema;
-        const data = artefact.toData();
-        const query = artefact.query.byIdOrPrimary as Filter<TSchema>;
-        options.upsert = true;
-        options.includeResultMetadata = true;
-        options.returnDocument = 'after';
-        const dbArtefact = await this._collection.findOneAndUpdate(query, { $set: artefact }, options);
-        if (dbArtefact.value === null || dbArtefact.ok === 0) {
-            throw new Error(`updateOrCreate: Error: dbArtefact=${dbArtefact} should not be null or have .ok===0, artefact=${artefactOrModel}, query=${query} options=${options}`)
-        }
+    async updateOrCreate(artefact: TSchema, options: any = {}) {
+        const query = artefact.query.unique() as Filter<TSchema>;
+        options = { ...options, upsert: true, includeResultMetadata: true, returnDocument: 'after' };
+        const dbArtefact = await this._collection.findOneAndUpdate(query, { $set: await artefact.toData() }, options);
+        if (dbArtefact.value === null || dbArtefact.ok === 0) throw new Error(`updateOrCreate: Error: dbArtefact=${dbArtefact} should not be null or have .ok===0, artefact=${artefact}, query=${query} options=${options}`);
         return dbArtefact.value;
-    }
-
-    async* watch() {
-        /* const changeStream = this._collection.watch([], { allowDiskUse: true }).stream();
-        while (!changeStream..closed) {
-            if (changeStream.stream)
-        } */
     }
 }
 
@@ -125,10 +118,10 @@ export function isConnected() {
     return client !== null;
 }
 
-export async function connect(url: string, options?: mongo.MongoClientOptions) {
+export async function connect(url: string, options?: MongoClientOptions) {
     if (client === null) {
         process.stdout.write(`Initialising DB connection to ${url} ${options !== undefined ? ("options=" + JSON.stringify(options)) : ""} ... `);
-        client = new mongo.MongoClient(url, options);
+        client = new MongoClient(url, options);
         connection = await client.connect();
         db = connection.db();
         process.stdout.write("OK\n");
@@ -145,7 +138,7 @@ export async function close() {
     }
 }
 
-export async function useConnection(url: string, options: mongo.MongoClientOptions = {}, command: (db: mongo.MongoClient) => Promise<void>) {
+export async function useConnection(url: string, options: MongoClientOptions = {}, command: (db: MongoClient) => Promise<void>) {
     await connect(url, options);
     try {
         await command(connection);

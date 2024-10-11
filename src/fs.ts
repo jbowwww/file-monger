@@ -1,7 +1,7 @@
 import nodeCrypto from 'node:crypto';
 import * as nodeFs from 'node:fs';
 import * as nodePath from 'node:path';
-import { Aspect as Aspect, AspectProperties } from './Model.js';
+import { Aspect as Aspect, AspectProperties } from './Model';
 
 /*
  * Ongoing reminder of the things I want File aspects / models /classes/modules(<-less OOP more FP?)
@@ -79,7 +79,7 @@ export class Directory extends FileSystemEntry {
     async* walk(): AsyncGenerator<FileSystemEntry, void, undefined> {
         const entries = await nodeFs.promises.readdir(this.path);
         const newFsEntries = await Promise.all(entries.map(entry => FileSystemEntry.create(nodePath.join(this.path, entry))));
-        const subDirs = newFsEntries.filter(entry => entry instanceof Directory);
+        const subDirs = newFsEntries.filter(entry => entry instanceof Directory) as Array<Directory>;
         yield* newFsEntries;
         for (const dir of subDirs)
             yield* dir.walk();
