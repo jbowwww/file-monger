@@ -1,6 +1,6 @@
 // import * as mongo from 'mongodb';
 import { ChangeStreamDocument, Collection, Db, Filter, MongoClient, MongoClientOptions, OptionalId, UpdateFilter, UpdateResult, WithId } from 'mongodb';
-import { Artefact, AspectClass } from './Model';
+import { ArtefactClass, AspectClass, ClassConstructor, Ctor } from './Model';
 
 export let client: MongoClient | null = null;
 export let connection: MongoClient;
@@ -16,7 +16,12 @@ export interface Storage {
     isConnected(): boolean;
     connect(): Promise<Storage>;
     close(): Promise<Storage>;
-    store<TSchema extends Artefact>(name: string, options?: any): Promise<Store<TSchema>>;
+
+export function isChangeInsert(value: ChangeStreamDocument): value is ChangeStreamInsertDocument {
+    return value.operationType === "insert";
+}
+export function isChangeUpdate(value: ChangeStreamDocument): value is ChangeStreamUpdateDocument {
+    return value.operationType === "update";
 }
 
 export class MongoStorage implements Storage {
@@ -53,17 +58,39 @@ export class MongoStorage implements Storage {
         return this as Storage;
     }
 
-    async store<TSchema extends Artefact>(name: string, options?: any): Promise<Store<TSchema>> {
+    async store<TSchema extends ArtefactClass>(artefactClass: typeof ArtefactClass, name: string, options?: any): Promise<Store<TSchema>> {
         await this.connect();
         process.stdout.write(`Getting store '${name} ${options !== undefined ? ("options=" + JSON.stringify(options)) : ""} ... `);
-        const store: Store<TSchema> = new MongoStore<TSchema>(this as Storage, name, options, this._db!.collection(name, options));
+        const collection = this._db!.collection<TSchema>(name, options);
+        const store: Store<TSchema> = new MongoStore<TSchema>(this as Storage, name, options, collection);
         process.stdout.write("OK\n");
-        return store as Store<TSchema>;
+        (async () => {
+            for await (const change of collection.watch([{
+                "$match": {
+                    $and: [
+                        { "operationType": { $in: ["insert", "update"] } },
+                        { $or: artefactClass.getAspectTypes().values()
+                            .flatMap(aspectCtors => aspectCtors).map(aspectCtor =>
+                            ({ [`updateDescription.updatedFields.${aspectCtor.name}`]: { $exists: true } })) }
+                    ]
+                }
+            }], { })) {
+                // if (isChangeInsert(change)) {
+                //     change
+                // } else if (isChangeUpdate(change)) {
+                //     change.
+                // }
+                for (const [aspectType, aspectTypeDependencies] of artefactClass.getAspectTypes()) {
+                    // if (change.)
+                }
+            }
+        })();
+        return store;
     }
 
 }
 
-export interface Store<TSchema extends Artefact> {
+export interface Store<TSchema extends ArtefactClass> {
     find(query: Filter<TSchema>): AsyncGenerator<WithId<TSchema>>;
     findOne(query: Filter<TSchema>): Promise<WithId<TSchema> | null>;
     findOneAndUpdate(query: Filter<TSchema>, update: TSchema): Promise<WithId<TSchema> | null>;
@@ -72,7 +99,7 @@ export interface Store<TSchema extends Artefact> {
     watch(): AsyncGenerator<ChangeStreamDocument<TSchema>>;
 }
 
-export class MongoStore<TSchema extends Artefact> implements Store<TSchema> {
+export class MongoStore<TSchema extends ArtefactClass> implements Store<TSchema> {
 
     constructor(
         public readonly storage: Storage,
@@ -98,17 +125,11 @@ export class MongoStore<TSchema extends Artefact> implements Store<TSchema> {
         return await this._collection.updateOne(query!, { $set: artefact }, options);
     }
 
-    async updateOrCreate(artefactOrAspect: TSchema | AspectClass, options: any = {}) {
-        const artefact = Artefact.isArtefact(artefactOrAspect) ? artefactOrAspect : new Artefact().addAspect(artefactOrAspect) as TSchema;
-        const data = artefact;//.toData();
-        const query = artefact.query.byIdOrPrimary as Filter<TSchema>;
-        options.upsert = true;
-        options.includeResultMetadata = true;
-        options.returnDocument = 'after';
+    async updateOrCreate(artefact: TSchema, options: any = {}) {
+        const query = artefact.query.unique() as Filter<TSchema>;
+        options = { ...options, upsert: true, includeResultMetadata: true, returnDocument: 'after' };
         const dbArtefact = await this._collection.findOneAndUpdate(query, { $set: artefact }, options);
-        if (dbArtefact.value === null || dbArtefact.ok === 0) {
-            throw new Error(`updateOrCreate: Error: dbArtefact=${dbArtefact} should not be null or have .ok===0, artefact=${artefactOrAspect}, query=${query} options=${options}`)
-        }
+        if (dbArtefact.value === null || dbArtefact.ok === 0) throw new Error(`updateOrCreate: Error: dbArtefact=${dbArtefact} should not be null or have .ok===0, artefact=${artefact}, query=${query} options=${options}`);
         return dbArtefact.value;
     }
 
