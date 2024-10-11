@@ -1,6 +1,6 @@
 // import * as mongo from 'mongodb';
 import { ChangeStreamDocument, ChangeStreamInsertDocument, ChangeStreamUpdateDocument, Collection, Db, Filter, MongoClient, MongoClientOptions, OptionalId, UpdateFilter, UpdateResult, WithId } from 'mongodb';
-import { ArtefactClass, AspectClass, ClassConstructor, Ctor } from './Model';
+import { Artefact, Aspect, ClassConstructor, Ctor } from './Model.js';
 
 export let client: MongoClient | null = null;
 export let connection: MongoClient;
@@ -16,7 +16,7 @@ export interface Storage {
     isConnected(): boolean;
     connect(): Promise<Storage>;
     close(): Promise<Storage>;
-    store<TSchema extends ArtefactClass>(artefactClass: typeof ArtefactClass, name: string, options?: any): Promise<Store<TSchema>>;
+    store<TSchema extends Artefact>(artefactClass: typeof Artefact, name: string, options?: any): Promise<Store<TSchema>>;
 }
 
 export function isChangeInsert(value: ChangeStreamDocument): value is ChangeStreamInsertDocument {
@@ -60,48 +60,26 @@ export class MongoStorage implements Storage {
         return this as Storage;
     }
 
-    async store<TSchema extends ArtefactClass>(artefactClass: typeof ArtefactClass, name: string, options?: any): Promise<Store<TSchema>> {
+    async store<TSchema extends Artefact>(artefactClass: typeof Artefact, name: string, options?: any): Promise<Store<TSchema>> {
         await this.connect();
         process.stdout.write(`Getting store '${name} ${options !== undefined ? ("options=" + JSON.stringify(options)) : ""} ... `);
         const collection = this._db!.collection<TSchema>(name, options);
         const store: Store<TSchema> = new MongoStore<TSchema>(this as Storage, name, options, collection);
         process.stdout.write("OK\n");
-        (async () => {
-            for await (const change of collection.watch([{
-                "$match": {
-                    $and: [
-                        { "operationType": { $in: ["insert", "update"] } },
-                        { $or: artefactClass.getAspectTypes().values()
-                            .flatMap(aspectCtors => aspectCtors).map(aspectCtor =>
-                            ({ [`updateDescription.updatedFields.${aspectCtor.name}`]: { $exists: true } })) }
-                    ]
-                }
-            }], { })) {
-                // if (isChangeInsert(change)) {
-                //     change
-                // } else if (isChangeUpdate(change)) {
-                //     change.
-                // }
-                for (const [aspectType, aspectTypeDependencies] of artefactClass.getAspectTypes()) {
-                    // if (change.)
-                }
-            }
-        })();
         return store;
     }
 
 }
 
-export interface Store<TSchema extends ArtefactClass> {
+export interface Store<TSchema extends Artefact> {
     find(query: Filter<TSchema>): AsyncGenerator<WithId<TSchema>>;
     findOne(query: Filter<TSchema>): Promise<WithId<TSchema> | null>;
     findOneAndUpdate(query: Filter<TSchema>, update: TSchema): Promise<WithId<TSchema> | null>;
     updateOne(artefact: TSchema, query?: Filter<TSchema>): Promise<UpdateResult<TSchema> | null>;
     updateOrCreate(artefact: TSchema): Promise<WithId<TSchema>>;
-    watch(): AsyncGenerator<ChangeStreamDocument<TSchema>>;
 }
 
-export class MongoStore<TSchema extends ArtefactClass> implements Store<TSchema> {
+export class MongoStore<TSchema extends Artefact> implements Store<TSchema> {
 
     constructor(
         public readonly storage: Storage,
@@ -130,16 +108,9 @@ export class MongoStore<TSchema extends ArtefactClass> implements Store<TSchema>
     async updateOrCreate(artefact: TSchema, options: any = {}) {
         const query = artefact.query.unique() as Filter<TSchema>;
         options = { ...options, upsert: true, includeResultMetadata: true, returnDocument: 'after' };
-        const dbArtefact = await this._collection.findOneAndUpdate(query, { $set: artefact }, options);
+        const dbArtefact = await this._collection.findOneAndUpdate(query, { $set: await artefact.toData() }, options);
         if (dbArtefact.value === null || dbArtefact.ok === 0) throw new Error(`updateOrCreate: Error: dbArtefact=${dbArtefact} should not be null or have .ok===0, artefact=${artefact}, query=${query} options=${options}`);
         return dbArtefact.value;
-    }
-
-    async* watch() {
-        // const changeStream = this._collection.watch([], { allowDiskUse: true }).stream();
-        // while (!changeStream.closed) {
-        //     if (changeStream.stream)
-        // }
     }
 }
 

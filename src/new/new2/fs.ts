@@ -1,7 +1,7 @@
 import nodeCrypto from 'node:crypto';
 import * as nodeFs from 'node:fs';
 import * as nodePath from 'node:path';
-import { AspectClass, AspectProperties } from './Model';
+import { Aspect as Aspect, AspectProperties } from './Model.js';
 
 /*
  * Ongoing reminder of the things I want File aspects / models /classes/modules(<-less OOP more FP?)
@@ -40,7 +40,7 @@ export interface FileSystemEntryProps {
     stats?: nodeFs.Stats;
 }
 
-export abstract class FileSystemEntry extends AspectClass implements FileSystemEntryProps {
+export abstract class FileSystemEntry extends Aspect implements FileSystemEntryProps {
     path: string;
     stats?: nodeFs.Stats;
 

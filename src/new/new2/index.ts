@@ -1,14 +1,13 @@
 
-import { File, Directory, FileSystem, FileSystemEntry, calculateHash } from "./fs";
-import * as db from "./db";
-import { ArtefactClass, AspectClass, AspectProperties, mapObject, runAsync } from "./Model";
-import { Artefact } from "../../models/Model";
+import { File, Directory, FileSystem, FileSystemEntry, calculateHash } from "./fs.js";
+import * as db from "./db.js";
+import { Artefact, Aspect, AspectProperties, mapObject, runAsync } from "./Model.js";
 
 export interface HashProps {
     sha256?: string;
 };
 
-class Hash extends AspectClass implements HashProps {
+class Hash extends Aspect implements HashProps {
     sha256?: string;
     constructor({ sha256, ...aspect }: AspectProperties<HashProps>) {
         super(aspect);
@@ -33,7 +32,7 @@ class Hash extends AspectClass implements HashProps {
 //     sha256: sha256 ?? await calculateHash(_.getAspect(File)?.path),
 // });
 
-class FileArtefact extends ArtefactClass {
+class FileArtefact extends Artefact {
     get fileEntry() { return this.getAspect(FileSystemEntry) || this.getAspect(File) || this.getAspect(Directory); }
     get file() { return this.getAspect(File); }
     get directory() { return this.getAspect(Directory); }
