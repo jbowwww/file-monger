@@ -27,15 +27,8 @@ import { AspectClass, AspectProperties } from './Model';
  *  */
 
 export const FileSystem = {
-    async create(path: string): Promise<FileSystemEntry> {
-        const stats = await nodeFs.promises.stat(path);
-        return stats.isFile() ? new File({ path, stats })
-            : stats.isDirectory() ? new Directory({ path, stats })
-                : new Unknown({ path, stats });
-    },
-
     async* walk(path: string): AsyncGenerator<FileSystemEntry, void, undefined> {
-        const rootEntry = await FileSystem.create(path);
+        const rootEntry = await FileSystemEntry.create(path);
         yield rootEntry;
         if (rootEntry instanceof Directory)
             yield* rootEntry.walk();
@@ -50,22 +43,19 @@ export interface FileSystemEntryProps {
 export abstract class FileSystemEntry extends AspectClass implements FileSystemEntryProps {
     path: string;
     stats?: nodeFs.Stats;
-    constructor({ _, path, stats }: AspectProperties<FileSystemEntryProps>) {
-        super(_);
-        this.path = path;
-        if (stats === undefined) {
-            /* this._.queueTask */(async() => {
-                this.stats = await nodeFs.promises.stat(path);
-            })();
-        } else {
-            this.stats = stats instanceof nodeFs.Stats ?
-                stats :
-                Object.assign(new nodeFs.Stats(), stats);
-        }
+
+    static async create(path: string): Promise<FileSystemEntry> {
+        const stats = await nodeFs.promises.stat(path);
+        return stats.isFile() ? new File({ path, stats }) :
+            stats.isDirectory() ? new Directory({ path, stats }) :
+            new Unknown({ path, stats });
     }
 
-    isFile() { return this.stats?.isFile(); }
-    isDirectory() { return this.stats?.isDirectory(); }
+    constructor({ path, stats, ...aspect }: AspectProperties<FileSystemEntryProps>) {
+        super(aspect);
+        this.path = path;
+        this.stats = stats;
+    }
 
     // static query = {
     //     ...Model.query,
@@ -88,28 +78,27 @@ export abstract class FileSystemEntry extends AspectClass implements FileSystemE
 export class Directory extends FileSystemEntry {
     async* walk(): AsyncGenerator<FileSystemEntry, void, undefined> {
         const entries = await nodeFs.promises.readdir(this.path);
-        const newFsEntries = await Promise.all(entries.map(entry => FileSystem.create(nodePath.join(this.path, entry))));
-        // const subDirs = newFsEntries.filter(entry => entry instanceof Directory);
+        const newFsEntries = await Promise.all(entries.map(entry => FileSystemEntry.create(nodePath.join(this.path, entry))));
+        const subDirs = newFsEntries.filter(entry => entry instanceof Directory);
         yield* newFsEntries;
-        for (const entry of newFsEntries)
-            if (entry instanceof Directory)
-                yield* entry.walk();
+        for (const dir of subDirs)
+            yield* dir.walk();
     }
 }
 
 export class Unknown extends FileSystemEntry { }
 
-export interface FileProps {
-    path: string;
-    stats?: nodeFs.Stats;
-}
+// export interface FileProps extends FileSystemEntryProps {
+//     hash?: string;
+// }
 
-export class File extends FileSystemEntry {
-    hash?: string;
-    constructor(aspect: AspectProperties<FileProps>) {
-        super(aspect);
-    }
-}
+export class File extends FileSystemEntry { }
+//     hash?: string;
+//     constructor({ hash, ...aspect }: AspectProperties<FileProps>) {
+//         super(aspect);
+//         this.hash = hash;
+//     }
+// }
 
 export async function calculateHash(path: string) {
     try {

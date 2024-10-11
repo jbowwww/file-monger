@@ -1,5 +1,5 @@
 // import * as mongo from 'mongodb';
-import { ChangeStreamDocument, Collection, Db, Filter, MongoClient, MongoClientOptions, OptionalId, UpdateFilter, UpdateResult, WithId } from 'mongodb';
+import { ChangeStreamDocument, ChangeStreamInsertDocument, ChangeStreamUpdateDocument, Collection, Db, Filter, MongoClient, MongoClientOptions, OptionalId, UpdateFilter, UpdateResult, WithId } from 'mongodb';
 import { ArtefactClass, AspectClass, ClassConstructor, Ctor } from './Model';
 
 export let client: MongoClient | null = null;
@@ -16,6 +16,8 @@ export interface Storage {
     isConnected(): boolean;
     connect(): Promise<Storage>;
     close(): Promise<Storage>;
+    store<TSchema extends ArtefactClass>(artefactClass: typeof ArtefactClass, name: string, options?: any): Promise<Store<TSchema>>;
+}
 
 export function isChangeInsert(value: ChangeStreamDocument): value is ChangeStreamInsertDocument {
     return value.operationType === "insert";
