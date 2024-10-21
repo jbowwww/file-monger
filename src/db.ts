@@ -1,12 +1,19 @@
 // import * as mongo from 'mongodb';
 import { ChangeStreamDocument, ChangeStreamInsertDocument, ChangeStreamUpdateDocument, Collection, Db, Filter, MongoClient, MongoClientOptions, OptionalId, UpdateFilter, UpdateResult, WithId } from 'mongodb';
-import { Artefact, Aspect, ClassConstructor, Ctor } from './Model';
+import { Artefact } from './Model';
 
 export let client: MongoClient | null = null;
 export let connection: MongoClient;
 export let db: Db;
 
 export let storage: Storage;
+
+export function isChangeInsert(value: ChangeStreamDocument): value is ChangeStreamInsertDocument {
+    return value.operationType === "insert";
+}
+export function isChangeUpdate(value: ChangeStreamDocument): value is ChangeStreamUpdateDocument {
+    return value.operationType === "update";
+}
 
 export function configure(config: () => Storage) {
     storage = config();
@@ -16,14 +23,7 @@ export interface Storage {
     isConnected(): boolean;
     connect(): Promise<Storage>;
     close(): Promise<Storage>;
-    store<TSchema extends Artefact>(artefactClass: typeof Artefact, name: string, options?: any): Promise<Store<TSchema>>;
-}
-
-export function isChangeInsert(value: ChangeStreamDocument): value is ChangeStreamInsertDocument {
-    return value.operationType === "insert";
-}
-export function isChangeUpdate(value: ChangeStreamDocument): value is ChangeStreamUpdateDocument {
-    return value.operationType === "update";
+    store<TSchema extends Artefact>(name: string, options?: any): Promise<Store<TSchema>>;
 }
 
 export class MongoStorage implements Storage {
@@ -60,7 +60,7 @@ export class MongoStorage implements Storage {
         return this as Storage;
     }
 
-    async store<TSchema extends Artefact>(artefactClass: typeof Artefact, name: string, options?: any): Promise<Store<TSchema>> {
+    async store<TSchema extends Artefact>(name: string, options?: any): Promise<Store<TSchema>> {
         await this.connect();
         process.stdout.write(`Getting store '${name} ${options !== undefined ? ("options=" + JSON.stringify(options)) : ""} ... `);
         const collection = this._db!.collection<TSchema>(name, options);
@@ -108,7 +108,9 @@ export class MongoStore<TSchema extends Artefact> implements Store<TSchema> {
     async updateOrCreate(artefact: TSchema, options: any = {}) {
         const query = artefact.query.unique() as Filter<TSchema>;
         options = { ...options, upsert: true, includeResultMetadata: true, returnDocument: 'after' };
-        const dbArtefact = await this._collection.findOneAndUpdate(query, { $set: await artefact.toData() }, options);
+        const data = await artefact.toData();
+        console.log(`updateOrCreate(): \n\tquery = ${JSON.stringify(query)}\n\toptions = ${JSON.stringify(options)}\n\tartefact = ${JSON.stringify(artefact)}\n\tdata = ${JSON.stringify(data)}`);
+        const dbArtefact = await this._collection.findOneAndUpdate(query, { $set: data }, options);
         if (dbArtefact.value === null || dbArtefact.ok === 0) throw new Error(`updateOrCreate: Error: dbArtefact=${dbArtefact} should not be null or have .ok===0, artefact=${artefact}, query=${query} options=${options}`);
         return dbArtefact.value;
     }

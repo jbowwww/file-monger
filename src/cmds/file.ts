@@ -1,8 +1,9 @@
 import yargs, { ArgumentsCamelCase } from "yargs";
 import * as db from '../db';
 
-import { File, Directory, FileSystem, FileSystemEntry, calculateHash } from "../fs";
-import { Artefact, Aspect, AspectProperties } from "../Model";
+import { File, Directory, FileEntry, calculateHash } from "../fs";
+import { Artefact, Aspect, AspectProperties, Queries } from "../Model";
+import { Filter } from "mongodb";
 
 export enum CalculateHashEnum {
     Disable,
@@ -19,13 +20,9 @@ export interface FileCommandArgv {
     },
 }
 
-export interface HashProps {
+class Hash extends Aspect {
     sha256?: string;
-};
-
-class Hash extends Aspect implements HashProps {
-    sha256?: string;
-    constructor({ sha256, ...aspect }: AspectProperties<HashProps>) {
+    constructor({ sha256, ...aspect }: AspectProperties<Hash>) {
         super(aspect);
         this.sha256 = sha256;
         if (!sha256) {
@@ -33,6 +30,10 @@ class Hash extends Aspect implements HashProps {
                 this.sha256 = await calculateHash(this._.getAspect(File)?.path);
             });
         }
+    }
+    
+    override onAddedToArtefact(_: Artefact) {
+
     }
 }
 
@@ -47,19 +48,22 @@ class Hash extends Aspect implements HashProps {
 // });
 
 class FileArtefact extends Artefact {
-    get fileEntry(): FileSystemEntry { return this.getAspect(FileSystemEntry) || this.getAspect(File) || this.getAspect(Directory); }
-    get file(): File { return this.getAspect(File); }
-    get directory(): Directory { return this.getAspect(Directory); }
-    async hash() {
-        const task = async () => new Hash({ _: this, sha256: await calculateHash(this.file.path) });
-        if ((this.file.stats?.size ?? 0) < (1024*1024)) {
-            return await this.runForeground(task);
-        } else {
-            this.runBackground(task);
-        }
-    }
-    query = {
-        unique: () => this.constructor.prototype.query.unique() ?? ({ "file.path": this.file.path })
+    get fileEntry() { return this.getAspect(FileEntry) || this.getAspect(File) || this.getAspect(Directory); }
+    get file() { return this.getAspect(File); }
+    get directory() { return this.getAspect(Directory); }
+    get hash() { return this.getAspect(Hash) ?? Hash.create({ _: this }) };
+    
+    // {
+    //     const task = async () => new Hash({ _: this, sha256: await calculateHash(this.file.path) });
+    //     if ((this.file.stats?.size ?? 0) < (1024*1024)) {
+    //         return await this.runForeground(task);
+    //     } else {
+    //         this.runBackground(task);
+    //     }
+    // }
+    query: Queries<Artefact> = {
+        unique: () => !!this._id ? { _id: { $eq: this._id } } : { "file.path": this.fileEntry?.path }
+            // this.constructor.prototype.query.unique.call(this) ?? ({ "file.path": this.file.path })
     }
 }
 
@@ -75,8 +79,8 @@ export const builder = (yargs: yargs.Argv) => yargs
         }),
         async function (argv): Promise<void> {
             for (const path of argv.paths) {
-                const store = await db.storage.store<FileArtefact>(FileArtefact, 'fileSystemEntries');
-                for await (const fsEntry of FileArtefact.stream(FileSystem.walk("."))) {
+                const store = await db.storage.store<FileArtefact>('fileSystemEntries');
+                for await (const fsEntry of FileArtefact.stream(FileEntry.walk("."))) {
                     const dbEntry = await store.updateOrCreate(fsEntry);
                     if (!dbEntry.hash) {
 
