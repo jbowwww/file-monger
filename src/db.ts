@@ -1,6 +1,6 @@
 // import * as mongo from 'mongodb';
-import { ChangeStreamDocument, ChangeStreamInsertDocument, ChangeStreamUpdateDocument, Collection, Db, Filter, MongoClient, MongoClientOptions, OptionalId, UpdateFilter, UpdateResult, WithId } from 'mongodb';
-import { Artefact } from './Model';
+import { ChangeStreamDocument, ChangeStreamInsertDocument, ChangeStreamUpdateDocument, Collection, Db, Filter, MongoClient, MongoClientOptions, UpdateFilter, UpdateResult, WithId } from 'mongodb';
+import { Artefact, ArtefactProperties } from './Model';
 
 export let client: MongoClient | null = null;
 export let connection: MongoClient;
@@ -63,7 +63,7 @@ export class MongoStorage implements Storage {
     async store<TSchema extends Artefact>(name: string, options?: any): Promise<Store<TSchema>> {
         await this.connect();
         process.stdout.write(`Getting store '${name} ${options !== undefined ? ("options=" + JSON.stringify(options)) : ""} ... `);
-        const collection = this._db!.collection<TSchema>(name, options);
+        const collection = this._db!.collection<ArtefactProperties<TSchema>>(name, options);
         const store: Store<TSchema> = new MongoStore<TSchema>(this as Storage, name, options, collection);
         process.stdout.write("OK\n");
         return store;
@@ -72,11 +72,11 @@ export class MongoStorage implements Storage {
 }
 
 export interface Store<TSchema extends Artefact> {
-    find(query: Filter<TSchema>): AsyncGenerator<WithId<TSchema>>;
-    findOne(query: Filter<TSchema>): Promise<WithId<TSchema> | null>;
-    findOneAndUpdate(query: Filter<TSchema>, update: TSchema): Promise<WithId<TSchema> | null>;
-    updateOne(artefact: TSchema, query?: Filter<TSchema>): Promise<UpdateResult<TSchema> | null>;
-    updateOrCreate(artefact: TSchema): Promise<WithId<TSchema>>;
+    find(query: Filter<ArtefactProperties<TSchema>>): AsyncGenerator<WithId<ArtefactProperties<TSchema>>>;
+    findOne(query: Filter<ArtefactProperties<TSchema>>): Promise<WithId<ArtefactProperties<TSchema>> | null>;
+    findOneAndUpdate(query: Filter<ArtefactProperties<TSchema>>, update: TSchema): Promise<WithId<ArtefactProperties<TSchema>> | null>;
+    updateOne(artefact: TSchema, query?: Filter<ArtefactProperties<TSchema>>): Promise<UpdateResult<ArtefactProperties<TSchema>> | null>;
+    updateOrCreate(artefact: TSchema): Promise<WithId<ArtefactProperties<TSchema>>>;
 }
 
 export class MongoStore<TSchema extends Artefact> implements Store<TSchema> {
@@ -85,28 +85,29 @@ export class MongoStore<TSchema extends Artefact> implements Store<TSchema> {
         public readonly storage: Storage,
         public readonly name: string,
         public readonly options: any,
-        private _collection: Collection<TSchema>, //Collection<ArtefactData>
+        private _collection: Collection<ArtefactProperties<TSchema>>, //Collection<ArtefactData>
     ) { }
 
-    async* find(query: Filter<TSchema>) {
+    async* find(query: Filter<ArtefactProperties<TSchema>>) {
         for await (const item of this._collection.find(query))
             yield item;
     }
 
-    async findOne(query: Filter<TSchema>) {
+    async findOne(query: Filter<ArtefactProperties<TSchema>>) {
         return await this._collection.findOne(query);
     }
 
-    async findOneAndUpdate(query: Filter<TSchema>, update: UpdateFilter<TSchema>) {
+    async findOneAndUpdate(query: Filter<ArtefactProperties<TSchema>>, update: UpdateFilter<ArtefactProperties<TSchema>>) {
         return await this._collection.findOneAndUpdate(query, update);
     }
 
-    async updateOne(artefact: TSchema, query?: Filter<TSchema>, options: any = {}) {
-        return await this._collection.updateOne(query!, { $set: artefact }, options);
+    async updateOne(artefact: TSchema, query?: Filter<ArtefactProperties<TSchema>>, options: any = {}) {
+        const data = await artefact.toData();
+        return await this._collection.updateOne(query!, { $set: data }, options);
     }
 
     async updateOrCreate(artefact: TSchema, options: any = {}) {
-        const query = artefact.query.unique() as Filter<TSchema>;
+        const query = artefact.query.unique() as Filter<ArtefactProperties<TSchema>>;
         options = { ...options, upsert: true, includeResultMetadata: true, returnDocument: 'after' };
         const data = await artefact.toData();
         console.log(`updateOrCreate(): \n\tquery = ${JSON.stringify(query)}\n\toptions = ${JSON.stringify(options)}\n\tartefact = ${JSON.stringify(artefact)}\n\tdata = ${JSON.stringify(data)}`);

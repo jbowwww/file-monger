@@ -2,7 +2,7 @@ import yargs, { ArgumentsCamelCase } from "yargs";
 import * as db from '../db';
 
 import { File, Directory, FileEntry, calculateHash } from "../fs";
-import { Artefact, Aspect, AspectProperties, Queries } from "../Model";
+import { Artefact, Aspect, AspectDataRequiredAndOptionalProperties, AspectProperties, Queries } from "../Model";
 import { Filter } from "mongodb";
 
 export enum CalculateHashEnum {
@@ -25,11 +25,11 @@ class Hash extends Aspect {
     constructor({ sha256, ...aspect }: AspectProperties<Hash>) {
         super(aspect);
         this.sha256 = sha256;
-        if (!sha256) {
-            this.runAsync(async () => {
-                this.sha256 = await calculateHash(this._.getAspect(File)?.path);
-            });
-        }
+    }
+    
+    static override async create({ _, path }: AspectProperties<{ path: string }>) {
+        const sha256 = await calculateHash(path);
+        return new Hash({ _, sha256 })
     }
     
     override onAddedToArtefact(_: Artefact) {
@@ -51,7 +51,7 @@ class FileArtefact extends Artefact {
     get fileEntry() { return this.getAspect(FileEntry) || this.getAspect(File) || this.getAspect(Directory); }
     get file() { return this.getAspect(File); }
     get directory() { return this.getAspect(Directory); }
-    get hash() { return this.getAspect(Hash) ?? Hash.create({ _: this }) };
+    get hash() { return this.getAspect(Hash) ?? Hash.create({ _: this, path: this.file.path }) };
     
     // {
     //     const task = async () => new Hash({ _: this, sha256: await calculateHash(this.file.path) });
