@@ -25,16 +25,18 @@ export type PossiblyAbstractCtor<T, TArgs extends Array<any> = CtorParameters<T>
 export const isCtor = <T>(value: any): value is Ctor<T> => value
 
 export type ObjectFilterFunction = ([K, V]: [string, any], depth: number, prefix: string) => boolean;
-export const filterObject = <T extends {}>(source: {}, filterFn: ObjectFilterFunction, maxDepth: number = 0, depth: number = 0, prefix: string = ""): T =>
-    Object.fromEntries(Array.from(Object.entries(source))
-        .filter(([K, V]: [string, any], index, arr) => filterFn([K, V], depth, prefix))
-        .map(([K, V]: [string, any]) => (typeof V === 'object' && (depth < maxDepth)) ? filterObject(V, filterFn, maxDepth, depth + 1, prefix + "." + K) : V)) as T;
+export const filterObject = <T extends {}>(source: {} | undefined, filterFn: ObjectFilterFunction, maxDepth: number = 0, depth: number = 0, prefix: string = ""): T =>
+    (!source ? source : Object.fromEntries(Array.from(Object.entries(source ?? {}))
+        .filter(([K, V]) => filterFn([K, V], depth, prefix))
+        .map(([K, V]) => ([K, (V !== null && typeof V === 'object' && (depth < maxDepth)) ?
+            filterObject(V, filterFn, maxDepth, depth + 1, prefix + "." + K) : V])))) as T;
 
 export type ObjectMapFunction = ([K, V]: [string, any], depth: number, prefix: string) => ([string, any]);
-export const mapObject = <T extends {}>(source: {}, mapFn: ObjectMapFunction, maxDepth: number = 0): T =>
-    Object.fromEntries(Array.from(Object.entries(source))
-        .filter(([K, V]: [unknown, unknown]) => typeof K === 'string' && typeof V !== 'function')
-        .map((([K, V]) => ([ K, V !== null && typeof V === 'object' ? mapObject(V, mapFn) : V ])))) as T;
+export const mapObject = <T extends {}>(source: {} | undefined, mapFn: ObjectMapFunction, maxDepth: number = 0, depth: number = 0, prefix: string = ""): T =>
+    (!source ? source : Object.fromEntries(Array.from(Object.entries(source))
+        .filter(([K, V]) => typeof K === 'string' && typeof V !== 'function')
+        .map((([K, V]) => ([ K, V !== null && typeof V === 'object' && (depth < maxDepth) ?
+            mapObject(V, mapFn, maxDepth, depth + 1, prefix + "." + K) : V ]))))) as T;
 
 export abstract class Aspect {
     #_?: Artefact;
@@ -89,31 +91,36 @@ export class Artefact {
     private static aspectTypes = new Map<PossiblyAbstractCtor<Aspect>, Array<PossiblyAbstractCtor<Aspect>>>;
 
     async createAspect<A extends /* typeof */ Aspect, TArgs extends Array<any> = Parameters<typeof Aspect["create"]>>(aspectCreator: typeof Aspect /* Ctor<A, TArgs> */, ...aspectArgs: TArgs) {
-        return this.addAspect(await aspectCreator.create(({ ...aspectArgs[0], _: this })));
+        const aspect = await aspectCreator.create(Object.assign(aspectArgs?.[0], { _: this }));
+        this.addAspect(aspect);
+        return aspect as A;
     }
     addAspect/* <A extends Artefact> */(/* this: A, */ aspect: Aspect) {
-        this.aspects.set(aspect.constructor as Ctor<Aspect>, Object.assign(({ ...aspect, _: this })));
+        this.aspects.set(aspect.constructor as Ctor<Aspect>, Object.assign(aspect, { _: this }));
         return this/*  as A */;
     }
     getAspect<A extends Aspect>(aspectCtor: PossiblyAbstractCtor<A>): A {
-        return this.aspects.get(aspectCtor) as A;
+        console.log(`getAspect(): ${JSON.stringify(aspectCtor.name)}`);
+        const result = filterObject<A>(this.aspects.get(aspectCtor) as A, ([K, V]) => K !== '_');
+        console.log(`getAspect(): result = ${JSON.stringify(result)}`);
+        return result;
     }
     getAspects() {
         return this.aspects;
     }
     async toData<A extends Artefact>(this: A): Promise<ArtefactProperties<A>> {
+        console.log(`toData(): this = ${JSON.stringify(this)}`);
         var dataUpdates = Object.fromEntries(Object.entries(
-            Object.getOwnPropertyDescriptors(this.constructor.prototype)
-        ).filter(([K, V]) => K !== 'constructor')
-        .map(([K, V]) => ([K,
-            !!V.get ? V.get.call(this) :
-            !!V.value ?
-                typeof V.value === 'function' ? V.value.call(this) : V.value
-            : undefined
-        ]))); //typeof V === 'function' ? V() : V])));
-        console.log(`toData(): ${JSON.stringify(dataUpdates)}`);
+            Object.getOwnPropertyDescriptors(this.constructor.prototype))
+                .filter(([K, V]) => K !== 'constructor' && K !== '_')
+                .map(([K, V]) => ([K,
+                    !!V.get ? V.get.call(this) :
+                    !!V.value ? typeof V.value === 'function' ? V.value.call(this) : V.value
+                    : undefined
+                ]))); //typeof V === 'function' ? V() : V])));
+        console.log(`toData(): dataUpdates = ${JSON.stringify(dataUpdates)}`);
         const result = { ...(await pProps(dataUpdates) as ArtefactProperties<A>), _ts: new Date() };
-        console.log(`toData(): ${JSON.stringify(result)}`);
+        console.log(`toData(): result = ${JSON.stringify(result)}`);
         return result;
     }
     static addAspectType<A extends Aspect>(aspectCtor: PossiblyAbstractCtor<A>, dependencies: Array<PossiblyAbstractCtor<Aspect>>) {

@@ -40,14 +40,18 @@ export class FileEntry extends Aspect {
     exists() { return nodeFs.existsSync(this.path); }
 
     static override async create({ _, path, ...aspect }: AspectDataRequiredAndOptionalProperties<FileEntry, "path">): Promise<FileEntry> {
-        const stats = await nodeFs.promises.stat(path!);
-        return stats.isFile() ? new File({ _, path, stats }) :
-            stats.isDirectory() ? new Directory({ _, path, stats }/* { _, path, stats } */) :
+        console.log(`create(): this = ${this} _ = ${JSON.stringify(_)} path=\"${path}\" aspect = ${JSON.stringify(aspect)} cwd=${process.cwd()}`);
+        const stats = await nodeFs.promises.stat(path);
+        console.log(`create(): stats = ${JSON.stringify(stats)}`);
+        return stats.isFile() ? new File({ _, ...aspect, path, stats }) :
+            stats.isDirectory() ? new Directory({ _, ...aspect, path, stats }) :
             new FileEntry({ _, path, stats });
     };
 
     static async* walk(path: string) {
+        console.log(`walk(\"${path}\"): cwd=${process.cwd()}`);
         const rootEntry = await FileEntry.create({ _: null!, path });
+        console.log(`walk(\"${path}\"): rootEntry = ${JSON.stringify(rootEntry)}`);
         yield rootEntry;
         if (isDirectory(rootEntry))
             yield* rootEntry.walk();
@@ -97,9 +101,13 @@ export class FileEntry extends Aspect {
 export const isDirectory = (value: any): value is Directory => !!value.walk;
 export class Directory extends FileEntry {
     async* walk(): AsyncGenerator<FileEntry, void, undefined> {
-        const entries = await nodeFs.promises.readdir(this.path);
+        console.log(`walk(): this = ${JSON.stringify(this)}`);
+        const entries = (await nodeFs.promises.readdir(this.path)).filter(e => e != "." && e != "..");
+        console.log(`walk(): entries = ${JSON.stringify(entries)}`);
         const newFsEntries = await Promise.all(entries.map(entry => FileEntry.create({ path: nodePath.join(this.path, entry) })));
+        console.log(`walk(): newFsEntries = ${JSON.stringify(newFsEntries)}`);
         const subDirs = newFsEntries.filter(d => isDirectory(d));
+        console.log(`walk(): subDirs = ${JSON.stringify(subDirs)}`);
         yield* newFsEntries;
         for (const dir of subDirs)
             yield* dir.walk();
@@ -132,10 +140,10 @@ export class File extends FileEntry {
         super({ _, ...fileEntry });
         this.hash = hash;
     }
-    
-    static override async create({ _, ...fileEntry }: AspectProperties<File>) {
-        const hash = await calculateHash(fileEntry.path);
-        return new File({ _, ...fileEntry, hash });
+
+    static override async create({ _, ...aspect }: AspectProperties<File>) {
+        //const hash = await calculateHash(fileEntry.path);
+        return new File({ _, ...aspect/* , hash */ });
     }
 }
 //  = async ({ /* _, */ path, stats }: FileEntryProps) =>
@@ -148,7 +156,7 @@ export async function calculateHash(path: string) {
         const hashDigest = nodeCrypto.createHash('sha256');
         const input = nodeFs.createReadStream(path);
         const hash = await new Promise((resolve: (value: string) => void, reject): void => {
-            input.on('end', () => resolve(hashDigest.digest('hex')));
+            input.on('end', () => { input.destroy(); return resolve(hashDigest.digest('hex')); });
             input.on('error', () => reject(`Error hashing file '${path}'`));
             input.on('readable', () => {
                 const data = input.read();

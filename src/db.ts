@@ -107,7 +107,9 @@ export class MongoStore<TSchema extends Artefact> implements Store<TSchema> {
     }
 
     async updateOrCreate(artefact: TSchema, options: any = {}) {
+        console.log(`updateOrCreate(): artefact = ${JSON.stringify(artefact)}`);
         const query = artefact.query.unique() as Filter<ArtefactProperties<TSchema>>;
+        console.log(`updateOrCreate(): query = ${JSON.stringify(query)}`);
         options = { ...options, upsert: true, includeResultMetadata: true, returnDocument: 'after' };
         const data = await artefact.toData();
         console.log(`updateOrCreate(): \n\tquery = ${JSON.stringify(query)}\n\toptions = ${JSON.stringify(options)}\n\tartefact = ${JSON.stringify(artefact)}\n\tdata = ${JSON.stringify(data)}`);

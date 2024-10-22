@@ -51,7 +51,7 @@ class FileArtefact extends Artefact {
     get fileEntry() { return this.getAspect(FileEntry) || this.getAspect(File) || this.getAspect(Directory); }
     get file() { return this.getAspect(File); }
     get directory() { return this.getAspect(Directory); }
-    get hash() { return this.getAspect(Hash) ?? Hash.create({ _: this, path: this.file.path }) };
+    get hash() { return this.getAspect(Hash) ?? this.file ? this.createAspect(Hash, { path: this.file.path }) : undefined; };
     
     // {
     //     const task = async () => new Hash({ _: this, sha256: await calculateHash(this.file.path) });
