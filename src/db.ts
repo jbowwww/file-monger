@@ -1,4 +1,3 @@
-// import * as mongo from 'mongodb';
 import { ChangeStreamDocument, ChangeStreamInsertDocument, ChangeStreamUpdateDocument, Collection, Db, Filter, MongoClient, MongoClientOptions, UpdateFilter, UpdateResult, WithId } from 'mongodb';
 import { Artefact, ArtefactProperties } from './Model';
 
@@ -50,13 +49,16 @@ export class MongoStorage implements Storage {
     }
 
     async close(): Promise<Storage> {
-        await this.connect();
-        process.stdout.write(`Closing DB connection ... `);
-        await this._connection!.close();
-        this._client = null;
-        this._connection = null;
-        this._db = null;
-        process.stdout.write("OK\n");
+        if (!!this._connection) {
+            process.stdout.write(`close(): Closing DB connection ... `);
+            await this._connection.close();
+            this._client = null;
+            this._connection = null;
+            this._db = null;
+            process.stdout.write("OK\n");
+        } else {
+            console.log(`close(): No DB connection to close`);
+        }
         return this as Storage;
     }
 
@@ -85,7 +87,7 @@ export class MongoStore<TSchema extends Artefact> implements Store<TSchema> {
         public readonly storage: Storage,
         public readonly name: string,
         public readonly options: any,
-        private _collection: Collection<ArtefactProperties<TSchema>>, //Collection<ArtefactData>
+        private _collection: Collection<ArtefactProperties<TSchema>>,
     ) { }
 
     async* find(query: Filter<ArtefactProperties<TSchema>>) {
@@ -108,14 +110,16 @@ export class MongoStore<TSchema extends Artefact> implements Store<TSchema> {
 
     async updateOrCreate(artefact: TSchema, options: any = {}) {
         console.log(`updateOrCreate(): artefact = ${JSON.stringify(artefact)}`);
-        const query = artefact.query.unique() as Filter<ArtefactProperties<TSchema>>;
+        const query = artefact.query.unique as Filter<ArtefactProperties<TSchema>>;
         console.log(`updateOrCreate(): query = ${JSON.stringify(query)}`);
         options = { ...options, upsert: true, includeResultMetadata: true, returnDocument: 'after' };
         const data = await artefact.toData();
         console.log(`updateOrCreate(): \n\tquery = ${JSON.stringify(query)}\n\toptions = ${JSON.stringify(options)}\n\tartefact = ${JSON.stringify(artefact)}\n\tdata = ${JSON.stringify(data)}`);
-        const dbArtefact = await this._collection.findOneAndUpdate(query, { $set: data }, options);
-        if (dbArtefact.value === null || dbArtefact.ok === 0) throw new Error(`updateOrCreate: Error: dbArtefact=${dbArtefact} should not be null or have .ok===0, artefact=${artefact}, query=${query} options=${options}`);
-        return dbArtefact.value;
+        const result = await this._collection.findOneAndUpdate(query, { $set: data }, options);
+        const dbArtefact = result.value;
+        console.log(`updateOrCreate(): result = ${JSON.stringify(query)}`);
+        if (dbArtefact === null || result.ok === 0) throw new Error(`updateOrCreate: Error: result=${result} should not be null or have .ok===0, artefact=${artefact}, query=${query} options=${options}`);
+        return dbArtefact;
     }
 }
 
@@ -135,7 +139,7 @@ export async function connect(url: string, options?: MongoClientOptions) {
 }
 
 export async function close() {
-    if (client !== null) {
+    if (!!connection) {
         process.stdout.write(`Closing DB connection ... `);
         await connection.close();
         client = null;

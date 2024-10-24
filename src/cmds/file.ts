@@ -1,9 +1,7 @@
 import yargs, { ArgumentsCamelCase } from "yargs";
+import { Artefact, Aspect, AspectProperties } from "../Model";
 import * as db from '../db';
-
 import { File, Directory, FileEntry, calculateHash } from "../fs";
-import { Artefact, Aspect, AspectDataRequiredAndOptionalProperties, AspectProperties, Queries } from "../Model";
-import { Filter } from "mongodb";
 
 export enum CalculateHashEnum {
     Disable,
@@ -16,54 +14,37 @@ export interface FileCommandArgv {
     paths: string[],
     calculateHash?: {
         type: CalculateHashEnum,
-        default: CalculateHashEnum.Wait,//.Async,
+        default: CalculateHashEnum.Wait,
     },
 }
 
 class Hash extends Aspect {
     sha256?: string;
+
     constructor({ sha256, ...aspect }: AspectProperties<Hash>) {
         super(aspect);
         this.sha256 = sha256;
     }
     
-    static override async create({ _, path }: AspectProperties<{ path: string }>) {
+    static override async create({ _, path }: { _: Artefact, path: string }) {
         const sha256 = await calculateHash(path);
         return new Hash({ _, sha256 })
     }
-    
-    override onAddedToArtefact(_: Artefact) {
-
-    }
 }
-
-// export interface HashProps {
-//     sha256?: string;
-// };
-
-// // TODO: I want to make a utility function that removes the need to declare each property with a null-coalescing operator, like sha256: sha256 ?? await calc....()
-// export const Hash = async ({ _, sha256 }: AspectProperties<HashProps>) => ({
-//     _,
-//     sha256: sha256 ?? await calculateHash(_.getAspect(File)?.path),
-// });
 
 class FileArtefact extends Artefact {
     get fileEntry() { return this.getAspect(FileEntry) || this.getAspect(File) || this.getAspect(Directory); }
     get file() { return this.getAspect(File); }
     get directory() { return this.getAspect(Directory); }
     get hash() { return this.getAspect(Hash) ?? this.file ? this.createAspect(Hash, { path: this.file.path }) : undefined; };
-    
-    // {
-    //     const task = async () => new Hash({ _: this, sha256: await calculateHash(this.file.path) });
-    //     if ((this.file.stats?.size ?? 0) < (1024*1024)) {
-    //         return await this.runForeground(task);
-    //     } else {
-    //         this.runBackground(task);
-    //     }
-    // }
-    query: Queries<Artefact> = {
-        unique: () => !!this._id ? { _id: { $eq: this._id } } : { "file.path": this.fileEntry?.path }
-            // this.constructor.prototype.query.unique.call(this) ?? ({ "file.path": this.file.path })
+
+    get query() {
+        return ({
+            unique: () => !!this._id ? { _id: { $eq: this._id } } :
+                this.file ? { "file.path": this.fileEntry?.path } :
+                this.directory ? { "directory.path": this.fileEntry?.path } :
+                this.fileEntry ? { "fileEntry.path": this.fileEntry?.path } : {},
+        });
     }
 }
 
@@ -87,12 +68,11 @@ export const builder = (yargs: yargs.Argv) => yargs
                     }
                 }
             }
-            console.log(`Closing db=${db}`);
-            await db.close();
+            console.log(`Closing db.storage=${JSON.stringify(db.storage)}`);
+            await db.storage.close();
 
         })
     .demandCommand();
 exports.handler = async function (argv: ArgumentsCamelCase) {
     console.log(`cmds/file handler argv=${JSON.stringify(argv)}`);
-//     await db.connect(argv.dbUrl, {});
 };

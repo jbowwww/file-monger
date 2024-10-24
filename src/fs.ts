@@ -1,7 +1,7 @@
 import nodeCrypto from 'node:crypto';
 import * as nodeFs from 'node:fs';
 import * as nodePath from 'node:path';
-import { Artefact, Aspect, AspectDataRequiredAndOptionalProperties, AspectDataProperties, AspectProperties, DataProperties } from './Model';
+import { Aspect, AspectDataRequiredAndOptionalProperties, DataProperties } from './Model';
 
 /*
  * Ongoing reminder of the things I want File aspects / models /classes/modules(<-less OOP more FP?)
@@ -27,26 +27,25 @@ import { Artefact, Aspect, AspectDataRequiredAndOptionalProperties, AspectDataPr
  *  */
 
 export class FileEntry extends Aspect {
-
     path: string;
     stats: nodeFs.Stats;
     
-    constructor({ _, path, stats }: AspectDataProperties<FileEntry>) {
+    constructor({ _, path, stats }: DataProperties<FileEntry>) {
         super({ _ });
         this.path = path;
         this.stats = stats;
     }
 
-    exists() { return nodeFs.existsSync(this.path); }
-
-    static override async create({ _, path, ...aspect }: AspectDataRequiredAndOptionalProperties<FileEntry, "path">): Promise<FileEntry> {
-        console.log(`create(): this = ${this} _ = ${JSON.stringify(_)} path=\"${path}\" aspect = ${JSON.stringify(aspect)} cwd=${process.cwd()}`);
+    static override async create({ _, path }: AspectDataRequiredAndOptionalProperties<FileEntry, "path">) {
+        console.log(`create(): this = ${this} _ = ${JSON.stringify(_)} path=\"${path}\" cwd=${process.cwd()}`);
         const stats = await nodeFs.promises.stat(path);
         console.log(`create(): stats = ${JSON.stringify(stats)}`);
-        return stats.isFile() ? new File({ _, ...aspect, path, stats }) :
-            stats.isDirectory() ? new Directory({ _, ...aspect, path, stats }) :
+        return stats.isFile() ? await File.create({ _, path, stats }) :
+            stats.isDirectory() ? await Directory.create({ _, path, stats }) :
             new FileEntry({ _, path, stats });
     };
+
+    exists() { return nodeFs.existsSync(this.path); }
 
     static async* walk(path: string) {
         console.log(`walk(\"${path}\"): cwd=${process.cwd()}`);
@@ -58,48 +57,12 @@ export class FileEntry extends Aspect {
     }
 }
 
-// export const FileEntry = async ({ /* _, */ path, stats }: FileEntryProps) => ({
-//     path,
-//     stats: await nodeFs.promises.stat(path!)
-//     async create({ path, _ }: AspectProperties<FileEntry>) {
-//         const stats = ;
-//         return new FileEntry({ path, stats, type: stats.isFile() ? 'file' : stats.isDirectory() ? 'directory' : 'unknown' });
-//     }
-
-//     exists() { return nodeFs.existsSync(this.path); }
-// });
-
-// export const FileEntry = async ({ /* _, */ path, stats }: FileEntryProps) => ({
-//     path,
-//     stats: await nodeFs.promises.stat(path!)
-//     async create({ path, _ }: AspectProperties<FileEntry>) {
-//         const stats = ;
-//         return new FileEntry({ path, stats, type: stats.isFile() ? 'file' : stats.isDirectory() ? 'directory' : 'unknown' });
-//     }
-
-//     exists() { return nodeFs.existsSync(this.path); }
-// });
-
-    // static query = {
-    //     ...Model.query,
-    //     // this.buildModelQueries({
-    //     byPath: (path: string) => ({ path }),
-    // // });
-    // };
-
-    //query(ies)
-    // static byPath<A extends ArtefactData>(this: typeof FileSystemEntryBase | typeof File | typeof Directory) : QueryBuilderFunction<A> {
-    //     return (artefact: Artefact<A>) => 
-    //         this === FileSystemEntryBase ? {
-    //             $or: [File, Directory]
-    //                 .filter(modelCtor => artefact.get(modelCtor) != null)
-    //                 .map(modelCtor => ({ [`${modelCtor.name}.path`]: artefact.get(modelCtor)?.path }))
-    //         } : ({ [`${this.name}.path`]: artefact.get(this as typeof File | typeof Directory)?.path });
-    // }    
-// }
-
 export const isDirectory = (value: any): value is Directory => !!value.walk;
 export class Directory extends FileEntry {
+    static override async create({ _, ...fileEntry }: AspectDataRequiredAndOptionalProperties<File, keyof FileEntry>) {
+        return new Directory({ _, ...fileEntry });
+    }
+
     async* walk(): AsyncGenerator<FileEntry, void, undefined> {
         console.log(`walk(): this = ${JSON.stringify(this)}`);
         const entries = (await nodeFs.promises.readdir(this.path)).filter(e => e != "." && e != "..");
@@ -114,42 +77,21 @@ export class Directory extends FileEntry {
     }
 }
 
-//);
-// export const Directory = async ({ /* _, */ path, stats }: FileEntryProps) => //pipeline(
-//     // ({ path, stats }) =>
-//     Object.assign(await pProps(Object.assign(await FileEntry({ path, stats }), {
-//     // (_) => ({ ..._,
-//         async* walk(this: DirectoryProps): AsyncGenerator<Partial<FileEntryProps>, void, undefined> {
-//             const entries = await nodeFs.promises.readdir(path);
-//             const newFsEntries = await Promise.all(entries.map(entry => FileEntry({ path: nodePath.join(path, entry) })));
-//             const subDirs = newFsEntries.filter(d => isDirectory(d)) as Array<PromiseValue<ReturnType<typeof Directory>>>;
-//             yield* newFsEntries;
-//             for (const dir of subDirs)
-//                 yield* dir.walk();
-//         }
-//     })));
-// //);
-
 export class UnknownFileEntry extends FileEntry {}
-
-// async ({ /* _, */ path, stats }: FileEntryProps) => await FileEntry({ path, stats });
 
 export class File extends FileEntry {
     hash?: string;
+
     constructor({ _, hash, ...fileEntry }: DataProperties<File>) {
         super({ _, ...fileEntry });
         this.hash = hash;
     }
 
-    static override async create({ _, ...aspect }: AspectProperties<File>) {
-        //const hash = await calculateHash(fileEntry.path);
-        return new File({ _, ...aspect/* , hash */ });
+    static override async create({ _, hash, ...fileEntry }: AspectDataRequiredAndOptionalProperties<File, keyof FileEntry/* "path" | "stats" */>) {
+        hash = hash ?? await calculateHash(fileEntry.path);
+        return new this({ _, ...fileEntry, hash });
     }
 }
-//  = async ({ /* _, */ path, stats }: FileEntryProps) =>
-//     Object.assign(await FileEntry({ path, stats }), {
-//         hash: await calculateHash(path),
-//     });
 
 export async function calculateHash(path: string) {
     try {
