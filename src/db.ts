@@ -1,5 +1,7 @@
 import { ChangeStreamDocument, ChangeStreamInsertDocument, ChangeStreamUpdateDocument, Collection, Db, Filter, FindOneAndReplaceOptions, FindOneAndUpdateOptions, FindOptions, MongoClient, MongoClientOptions, UpdateFilter, UpdateOptions, UpdateResult, WithId, WithoutId } from 'mongodb';
 import { Artefact, ArtefactProperties, filterObject } from './Model';
+import { get, set, has } from './prop-path';
+import { diff, addedDiff, deletedDiff, updatedDiff, detailedDiff } from 'deep-object-diff';
 
 export let client: MongoClient | null = null;
 export let connection: MongoClient;
@@ -135,13 +137,16 @@ export class MongoStore<A extends Artefact, TSchema extends Record<string, any> 
     async updateOrCreate(artefact: A, options: UpdateOptions = {}) {
         const query = (artefact.constructor as typeof Artefact).query(artefact).unique as Filter<TSchema>;
         options = { ...options, upsert: true, /* includeResultMetadata: true, returnDocument: 'after', */ };
-        const { _id, _ts, ...data } = await artefact.toData();
+        const { /* _id, */ _ts, ...data } = await artefact.toData();
         const dbArtefact = await this._collection.findOne(query, options); //AndReplace(query, data as WithoutId<TSchema>, options);
-        const update = !!dbArtefact ? filterObject(data as { [K: string]: any; }, (([K, V], depth, prefix) => dbArtefact[prefix != "" ? `${prefix}.${K}` : K] !== V), ) : data;
+        const { _id, ...update } = diff(dbArtefact as object, data) as ({ _id?: string; });
+        // const update = !!dbArtefact ? filterObject(filterObject(data as { [K: string]: any; },
+        //     ([K, V], depth, prefix) => typeof V === 'object' || get(dbArtefact, prefix !== "" ? `${prefix}.${K}` : K) !== V),
+        //     ([K, V], depth, prefix) => V && Object.keys(V).length > 0) : data;
         // if (dbArtefact === null) throw new Error(`updateOrCreate: Error: dbArtefact=${dbArtefact} should not be null artefact=${artefact}, query=${query} options=${options}`);
-        const query2 = (Artefact.query((dbArtefact ?? {}) as A).unique ?? {}) as Filter<TSchema>;
+        const query2 = (!dbArtefact ? query : Artefact.query(dbArtefact as A).unique) as Filter<TSchema>;
         const result = { ...await this._collection.updateOne(query2, { $set: update as Readonly<Partial<TSchema>> }, options), _: artefact };
-        console.log(`updateOrCreate(): \n\tquery = ${JSON.stringify(query)}\n\toptions = ${JSON.stringify(options)}\n\tartefact = ${artefact}\n\tdata = ${JSON.stringify(data)}\n\tdbArtefact = ${JSON.stringify(dbArtefact)}\n\tupdate = ${JSON.stringify(update)}\n\tresult = ${JSON.stringify(result)}`);
+        console.log(`updateOrCreate(): \n\tquery = ${JSON.stringify(query)}\n\tquery2 = ${JSON.stringify(query2)}\n\toptions = ${JSON.stringify(options)}\n\tartefact = ${artefact}\n\tdata = ${JSON.stringify(data)}\n\tdbArtefact = ${JSON.stringify(dbArtefact)}\n\tupdate = ${JSON.stringify(update)}\n\tresult = ${JSON.stringify(result)}`);
         return result;
     }
 }
