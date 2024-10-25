@@ -170,7 +170,7 @@ export class Artefact {
         }
     }
 
-    static query(_: Artefact): Queries<DataProperties<Artefact>> {
+    static query(_: Artefact): Queries<Artefact> {
         return ({
             unique: !_._id ? undefined : ({ _id: { $eq: _._id } }),
         });

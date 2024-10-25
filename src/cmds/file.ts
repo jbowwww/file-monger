@@ -62,7 +62,7 @@ export const builder = (yargs: yargs.Argv) => yargs
             for (const path of argv.paths) {
                 const store = await db.storage.store<FileArtefact>('fileSystemEntries');
                 for await (const fsEntry of FileArtefact.stream(FileEntry.walk("."))) {
-                    const dbEntry = await store.updateOrCreate(fsEntry);
+                    const dbEntry = (await store.updateOrCreate(fsEntry))._;
                     if (!dbEntry.hash) {
 
                     }
