@@ -37,7 +37,7 @@ export class FileEntry extends Aspect {
     }
 
     static override async create({ _, path }: AspectDataRequiredAndOptionalProperties<FileEntry, "path">) {
-        console.log(`create(): this = ${this} _ = ${JSON.stringify(_)} path=\"${path}\" cwd=${process.cwd()}`);
+        console.log(`create(): this.name = ${this.name} _ = ${_} path=\"${path}\" cwd=${process.cwd()}`);
         const stats = await nodeFs.promises.stat(path);
         console.log(`create(): stats = ${JSON.stringify(stats)}`);
         return stats.isFile() ? await File.create({ _, path, stats }) :
@@ -50,7 +50,7 @@ export class FileEntry extends Aspect {
     static async* walk(path: string) {
         console.log(`walk(\"${path}\"): cwd=${process.cwd()}`);
         const rootEntry = await FileEntry.create({ _: null!, path });
-        console.log(`walk(\"${path}\"): rootEntry = ${JSON.stringify(rootEntry)}`);
+        console.log(`walk(\"${path}\"): rootEntry = ${rootEntry}`);
         yield rootEntry;
         if (isDirectory(rootEntry))
             yield* rootEntry.walk();
@@ -64,7 +64,7 @@ export class Directory extends FileEntry {
     }
 
     async* walk(): AsyncGenerator<FileEntry, void, undefined> {
-        console.log(`walk(): this = ${JSON.stringify(this)}`);
+        console.log(`walk(): this = ${this}`);
         const entries = (await nodeFs.promises.readdir(this.path)).filter(e => e != "." && e != "..");
         console.log(`walk(): entries = ${JSON.stringify(entries)}`);
         const newFsEntries = await Promise.all(entries.map(entry => FileEntry.create({ path: nodePath.join(this.path, entry) })));

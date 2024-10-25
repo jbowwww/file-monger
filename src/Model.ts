@@ -1,14 +1,15 @@
 import { Filter } from "mongodb";
 
+export type AnyParameters = any[] | [];
 export type DataProperties<T> = { [K in keyof T as T[K] extends Function ? never : K]: T[K]; };
 export type DataRequiredProperties<T, K extends keyof T = keyof T> = DataProperties<Pick<T, K>>;
 export type DataOptionalProperties<T, K extends keyof T = keyof T> = Partial<DataProperties<Pick<T, K>>>;
 export type DataRequiredAndOptionalProperties<T, KR extends keyof T = never, KO extends keyof T = keyof T> = DataProperties<Pick<T, KR>> & Partial<DataProperties<Pick<T, KO>>>;
 
 export type CtorParameters<T> = T extends { new (...args: infer P): T } ? P : never;
-export type Ctor<T, TArgs extends Array<any> | [] = [CtorParameters<T>]> = Function & { new (...args: TArgs): T; };
-export type AbstractCtor<T, TArgs extends Array<any> | [] = [CtorParameters<T>]> = abstract new (...args: TArgs) => T;
-export type PossiblyAbstractCtor<T, TArgs extends Array<any> | [] = [CtorParameters<T>]> = Ctor<T, TArgs> | AbstractCtor<T, TArgs>;
+export type Ctor<T, TArgs extends AnyParameters = CtorParameters<T>> = Function & { new (...args: TArgs): T; };
+export type AbstractCtor<T, TArgs extends AnyParameters = CtorParameters<T>> = abstract new (...args: TArgs) => T;
+export type PossiblyAbstractCtor<T, TArgs extends AnyParameters = CtorParameters<T>> = Ctor<T, TArgs> | AbstractCtor<T, TArgs>;
 export const isCtor = <T>(value: any): value is Ctor<T> => value.prototype.constructor === value;
 
 export const pProps = async (o: any) => {
@@ -45,29 +46,30 @@ export const mapObject = <T extends {}>(source: {} | undefined, mapFn: ObjectMap
 
 export type AspectCtorParameters<T extends Aspect> = T extends { new (...args: infer P): T } ? P : never;
 export type AspectCtor<
-    T extends Aspect,
-    TArgs extends Array<any> | [] = any[],
-    TCreateArgs extends Array<any> | [] = any[],
+    A extends Aspect,
+    TArgs extends AnyParameters = AspectCtorParameters<A>,//any[],
+    TCreateArgs extends AnyParameters = any[],
 > = Function & {
-    new (...args: TArgs): T;
-    create(...args: TCreateArgs): Promise<T>;
+    new (...args: TArgs): A;
+    create(...args: TCreateArgs): Promise<A>;
 };
-export type AspectAbstractCtor<T extends Aspect, TArgs extends Array<any>  = AspectCtorParameters<T>> = abstract new (...args: TArgs) => T;
-export type AspectPossiblyAbstractCtor<T extends Aspect, TArgs extends Array<any>  = AspectCtorParameters<T>> = AspectCtor<T, TArgs> | AspectAbstractCtor<T, TArgs>;
-export const isAspectCtor = <T extends Aspect>(value: any): value is AspectCtor<T> => (function testValuePrototype(value: any, testFn: (value: any) => boolean): boolean {
+export type AspectAbstractCtor<A extends Aspect, TArgs extends AnyParameters = AspectCtorParameters<A>> = abstract new (...args: TArgs) => A;
+export type AspectPossiblyAbstractCtor<A extends Aspect, TArgs extends AnyParameters = AspectCtorParameters<A>> = AspectCtor<A, TArgs> | AspectAbstractCtor<A, TArgs>;
+export const isAspectCtor = <A extends Aspect>(value: any): value is AspectCtor<A> => (function testValuePrototype(value: any, testFn: (value: any) => boolean): boolean {
     return testFn(value) || testValuePrototype(value.prototype, testFn);
 })(value, value => value.constructor === Aspect);
 
-export type AspectProperties<T extends Aspect, K extends keyof T = keyof T> = DataProperties<Pick<T, K>> & { _?: Artefact };
-export type AspectDataProperties<T extends Aspect, K extends keyof T = keyof T> = DataProperties<Pick<T, K>> & { _?: Artefact };
-export type AspectDataRequiredProperties<T extends Aspect, K extends keyof T = keyof T> = DataProperties<Pick<T, K>> & { _?: Artefact };
-export type AspectDataOptionalProperties<T extends Aspect, K extends keyof T = keyof T> = Partial<DataProperties<Pick<T, K>>> & { _?: Artefact };
-export type AspectDataRequiredAndOptionalProperties<T extends Aspect, KR extends keyof T = never, KO extends keyof T = keyof T> =
-    DataProperties<Pick<T, KR>> &
-    Partial<DataProperties<Pick<T, Exclude<KO, KR>>>> &
+export type AspectCreateParameters<A extends Aspect> = Parameters<AspectCtor<A>["create"]>
+export type AspectProperties<A extends Aspect, K extends keyof A = keyof A> = DataProperties<Pick<A, K>> & { _?: Artefact };
+export type AspectDataProperties<A extends Aspect, K extends keyof A = keyof A> = DataProperties<Pick<A, K>> & { _?: Artefact };
+export type AspectDataRequiredProperties<A extends Aspect, K extends keyof A = keyof A> = DataProperties<Pick<A, K>> & { _?: Artefact };
+export type AspectDataOptionalProperties<A extends Aspect, K extends keyof A = keyof A> = Partial<DataProperties<Pick<A, K>>> & { _?: Artefact };
+export type AspectDataRequiredAndOptionalProperties<A extends Aspect, KR extends keyof A = never, KO extends keyof A = keyof A> =
+    DataProperties<Pick<A, KR>> &
+    Partial<DataProperties<Pick<A, Exclude<KO, KR>>>> &
     { _?: Artefact };
 
-export type AspectFunction<T extends Aspect, A extends Artefact = Artefact> = ({ _, ...props }: AspectProperties<T>) => A;
+export type AspectFunction<P extends Aspect, A extends Artefact = Artefact> = ({ _, ...props }: AspectProperties<P>) => A;
 
 export abstract class Aspect {
     #_?: Artefact;
@@ -76,26 +78,12 @@ export abstract class Aspect {
 
     constructor({ _ }: DataProperties<Aspect>) { this._ = _; }
 
-    public addToArtefact(_: Artefact) {
-        this._ = _;
-        this.onAddedToArtefact(_);
-    }
-    protected onAddedToArtefact<A extends Artefact>(_: A) {}
-
-    #tasks: Array<Promise<any>> = [];
-    runAsync<R, T extends ((...args: any[] | any) => Promise<R>)>(task: T) {
-        const taskPromise = task.bind(this)();
-        this.#tasks.push(taskPromise);
-    }
-    finishTasks() { return Promise.all(this.#tasks); }
-
-    static async create(this: typeof Aspect, ...props: any[]): Promise<InstanceType<typeof this>> {
-        return new (this as AspectCtor<InstanceType<typeof this>>)(...props);
+    static async create<A extends Aspect>(this: AspectCtor<A>, ...props: any[]): Promise<Aspect> {
+        return new this(...props as AspectCtorParameters<A>);
     }
 
-    #init: Promise<this> = Promise.resolve(this);
-    protected async init<I extends any[]>(initFn?: (...args: I) => Promise<void>, ...args: I) {
-        return !initFn ? this.#init : this.#init.then(() => initFn(...args));
+    toString() {
+        return `[${this.constructor.name}: ${JSON.stringify(this)}]`;
     }
 }
 
@@ -103,22 +91,24 @@ export type Queries<T> = {
     [K: string]: Filter<T> | undefined;
 }
 
-export type ArtefactCtor<T extends Artefact, TArgs extends Array<any> | [] = ArtefactCtorParameters<T>> = Function & { new (...args: TArgs | []): T; };
-export type ArtefactCtorParameters<T extends Artefact> = T extends { new (...args: infer P): T } ? P : never;
-export type ArtefactAbstractCtor<T extends Artefact, TArgs extends Array<any> | [] = ArtefactCtorParameters<T>> = abstract new (...args: TArgs | []) => T;
-export type ArtefactPossiblyAbstractCtor<T extends Artefact, TArgs extends Array<any> | [] = ArtefactCtorParameters<T>> = ArtefactCtor<T, TArgs> | ArtefactAbstractCtor<T, TArgs>;
-export const isArtefactCtor = <T extends Artefact>(value: any): value is ArtefactCtor<T> => (function testValuePrototype(value: any, testFn: (value: any) => boolean): boolean {
+export type ArtefactCtorParameters<A extends Artefact> = A extends { new (...args: infer P): A } ? P : never;
+export type ArtefactCtor<A extends Artefact, TArgs extends AnyParameters = ArtefactCtorParameters<A>> = Function & {
+    new (...args: TArgs | []): A;
+    query(_: A): Queries<A>;
+};
+export type ArtefactAbstractCtor<A extends Artefact, TArgs extends AnyParameters = ArtefactCtorParameters<A>> = abstract new (...args: TArgs | []) => A;
+export type ArtefactPossiblyAbstractCtor<A extends Artefact, TArgs extends AnyParameters = ArtefactCtorParameters<A>> = ArtefactCtor<A, TArgs> | ArtefactAbstractCtor<A, TArgs>;
+export const isArtefactCtor = <A extends Artefact>(value: any): value is ArtefactCtor<A> => (function testValuePrototype(value: any, testFn: (value: any) => boolean): boolean {
     return testFn(value) || testValuePrototype(value.prototype, testFn);
 })(value, value => value.constructor === Artefact);
 
-export type ArtefactProperties<T, K extends keyof T = keyof T> = DataProperties<Pick<T, K>> & { _?: Artefact };
-export type ArtefactDataProperties<T, K extends keyof T = keyof T> = DataProperties<Pick<T, K>> & { _?: Artefact };
-export type ArtefactDataRequiredProperties<T, K extends keyof T = keyof T> = DataProperties<Pick<T, K>> & { _?: Artefact };
-export type ArtefactDataOptionalProperties<T, K extends keyof T = keyof T> = Partial<DataProperties<Pick<T, K>>> & { _?: Artefact };
-export type ArtefactDataRequiredAndOptionalProperties<T, KR extends keyof T = never, KO extends keyof T = keyof T> =
-    DataProperties<Pick<T, KR>> &
-    Partial<DataProperties<Pick<T, KO>>> &
-    { _?: Artefact };
+export type ArtefactProperties<A extends Artefact, K extends keyof A = keyof A> = DataProperties<Pick<A, K>>;
+export type ArtefactDataProperties<A extends Artefact, K extends keyof A = keyof A> = DataProperties<Pick<A, K>>;
+export type ArtefactDataRequiredProperties<A extends Artefact, K extends keyof A = keyof A> = DataProperties<Pick<A, K>>;
+export type ArtefactDataOptionalProperties<A extends Artefact, K extends keyof A = keyof A> = Partial<DataProperties<Pick<A, K>>>;
+export type ArtefactDataRequiredAndOptionalProperties<A extends Artefact, KR extends keyof A = never, KO extends keyof A = keyof A> =
+    DataProperties<Pick<A, KR>> &
+    Partial<DataProperties<Pick<A, KO>>>;
 
 export class Artefact {
     static is(a: any) { return is(a, this); }
@@ -127,26 +117,31 @@ export class Artefact {
     private aspects = new Map<AspectPossiblyAbstractCtor<Aspect>, Aspect>();
     private static aspectTypes = new Map<AspectPossiblyAbstractCtor<Aspect>, Array<AspectPossiblyAbstractCtor<Aspect>>>;
 
-    async createAspect<A extends Aspect, TArgs extends any[] | [] = Parameters<AspectCtor<A>["create"]>>(aspectCreator: AspectCtor<A>, ...aspectArgs: TArgs) {
+    toString<A extends Artefact>(this: A) {
+        return `[${this.constructor.name}: ` +
+            `aspects = ${JSON.stringify(Array.from(this.aspects.entries()).map(([K, V]) => ([K.name, V])))} ` +
+            `query = ${JSON.stringify((this.constructor as typeof Artefact).query(this))}]`;
+    }
+
+    async createAspect<
+        A extends Aspect,
+        TCreateArgs extends AnyParameters = Parameters<AspectCtor<A>["create"]>
+    >(aspectCreator: AspectCtor<A>, ...aspectArgs: TCreateArgs) {
         const aspect = await aspectCreator.create(...[Object.assign(aspectArgs[0], { _: this }), ...aspectArgs.slice(1)]);
         this.addAspect(aspect);
-        return aspect as A;
+        return aspect;
     }
     addAspect(aspect: Aspect) {
         this.aspects.set(aspect.constructor as AspectCtor<Aspect>, Object.assign(aspect, { _: this }));
         return this;
     }
-    getAspect<A extends Aspect>(aspectCtor: AspectPossiblyAbstractCtor<A>): A {
-        console.log(`getAspect(): ${JSON.stringify(aspectCtor.name)}`);
-        const result = filterObject<A>(this.aspects.get(aspectCtor) as A, ([K, V]) => K !== '_');
-        console.log(`getAspect(): result = ${JSON.stringify(result)}`);
-        return result;
+    getAspect<A extends Aspect>(aspectCtor: AspectPossiblyAbstractCtor<A>) {
+        // const result = filterObject<A>(this.aspects.get(aspectCtor) as A, ([K, V]) => K !== '_');
+        return this.aspects.get(aspectCtor) as A | undefined;
     }
-    getAspects() {
-        return this.aspects;
-    }
-    async toData<A extends Artefact>(this: A): Promise<ArtefactProperties<A>> {
-        console.log(`toData(): this = ${JSON.stringify(this)}`);
+
+    async toData<A extends Artefact>() {
+        console.log(`toData(): this = ${this}`);
         var dataUpdates = Object.fromEntries(Object.entries(
             Object.getOwnPropertyDescriptors(this.constructor.prototype))
                 .filter(([K, V]) => K !== 'constructor' && K !== '_')
@@ -169,31 +164,15 @@ export class Artefact {
     static getAspectTypes() {
         return this.aspectTypes;
     }
-    static async* stream<S extends Aspect, T extends Artefact>(this: ArtefactCtor<T>, source: AsyncIterable<S>) {
+    static async* stream<S extends Aspect, A extends Artefact>(this: ArtefactCtor<A>, source: AsyncIterable<S>) {
         for await (const aspect of source) {
             yield (new this()).addAspect(aspect);
         }
     }
 
-    static Type(schema: Array<AspectCtor<Aspect>>) {
-        const c = class {
-            static is(a: any) { return is(a, this); }
-            _id?: string;
-            get isNew() { return !this._id; }
-        };
-    }
-
-    runBackground<R, T extends ((...args: any[]) => Promise<R>)>(task: T) {
-        task();
-    }
-    async runForeground<R, T extends ((...args: any[]) => Promise<R>)>(task: T) {
-        await task();
-    }
-    
-    get query(): Queries<Artefact> {
+    static query(_: Artefact): Queries<DataProperties<Artefact>> {
         return ({
-            unique: !this._id ? undefined : ({ _id: { $eq: this._id } }),
+            unique: !_._id ? undefined : ({ _id: { $eq: _._id } }),
         });
     }
-
 }

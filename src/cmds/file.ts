@@ -33,17 +33,17 @@ class Hash extends Aspect {
 }
 
 class FileArtefact extends Artefact {
-    get fileEntry() { return this.getAspect(FileEntry) || this.getAspect(File) || this.getAspect(Directory); }
+    get fileEntry() { return this.getAspect(FileEntry); }// || this.getAspect(File) || this.getAspect(Directory); }
     get file() { return this.getAspect(File); }
     get directory() { return this.getAspect(Directory); }
-    get hash() { return this.getAspect(Hash) ?? this.file ? this.createAspect(Hash, { path: this.file.path }) : undefined; };
+    get hash() { return this.getAspect(Hash) ?? !!this.file ? this.createAspect(Hash, { path: this.file!.path }) : undefined; };
 
-    get query() {
+    static override query(_: FileArtefact) {
         return ({
-            unique: () => !!this._id ? { _id: { $eq: this._id } } :
-                this.file ? { "file.path": this.fileEntry?.path } :
-                this.directory ? { "directory.path": this.fileEntry?.path } :
-                this.fileEntry ? { "fileEntry.path": this.fileEntry?.path } : {},
+            unique: !!_._id ? { _id: { $eq: _._id } } :
+                _.file ? { "file.path": _.file.path } :
+                _.directory ? { "directory.path": _.directory.path } :
+                _.fileEntry ? { "fileEntry.path": _.fileEntry.path } : {},
         });
     }
 }
@@ -68,7 +68,7 @@ export const builder = (yargs: yargs.Argv) => yargs
                     }
                 }
             }
-            console.log(`Closing db.storage=${JSON.stringify(db.storage)}`);
+            console.log(`Closing db.storage=${db.storage}`);
             await db.storage.close();
 
         })
