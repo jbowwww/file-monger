@@ -110,9 +110,13 @@ export type ArtefactDataRequiredAndOptionalProperties<A extends Artefact, KR ext
     DataProperties<Pick<A, KR>> &
     Partial<DataProperties<Pick<A, KO>>>;
 
-export class Artefact {
-    static is(a: any) { return is(a, this); }
+export type Timestamped<T> = T & { _ts: Date; };
 
+export class Artefact {
+    public static is(a: any) { return is(a, this); }
+    private static timestamp(value: any) {
+        return ({ ...value, _ts: new Date(), });
+    }
     _id?: string;
     private aspects = new Map<AspectPossiblyAbstractCtor<Aspect>, Aspect>();
     private static aspectTypes = new Map<AspectPossiblyAbstractCtor<Aspect>, Array<AspectPossiblyAbstractCtor<Aspect>>>;
@@ -140,7 +144,7 @@ export class Artefact {
         return this.aspects.get(aspectCtor) as A | undefined;
     }
 
-    async toData<A extends Artefact>() {
+    async* toData/* <A extends Artefact> */(): AsyncGenerator<Timestamped<Partial<this/* A */>>, Timestamped<this/* A */>, undefined> {
         console.log(`toData(): this = ${this}`);
         var dataUpdates = Object.fromEntries(Object.entries(
             Object.getOwnPropertyDescriptors(this.constructor.prototype))
@@ -151,8 +155,12 @@ export class Artefact {
                     : undefined
                 ])));
         console.log(`toData(): dataUpdates = ${JSON.stringify(dataUpdates)}`);
-        const result = { ...(await pProps(dataUpdates) as ArtefactProperties<A>), _ts: new Date() };
+        // Object.assign(this, dataUpdates);
+        yield { ...this, _ts: new Date() };
+        const result = { ...await pProps(dataUpdates), _ts: new Date() };
+        // Object.assign(this, result);
         console.log(`toData(): result = ${JSON.stringify(result)}`);
+        yield { ...this, _ts: new Date() };
         return result;
     }
     static addAspectType<A extends Aspect>(aspectCtor: AspectPossiblyAbstractCtor<A>, dependencies: Array<AspectPossiblyAbstractCtor<Aspect>>) {
@@ -170,7 +178,7 @@ export class Artefact {
         }
     }
 
-    static query(_: Artefact): Queries<Artefact> {
+    static query(_: ArtefactProperties<Artefact>): Queries<Artefact> {
         return ({
             unique: !_._id ? undefined : ({ _id: { $eq: _._id } }),
         });

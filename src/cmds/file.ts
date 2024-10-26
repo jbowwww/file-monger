@@ -2,6 +2,7 @@ import yargs, { ArgumentsCamelCase } from "yargs";
 import { Artefact, Aspect, AspectProperties } from "../Model";
 import * as db from '../db';
 import { File, Directory, FileEntry, calculateHash } from "../fs";
+import dependsOn from "@justinseibert/depends-on";
 
 export enum CalculateHashEnum {
     Disable,
@@ -33,9 +34,12 @@ class Hash extends Aspect {
 }
 
 class FileArtefact extends Artefact {
+
     get fileEntry() { return this.getAspect(FileEntry); }// || this.getAspect(File) || this.getAspect(Directory); }
     get file() { return this.getAspect(File); }
     get directory() { return this.getAspect(Directory); }
+    
+    @dependsOn(['file'])
     get hash() { return this.getAspect(Hash) ?? !!this.file ? this.createAspect(Hash, { path: this.file!.path }) : undefined; };
 
     static override query(_: FileArtefact) {
@@ -62,8 +66,8 @@ export const builder = (yargs: yargs.Argv) => yargs
             for (const path of argv.paths) {
                 const store = await db.storage.store<FileArtefact>('fileSystemEntries');
                 for await (const fsEntry of FileArtefact.stream(FileEntry.walk("."))) {
-                    const dbEntry = (await store.updateOrCreate(fsEntry))._;
-                    if (!dbEntry.hash) {
+                    const dbEntry = (await store.updateOrCreate(fsEntry));
+                    if (!dbEntry?._.hash) {
 
                     }
                 }
