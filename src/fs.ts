@@ -1,7 +1,7 @@
 import nodeCrypto from 'node:crypto';
 import * as nodeFs from 'node:fs';
 import * as nodePath from 'node:path';
-import { Aspect, AspectDataRequiredAndOptionalProperties, DataProperties } from './Model';
+import { Aspect, AspectDataProperties, AspectDataRequiredAndOptionalProperties, DataProperties } from './Model';
 
 /*
  * Ongoing reminder of the things I want File aspects / models /classes/modules(<-less OOP more FP?)
@@ -27,14 +27,9 @@ import { Aspect, AspectDataRequiredAndOptionalProperties, DataProperties } from 
  *  */
 
 export class FileEntry extends Aspect {
-    path: string;
-    stats: nodeFs.Stats;
-    
-    constructor({ _, path, stats }: DataProperties<FileEntry>) {
-        super({ _ });
-        this.path = path;
-        this.stats = stats;
-    }
+    path!: string;
+    stats!: nodeFs.Stats;
+
 
     static override async create({ _, path }: AspectDataRequiredAndOptionalProperties<FileEntry, "path">) {
         console.log(`create(): this.name = ${this.name} _ = ${_} path=\"${path}\" cwd=${process.cwd()}`);
@@ -82,14 +77,8 @@ export class UnknownFileEntry extends FileEntry {}
 export class File extends FileEntry {
     hash?: string;
 
-    constructor({ _, hash, ...fileEntry }: DataProperties<File>) {
-        super({ _, ...fileEntry });
-        this.hash = hash;
-    }
-
-    static override async create({ _, hash, ...fileEntry }: AspectDataRequiredAndOptionalProperties<File, keyof FileEntry/* "path" | "stats" */>) {
-        hash = hash ?? await calculateHash(fileEntry.path);
-        return new this({ _, ...fileEntry, hash });
+    static override async create({ _, path, stats }: AspectDataProperties<FileEntry>) {
+        return new this({ _, path, stats, hash:  await calculateHash(path) });
     }
 }
 
