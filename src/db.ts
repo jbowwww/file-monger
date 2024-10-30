@@ -1,7 +1,6 @@
-import { ChangeStreamDocument, ChangeStreamInsertDocument, ChangeStreamUpdateDocument, Collection, Db, Filter, Document, FindOneAndReplaceOptions, FindOneAndUpdateOptions, FindOptions, MongoClient, MongoClientOptions, UpdateFilter, UpdateOptions, UpdateResult, WithId, WithoutId } from 'mongodb';
-import { Artefact, ArtefactProperties, filterObject } from './Model';
-import { get, set, has } from './prop-path';
-import { diff, addedDiff, deletedDiff, updatedDiff, detailedDiff } from 'deep-object-diff';
+import { ChangeStreamDocument, ChangeStreamInsertDocument, ChangeStreamUpdateDocument, Collection, Db, Filter, MongoClient, MongoClientOptions, UpdateFilter, UpdateOptions, UpdateResult, WithId } from 'mongodb';
+import { Artefact, ArtefactDataProperties, Id, Timestamped } from './Model';
+import { diff } from 'deep-object-diff';
 
 export let client: MongoClient | null = null;
 export let connection: MongoClient;
@@ -16,13 +15,11 @@ export function isChangeUpdate(value: ChangeStreamDocument): value is ChangeStre
     return value.operationType === "update";
 }
 
-export type Timestamp = { _ts: Date; };
-
 export interface Storage {
     isConnected(): boolean;
     connect(): Promise<Storage>;
     close(): Promise<Storage>;
-    store<A extends Artefact, TSchema extends Document = A & Timestamp>(name: string, options?: any): Promise<Store<A, TSchema>>;
+    store<A extends Artefact, TSchema extends Id<Timestamped<Partial<ArtefactDataProperties<A>>>> = Id<Timestamped<Partial<ArtefactDataProperties<A>>>>>(name: string, options?: any): Promise<Store<A, TSchema>>;
 }
 
 export type StorageConfigurationFunction = () => Storage;
@@ -88,7 +85,7 @@ export class MongoStorage implements Storage {
         return this as Storage;
     }
 
-    async store<A extends Artefact, TSchema extends Document = A & Timestamp>(name: string, options?: any): Promise<Store<A, TSchema>> {
+    async store<A extends Artefact, TSchema extends Id<Timestamped<Partial<ArtefactDataProperties<A>>>> = Id<Timestamped<Partial<ArtefactDataProperties<A>>>>>(name: string, options?: any): Promise<Store<A, TSchema>> {
         await this.connect();
         process.stdout.write(`Getting store '${name} ${options !== undefined ? ("options=" + JSON.stringify(options)) : ""} ... `);
         const collection = this._db!.collection<TSchema>(name, options);
@@ -99,7 +96,7 @@ export class MongoStorage implements Storage {
 
 }
 
-export interface Store<A extends Artefact, TSchema extends Document = A & Timestamp> {
+export interface Store<A extends Artefact, TSchema extends Id<Timestamped<Partial<ArtefactDataProperties<A>>>> = Id<Timestamped<Partial<ArtefactDataProperties<A>>>>> {
     find(query: Filter<TSchema>): AsyncGenerator<WithId<TSchema>>;
     findOne(query: Filter<TSchema>): Promise<WithId<TSchema> | null>;
     findOneAndUpdate(query: Filter<TSchema>, update: TSchema): Promise<WithId<TSchema> | null>;
@@ -107,7 +104,7 @@ export interface Store<A extends Artefact, TSchema extends Document = A & Timest
     updateOrCreate(artefact: A, options?: UpdateOptions): Promise<(UpdateResult<TSchema> & { _: A }) | null | undefined>;
 }
 
-export class MongoStore<A extends Artefact, TSchema extends Document = A & Timestamp> implements Store<A, TSchema> {
+export class MongoStore<A extends Artefact, TSchema extends Id<Timestamped<Partial<ArtefactDataProperties<A>>>> = Id<Timestamped<Partial<ArtefactDataProperties<A>>>>> implements Store<A, TSchema> {
 
     constructor(
         public readonly storage: Storage,
@@ -133,23 +130,28 @@ export class MongoStore<A extends Artefact, TSchema extends Document = A & Times
         const /* { _id, _ts, ... */data = await artefact.toData();
         let result: UpdateResult<TSchema> = null!;
         for await (const update of data) {
-            result = await this._collection.updateOne(query!, { $set: { ...update as Readonly<Partial<TSchema>>, _ts: new Date(), } }, options);
+            result = await this._collection.updateOne(query!, { $set: { ...update as TSchema, _ts: new Date(), } }, options);
         }
         return result;
     }
 
     async updateOrCreate(artefact: A, options: UpdateOptions = {}) {
-        options = { ...options, upsert: true, /* includeResultMetadata: true, returnDocument: 'after', */ };
-        const data = await artefact.toData();
+        options = { ...options, upsert: true, /* ignoreUndefined: true, includeResultMetadata: true, returnDocument: 'after', */ };
+        const data = artefact.toData();
         let result;
+        const query = artefact.query.unique as Filter<TSchema>;
+        const dbArtefact = await this._collection.findOne<TSchema>(query, options); //AndReplace(query, data as WithoutId<TSchema>, options);
+        const dbId = dbArtefact?._id;
+        const query2 = (!!dbId ? ({ _id: { $eq: dbId } }) : query) as Filter<TSchema>;
         for await (const update of data) {
-            const query = (artefact.constructor as typeof Artefact).query(artefact).unique as Filter<TSchema>;
-            const dbArtefact = await this._collection.findOne<TSchema>(query, options); //AndReplace(query, data as WithoutId<TSchema>, options);
-            const { _id, ...update } = diff(dbArtefact ?? {}, data) as ({ _id?: string; });
-            const query2 = (!!dbArtefact ? Artefact.query(dbArtefact).unique as Filter<TSchema> : undefined) ?? query;
-            result = { ...await this._collection.updateOne(query2, { $set: update as Readonly<Partial<TSchema>> }, options), _: artefact }; 
-            console.log(`updateOrCreate(): \n\tquery = ${JSON.stringify(query)}\n\tquery2 = ${JSON.stringify(query2)}\n\toptions = ${JSON.stringify(options)}\n\tartefact = ${artefact}\n\tdata = ${JSON.stringify(data)}\n\tdbArtefact = ${JSON.stringify(dbArtefact)}\n\tupdate = ${JSON.stringify(update)}\n\tresult = ${JSON.stringify(result)}`);        
+            const { _id, _ts, ...dbUpdate } = diff(dbArtefact ?? {}, update) as TSchema;//({ _id?: string; _ts?: Date; });
+            if (Object.keys(dbUpdate).length > 0) {
+                result = { ...await this._collection.updateOne(query2, { $set: { ...dbUpdate, _ts } as TSchema }, options), _: artefact };
+            }
+            // console.log(`updateOrCreate(): \n\tquery = ${JSON.stringify(query)}\n\tquery2 = ${JSON.stringify(query2)}\n\toptions = ${JSON.stringify(options)}\n\tartefact = ${artefact}\n\tdata = ${JSON.stringify(data)}\n\tdbArtefact = ${JSON.stringify(dbArtefact)}\n\tupdate = ${JSON.stringify(update)}\n\tdbUpdate = ${JSON.stringify(dbUpdate)}\n\tresult = ${JSON.stringify(mapObject(result, ([K, V]) => K === '_' ? V.toString() : V))}`);        
+            Object.assign(dbArtefact ?? {}, dbUpdate);
         }
+        console.log(`updateOrCreate(): dbArtefact=${JSON.stringify(dbArtefact)}`);
         return result;
     }
 }

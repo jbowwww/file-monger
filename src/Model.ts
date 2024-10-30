@@ -76,14 +76,14 @@ export abstract class Aspect {
     public get _() { return this.#_; }
     private set _(_: Artefact | undefined) { this.#_ = _; }
 
-    constructor({ _ }: DataProperties<Aspect>) { this._ = _; }
+    toString() { return `[${this.constructor.name}: ${JSON.stringify(filterObject(this, ([K, V]) => K !== "_" && typeof V !== 'function'))}]`; }
+    
+    constructor({ _ }: DataProperties<Aspect>) { this.#_ = _; }
+    
+    onAddedToArtefact<A extends Artefact>(_: A) { this.#_ = _; }
 
     static async create<A extends Aspect>(this: AspectCtor<A>, ...props: any[]): Promise<Aspect> {
         return new this(...props as AspectCtorParameters<A>);
-    }
-
-    toString() {
-        return `[${this.constructor.name}: ${JSON.stringify(this)}]`;
     }
 }
 
@@ -94,7 +94,6 @@ export type Queries<T> = {
 export type ArtefactCtorParameters<A extends Artefact> = A extends { new (...args: infer P): A } ? P : never;
 export type ArtefactCtor<A extends Artefact, TArgs extends AnyParameters = ArtefactCtorParameters<A>> = Function & {
     new (...args: TArgs | []): A;
-    query(_: A): Queries<A>;
 };
 export type ArtefactAbstractCtor<A extends Artefact, TArgs extends AnyParameters = ArtefactCtorParameters<A>> = abstract new (...args: TArgs | []) => A;
 export type ArtefactPossiblyAbstractCtor<A extends Artefact, TArgs extends AnyParameters = ArtefactCtorParameters<A>> = ArtefactCtor<A, TArgs> | ArtefactAbstractCtor<A, TArgs>;
@@ -102,75 +101,92 @@ export const isArtefactCtor = <A extends Artefact>(value: any): value is Artefac
     return testFn(value) || testValuePrototype(value.prototype, testFn);
 })(value, value => value.constructor === Artefact);
 
-export type ArtefactProperties<A extends Artefact, K extends keyof A = keyof A> = DataProperties<Pick<A, K>>;
-export type ArtefactDataProperties<A extends Artefact, K extends keyof A = keyof A> = DataProperties<Pick<A, K>>;
-export type ArtefactDataRequiredProperties<A extends Artefact, K extends keyof A = keyof A> = DataProperties<Pick<A, K>>;
-export type ArtefactDataOptionalProperties<A extends Artefact, K extends keyof A = keyof A> = Partial<DataProperties<Pick<A, K>>>;
+export type ArtefactDataProperties<A extends Artefact, K extends keyof A = keyof A> = DataProperties<Omit<Pick<A, K>, "query">>;
+export type ArtefactDataRequiredProperties<A extends Artefact, K extends keyof A = keyof A> = DataProperties<Omit<Pick<A, K>, "query">>;
+export type ArtefactDataOptionalProperties<A extends Artefact, K extends keyof A = keyof A> = Partial<DataProperties<Omit<Pick<A, K>, "query">>>;
 export type ArtefactDataRequiredAndOptionalProperties<A extends Artefact, KR extends keyof A = never, KO extends keyof A = keyof A> =
-    DataProperties<Pick<A, KR>> &
-    Partial<DataProperties<Pick<A, KO>>>;
+    Omit<
+        DataProperties<Pick<A, KR>> &
+        Partial<DataProperties<Pick<A, KO>>
+    >, "query">;
 
 export type Timestamped<T> = T & { _ts: Date; };
+export type Id<T> = T & { _id?: string; };
 
 export class Artefact {
-    public static is(a: any) { return is(a, this); }
-    private static timestamp(value: any) {
+    
+    static is(a: any) { return is(a, this); }
+    static #timestamp(value: any) {
         return ({ ...value, _ts: new Date(), });
     }
+    
     _id?: string;
-    private aspects = new Map<AspectPossiblyAbstractCtor<Aspect>, Aspect>();
-    private static aspectTypes = new Map<AspectPossiblyAbstractCtor<Aspect>, Array<AspectPossiblyAbstractCtor<Aspect>>>;
+    
+    #aspects = new Map<AspectPossiblyAbstractCtor<Aspect>, Aspect>();
+    static #aspectTypes = new Map<AspectPossiblyAbstractCtor<Aspect>, Array<AspectPossiblyAbstractCtor<Aspect>>>;
 
+    toJSON<A extends Artefact>(this: A, K?: string) {
+        return ({
+            _id: this._id,
+            ...Object.fromEntries(
+                Object.getOwnPropertyNames(this.constructor.prototype)
+                    .filter(K => K !== "query")
+                    .map(K => ([K, (this as any)[K]]))
+            )
+        });
+    }
     toString<A extends Artefact>(this: A) {
-        return `[${this.constructor.name}: ` +
-            `aspects = ${JSON.stringify(Array.from(this.aspects.entries()).map(([K, V]) => ([K.name, V])))} ` +
-            `query = ${JSON.stringify((this.constructor as typeof Artefact).query(this))}]`;
+        return `[${this.constructor.name}: _id=${this._id ?? "(undefined)"} ${JSON.stringify(this.toJSON())} query=${JSON.stringify(this.query)}`;
     }
 
     async createAspect<
         A extends Aspect,
         TCreateArgs extends AnyParameters = Parameters<AspectCtor<A>["create"]>
     >(aspectCreator: AspectCtor<A>, ...aspectArgs: TCreateArgs) {
-        const aspect = await aspectCreator.create(...[Object.assign(aspectArgs[0], { _: this }), ...aspectArgs.slice(1)]);
+        const aspect = await aspectCreator.create(...[aspectArgs[0], ...aspectArgs.slice(1)]);
         this.addAspect(aspect);
         return aspect;
     }
-    addAspect(aspect: Aspect) {
-        this.aspects.set(aspect.constructor as AspectCtor<Aspect>, Object.assign(aspect, { _: this }));
+    addAspect<A extends Aspect>(aspect?: A, aspectCtor?: Ctor<A>) {
+        if (!aspect) {
+            if (!!aspectCtor) {
+                this.#aspects.delete(aspectCtor);
+            }
+            else throw new TypeError(`addAspect(): aspect == null && aspectCtor == null`)
+        } else {
+            this.#aspects.set(aspectCtor ?? aspect?.constructor as AspectCtor<A>, aspect);
+            aspect.onAddedToArtefact(this);
+        }
         return this;
     }
     getAspect<A extends Aspect>(aspectCtor: AspectPossiblyAbstractCtor<A>) {
-        // const result = filterObject<A>(this.aspects.get(aspectCtor) as A, ([K, V]) => K !== '_');
-        return this.aspects.get(aspectCtor) as A | undefined;
+        return this.#aspects.get(aspectCtor) as A | undefined;
     }
 
-    async* toData/* <A extends Artefact> */(): AsyncGenerator<Timestamped<Partial<this/* A */>>, Timestamped<this/* A */>, undefined> {
-        console.log(`toData(): this = ${this}`);
+    async* toData<A extends Artefact>(): AsyncGenerator<Timestamped<Partial<ArtefactDataProperties<A>>>, Timestamped<Partial<ArtefactDataProperties<A>>>, undefined> {
         var dataUpdates = Object.fromEntries(Object.entries(
             Object.getOwnPropertyDescriptors(this.constructor.prototype))
-                .filter(([K, V]) => K !== 'constructor' && K !== '_')
+                .filter(([K, V]) => K !== 'constructor' && K !== '_' && K !== 'query')
                 .map(([K, V]) => ([K,
                     !!V.get ? V.get.call(this) :
                     !!V.value ? typeof V.value === 'function' ? V.value.call(this) : V.value
                     : undefined
                 ])));
-        console.log(`toData(): dataUpdates = ${JSON.stringify(dataUpdates)}`);
-        // Object.assign(this, dataUpdates);
-        yield { ...this, _ts: new Date() };
+        // console.log(`toData(): dataUpdates = ${JSON.stringify(dataUpdates)}`);
+        yield { ...dataUpdates as Timestamped<Partial<ArtefactDataProperties<A>>>, _ts: new Date() };
         const result = { ...await pProps(dataUpdates), _ts: new Date() };
-        // Object.assign(this, result);
-        console.log(`toData(): result = ${JSON.stringify(result)}`);
-        yield { ...this, _ts: new Date() };
+        // console.log(`toData(): result = ${JSON.stringify(result)}`);
+        yield { ...result as Timestamped<Partial<ArtefactDataProperties<A>>>, _ts: new Date() };
         return result;
     }
     static addAspectType<A extends Aspect>(aspectCtor: AspectPossiblyAbstractCtor<A>, dependencies: Array<AspectPossiblyAbstractCtor<Aspect>>) {
-        this.aspectTypes.set(aspectCtor, dependencies);
+        this.#aspectTypes.set(aspectCtor, dependencies);
     }
     static getAspectType<A extends Aspect>(aspectCtor: AspectPossiblyAbstractCtor<A>) {
-        return this.aspectTypes.get(aspectCtor);
+        return this.#aspectTypes.get(aspectCtor);
     }
     static getAspectTypes() {
-        return this.aspectTypes;
+        return this.#aspectTypes;
     }
     static async* stream<S extends Aspect, A extends Artefact>(this: ArtefactCtor<A>, source: AsyncIterable<S>) {
         for await (const aspect of source) {
@@ -178,9 +194,9 @@ export class Artefact {
         }
     }
 
-    static query(_: ArtefactProperties<Artefact>): Queries<Artefact> {
+    get query(): Queries<Artefact> {
         return ({
-            unique: !_._id ? undefined : ({ _id: { $eq: _._id } }),
+            unique: !this._id ? undefined : ({ _id: { $eq: this._id } }),
         });
     }
 }
