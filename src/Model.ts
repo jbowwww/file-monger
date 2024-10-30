@@ -90,7 +90,7 @@ export abstract class Aspect {
 }
 
 export type Queries<T> = {
-    [K: string]: Filter<T> | undefined;
+    [K: string]: Id<Omit<Filter<T>, "_id">> | undefined;
 }
 
 export type ArtefactCtorParameters<A extends Artefact> = A extends { new (...args: infer P): A } ? P extends [] ? [] : P : never;
@@ -194,7 +194,7 @@ export class Artefact {
         }
     }
 
-    get query(): Queries<Artefact> {
+    async query(): Promise<Queries<Artefact>> {
         return ({
             unique: !this._id ? undefined : ({ _id: { $eq: this._id } }),
         });

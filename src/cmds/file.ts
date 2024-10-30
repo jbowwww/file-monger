@@ -1,5 +1,5 @@
 import yargs, { ArgumentsCamelCase } from "yargs";
-import { Artefact, Aspect, AspectProperties } from "../Model";
+import { Artefact, Aspect, AspectProperties, Queries } from "../Model";
 import * as db from '../db';
 import { File, Directory, FileEntry, calculateHash } from "../fs";
 import dependsOn from "@justinseibert/depends-on";
@@ -27,37 +27,56 @@ class Hash extends Aspect {
         this.sha256 = sha256;
     }
     
-    static override async create({ _, path }: { _: Artefact, path: string }) {
+    static override async create(path: string) {
         const sha256 = await calculateHash(path);
-        return new Hash({ _, sha256 })
+        return new Hash({ _: undefined, sha256 })
     }
 }
 
-class FileArtefact extends Artefact {
+class Ashpect<C, T, A> {
+    #value: T;
 
-    get fileEntry() { return this.getAspect(FileEntry); }// || this.getAspect(File) || this.getAspect(Directory); }
-    set fileEntry(fileEntry: FileEntry | undefined) { this.addAspect(fileEntry); }
+    constructor(container: C, initialValue: T, dependencies: string[], get: (this: A) => T | Promise<T | undefined>) {
+        this.#value = initialValue;
+    }
 
-    get file() { return this.getAspect(File); }
-    set file(file: File | undefined) { this.addAspect(file); }
-    
-    get directory() { return this.getAspect(Directory); }
-    set directory(directory: Directory | undefined) { this.addAspect(directory); }
-    
-    @dependsOn(['file'])
-    get hash(): Promise<Hash> | undefined { return this.getAspect(Hash) ?? !!this.file ? this.createAspect(Hash, { path: this.file?.path }) : undefined; };
-    set hash(hash: Hash | undefined) { this.addAspect(hash, Hash); }
-
-    get query() {
-        return ({
-            unique:
-                !!this._id ? { _id: { $eq: this._id } } :
-                !!this.file ? { "file.path": this.file.path } :
-                !!this.directory ? { "directory.path": this.directory.path } :
-                !!this.fileEntry ? { "fileEntry.path": this.fileEntry.path } : {},
-        });
+    valueOf() {
+        return this.#value;
     }
 }
+
+// }= <A>(dependencies: string[], get: (this: A) => Promise<A>) => function onDecorator() {
+
+// };
+
+// const makeFileArtefact = Object.assign(
+    function FileArtefact({ _id, fileEntry, file, directory, hash }/* _ */: Partial<{ _id: string, fileEntry: FileEntry, file: File, directory: Directory, hash: Hash }>) {
+        const self = new Proxy(class FileArtefact {
+                _id = _id;
+                fileEntry = fileEntry//: Promise<FileEntry>,// || this.getAspect(File) || this.getAspect(Directory); }
+                file = file//: Promise<File>,
+                directory = directory//: Promise<Directory>,
+                
+                hash = new Ashpect(this, hash, ["file.stats"], async function hash(this: FileArtefact): Promise<Hash | undefined> { return Hash.create((await this.file)?.path ?? ""); })
+                // hash = hash//(): Promise<Hash | undefined> { return Hash.create((await this.file)?.path ?? ""); },
+
+                async query(): Promise<Queries<typeof self>> {
+                    return ({
+                        unique:
+                            !!this._id ? { "_id": this._id } :
+                            !!this.file ? { "file.path": (await this.file).path } :
+                            !!this.directory ? { "directory.path": (await this.directory).path } :
+                            !!this.fileEntry ? { "fileEntry.path": (await this.fileEntry).path } : {},
+                    });
+                }
+            }, {
+                get(_, K, receiver) {
+                    
+                } ,
+            }
+        );
+    }
+// );
 
 export const command = 'file';
 export const description = 'File commands';
