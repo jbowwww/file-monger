@@ -6,8 +6,8 @@ export type DataRequiredProperties<T, K extends keyof T = keyof T> = DataPropert
 export type DataOptionalProperties<T, K extends keyof T = keyof T> = Partial<DataProperties<Pick<T, K>>>;
 export type DataRequiredAndOptionalProperties<T, KR extends keyof T = never, KO extends keyof T = keyof T> = DataProperties<Pick<T, KR>> & Partial<DataProperties<Pick<T, KO>>>;
 
-export type CtorParameters<T> = T extends { new (...args: infer P): T } ? P : never;
-export type Ctor<T, TArgs extends AnyParameters = CtorParameters<T>> = Function & { new (...args: TArgs): T; };
+export type CtorParameters<T> = T extends { new (...args: infer P): T } ? P extends [] ? [] : P : never;
+export type Ctor<T, TArgs extends AnyParameters = CtorParameters<T>> = { new (...args: TArgs): T; };
 export type AbstractCtor<T, TArgs extends AnyParameters = CtorParameters<T>> = abstract new (...args: TArgs) => T;
 export type PossiblyAbstractCtor<T, TArgs extends AnyParameters = CtorParameters<T>> = Ctor<T, TArgs> | AbstractCtor<T, TArgs>;
 export const isCtor = <T>(value: any): value is Ctor<T> => value.prototype.constructor === value;
@@ -44,12 +44,12 @@ export const mapObject = <T extends {}>(source: {} | undefined, mapFn: ObjectMap
         .map((([K, V]) => ([ K, V !== null && typeof V === 'object' && (depth < maxDepth) ?
             mapObject(V, mapFn, maxDepth, depth + 1, prefix + "." + K) : V ]))))) as T;
 
-export type AspectCtorParameters<T extends Aspect> = T extends { new (...args: infer P): T } ? P : never;
+export type AspectCtorParameters<T extends Aspect> = T extends { new (...args: infer P): T } ? P extends [] ? [] : P : never;
 export type AspectCtor<
     A extends Aspect,
-    TArgs extends AnyParameters = AspectCtorParameters<A>,//any[],
+    TArgs extends AnyParameters = AspectCtorParameters<A>,
     TCreateArgs extends AnyParameters = any[],
-> = Function & {
+> = {
     new (...args: TArgs): A;
     create(...args: TCreateArgs): Promise<A>;
 };
@@ -72,6 +72,8 @@ export type AspectDataRequiredAndOptionalProperties<A extends Aspect, KR extends
 export type AspectFunction<P extends Aspect, A extends Artefact = Artefact> = ({ _, ...props }: AspectProperties<P>) => A;
 
 export abstract class Aspect {
+    static is<A extends Aspect = Aspect>(this: Ctor<A>, a: any): a is A { return is(a, this); }
+    
     #_?: Artefact;
     public get _() { return this.#_; }
     private set _(_: Artefact | undefined) { this.#_ = _; }
@@ -91,10 +93,8 @@ export type Queries<T> = {
     [K: string]: Filter<T> | undefined;
 }
 
-export type ArtefactCtorParameters<A extends Artefact> = A extends { new (...args: infer P): A } ? P : never;
-export type ArtefactCtor<A extends Artefact, TArgs extends AnyParameters = ArtefactCtorParameters<A>> = Function & {
-    new (...args: TArgs | []): A;
-};
+export type ArtefactCtorParameters<A extends Artefact> = A extends { new (...args: infer P): A } ? P extends [] ? [] : P : never;
+export type ArtefactCtor<A extends Artefact, TArgs extends AnyParameters = ArtefactCtorParameters<A>> = { new (...args: TArgs | []): A; };
 export type ArtefactAbstractCtor<A extends Artefact, TArgs extends AnyParameters = ArtefactCtorParameters<A>> = abstract new (...args: TArgs | []) => A;
 export type ArtefactPossiblyAbstractCtor<A extends Artefact, TArgs extends AnyParameters = ArtefactCtorParameters<A>> = ArtefactCtor<A, TArgs> | ArtefactAbstractCtor<A, TArgs>;
 export const isArtefactCtor = <A extends Artefact>(value: any): value is ArtefactCtor<A> => (function testValuePrototype(value: any, testFn: (value: any) => boolean): boolean {
@@ -115,7 +115,7 @@ export type Id<T> = T & { _id?: string; };
 
 export class Artefact {
     
-    static is(a: any) { return is(a, this); }
+    static is<A extends Artefact = Artefact>(this: Ctor<A>, a: any) { return is(a, this); }
     static #timestamp(value: any) {
         return ({ ...value, _ts: new Date(), });
     }

@@ -49,12 +49,12 @@ export class FileEntry extends Aspect {
     static async* walk(path: string) {
         const rootEntry = await FileEntry.create({ _: null!, path });
         yield rootEntry;
-        if (isDirectory(rootEntry))
-            yield* rootEntry.walk();
+        if (Directory.is(rootEntry)) {
+            yield* (rootEntry as Directory).walk();
+        }
     }
 }
 
-export const isDirectory = (value: any): value is Directory => value.constructor === Directory;
 export class Directory extends FileEntry {
     static override async create({ _, ...fileEntry }: AspectDataRequiredAndOptionalProperties<File, keyof FileEntry>) {
         return new Directory({ _, ...fileEntry });
@@ -66,8 +66,8 @@ export class Directory extends FileEntry {
             (await nodeFs.promises.readdir(this.path))
                 .filter(e => e != "." && e != "..")
                 .map(entry => FileEntry.create({ path: nodePath.join(this.path, entry) })));
-        const subDirs = newFsEntries.filter(d => isDirectory(d));
-        const subUnknowns = newFsEntries.filter(u => isUnknown(u));
+        const subDirs = newFsEntries.filter(d => Directory.is(d));
+        const subUnknowns = newFsEntries.filter(u => UnknownFileEntry.is(u));
         process.stdout.write(`${newFsEntries.length - subDirs.length - subUnknowns.length} files, ${subDirs.length} subdirs, ${subUnknowns.length} unknown entries\n`);
         yield* newFsEntries;
         for (const dir of subDirs)
@@ -75,10 +75,8 @@ export class Directory extends FileEntry {
     }
 }
 
-export const isUnknown = (value: any): value is UnknownFileEntry => value.constructor === UnknownFileEntry;
 export class UnknownFileEntry extends FileEntry {}
 
-export const isFile = (value: any): value is File => value.constructor === File;
 export class File extends FileEntry {
     hash?: string;
 

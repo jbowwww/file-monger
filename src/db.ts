@@ -151,7 +151,7 @@ export class MongoStore<A extends Artefact, TSchema extends Id<Timestamped<Parti
             // console.log(`updateOrCreate(): \n\tquery = ${JSON.stringify(query)}\n\tquery2 = ${JSON.stringify(query2)}\n\toptions = ${JSON.stringify(options)}\n\tartefact = ${artefact}\n\tdata = ${JSON.stringify(data)}\n\tdbArtefact = ${JSON.stringify(dbArtefact)}\n\tupdate = ${JSON.stringify(update)}\n\tdbUpdate = ${JSON.stringify(dbUpdate)}\n\tresult = ${JSON.stringify(mapObject(result, ([K, V]) => K === '_' ? V.toString() : V))}`);        
             Object.assign(dbArtefact ?? {}, dbUpdate);
         }
-        console.log(`updateOrCreate(): dbArtefact=${JSON.stringify(dbArtefact)}`);
+        // console.log(`updateOrCreate(): dbArtefact=${JSON.stringify(dbArtefact)}`);
         return result;
     }
 }
