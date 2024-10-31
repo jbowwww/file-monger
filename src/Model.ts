@@ -196,7 +196,7 @@ export class Artefact {
 
     async query(): Promise<Queries<Artefact>> {
         return ({
-            unique: !this._id ? undefined : ({ _id: { $eq: this._id } }),
+            unique: !this._id ? undefined : ({ _id: this._id }),
         });
     }
 }
