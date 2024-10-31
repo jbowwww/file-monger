@@ -1,8 +1,7 @@
 import yargs, { ArgumentsCamelCase } from "yargs";
-import { Artefact, Aspect, AspectProperties, Queries } from "../Model";
+import { Aspect, AspectProperties, Ctor, Queries } from "../Model";
 import * as db from '../db';
 import { File, Directory, FileEntry, calculateHash } from "../fs";
-import dependsOn from "@justinseibert/depends-on";
 
 export enum CalculateHashEnum {
     Disable,
@@ -33,10 +32,10 @@ class Hash extends Aspect {
     }
 }
 
-class Ashpect<C, T, A> {
+class Ashpect<T, A> {
     #value: T;
 
-    constructor(container: C, initialValue: T, dependencies: string[], get: (this: A) => T | Promise<T | undefined>) {
+    constructor(initialValue: T, dependencies: string[], get: (this: A) => T | Promise<T | undefined>) {
         this.#value = initialValue;
     }
 
@@ -48,35 +47,57 @@ class Ashpect<C, T, A> {
 // }= <A>(dependencies: string[], get: (this: A) => Promise<A>) => function onDecorator() {
 
 // };
+type ArtefactType<T extends Aspect> = { [K: string]: Ctor<T> | Ashpect<T, ArtefactPropertyTypes>; };
+type ArtefactPropertyType<T> = T extends Ctor<infer A> ? A : T extends [string[], () => infer A] ? A : never;
+type ArtefactPropertyTypes<P extends Aspect = Aspect> = { [K in keyof P]: ArtefactPropertyType<P[K]>; }
 
 // const makeFileArtefact = Object.assign(
-    function FileArtefact({ _id, fileEntry, file, directory, hash }/* _ */: Partial<{ _id: string, fileEntry: FileEntry, file: File, directory: Directory, hash: Hash }>) {
-        const self = new Proxy(class FileArtefact {
-                _id = _id;
-                fileEntry = fileEntry//: Promise<FileEntry>,// || this.getAspect(File) || this.getAspect(Directory); }
-                file = file//: Promise<File>,
-                directory = directory//: Promise<Directory>,
+    function makeFileArtefactType<A, T extends ArtefactType>(
+        artefactProperties: InstanceType<A>,
+        artefactCreator: (artefactProps: Partial<ArtefactPropertyTypes<InstanceType<A>>>) => ArtefactPropertyTypes<InstanceType<A>>
+    ) {
+        return function FileArtefact(artefact: Partial<ArtefactPropertyTypes<InstanceType<A>>> = {}) {
+            const artefactSchema = artefactCreator(artefact);
+            return new Proxy(artefact, {
+                get(_: ArtefactPropertyTypes<InstanceType<A>>, K: string, receiver: ArtefactPropertyTypes<InstanceType<A>>) {
+                    return Array.isArray(artefactProperties[K]) && artefactProperties[K].length === 2 ?
+                        artefact[K] ?? artefactProperties[K][1]() : artefact[K];
+                },
+                set(_: ArtefactPropertyTypes<InstanceType<A>>, K: string, newValue: any/* ArtefactPropertyTypes<A>[typeof K] */, receiver: ArtefactPropertyTypes<InstanceType<A>>) {
+                    const valueCtor = newValue?.constructor;
+                    const artefactProp = (Array.isArray(artefactProperties[K]) && artefactProperties[K].length === 2 ?
+                        artefactProperties[K][0] : artefactProperties[K]) as Ctor<Aspect>;
+                    if (valueCtor !== artefactProp)
+                        throw new TypeError(`valueCtor=${valueCtor.name} !== artefactProperties["${K}"]=${artefactProp?.name}`);
+                    return true;
+                }
+            });
+        };
+    }
+
+
+    const FileArtefact = makeFileArtefactType({
+        fileEntry: FileEntry,
+        file: File,
+        directory: Directory
+    }, function ({ fileEntry, file, directory, hash }: Partial<{ fileEntry: FileEntry, file: File, directory: Directory, hash: Hash }>) { return ({
+        fileEntry: fileEntry,
+        file: file,
+        directory: directory,
                 
-                hash = new Ashpect(this, hash, ["file.stats"], async function hash(this: FileArtefact): Promise<Hash | undefined> { return Hash.create((await this.file)?.path ?? ""); })
+        hash: new Ashpect(hash, ["file.stats"], async (): Promise<Hash | undefined> => Hash.create(file?.path ?? "")),
                 // hash = hash//(): Promise<Hash | undefined> { return Hash.create((await this.file)?.path ?? ""); },
 
-                async query(): Promise<Queries<typeof self>> {
-                    return ({
-                        unique:
-                            !!this._id ? { "_id": this._id } :
-                            !!this.file ? { "file.path": (await this.file).path } :
-                            !!this.directory ? { "directory.path": (await this.directory).path } :
-                            !!this.fileEntry ? { "fileEntry.path": (await this.fileEntry).path } : {},
-                    });
-                }
-            }, {
-                get(_, K, receiver) {
-                    
-                } ,
-            }
-        );
-    }
-// );
+        async query() {
+            return ({
+                unique:
+                    !!this._id ? { "_id": this._id } :
+                    !!file ? { "file.path": (await this.file).path } :
+                    !!this.directory ? { "directory.path": (await this.directory).path } :
+                    !!this.fileEntry ? { "fileEntry.path": (await this.fileEntry).path } : undefined,
+            });
+        }
+    }); });
 
 export const command = 'file';
 export const description = 'File commands';

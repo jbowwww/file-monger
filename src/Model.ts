@@ -7,7 +7,10 @@ export type DataOptionalProperties<T, K extends keyof T = keyof T> = Partial<Dat
 export type DataRequiredAndOptionalProperties<T, KR extends keyof T = never, KO extends keyof T = keyof T> = DataProperties<Pick<T, KR>> & Partial<DataProperties<Pick<T, KO>>>;
 
 export type CtorParameters<T> = T extends { new (...args: infer P): T } ? P extends [] ? [] : P : never;
-export type Ctor<T, TArgs extends AnyParameters = CtorParameters<T>> = { new (...args: TArgs): T; };
+export type Ctor<T, TArgs extends AnyParameters = CtorParameters<T>> = {
+    new (...args: TArgs): T; 
+    constructor: { prototype: T; };
+};
 export type AbstractCtor<T, TArgs extends AnyParameters = CtorParameters<T>> = abstract new (...args: TArgs) => T;
 export type PossiblyAbstractCtor<T, TArgs extends AnyParameters = CtorParameters<T>> = Ctor<T, TArgs> | AbstractCtor<T, TArgs>;
 export const isCtor = <T>(value: any): value is Ctor<T> => value.prototype.constructor === value;
@@ -196,7 +199,7 @@ export class Artefact {
 
     async query(): Promise<Queries<Artefact>> {
         return ({
-            unique: !this._id ? undefined : ({ _id: { $eq: this._id } }),
+            unique: !this._id ? undefined : ({ _id: this._id }),
         });
     }
 }
