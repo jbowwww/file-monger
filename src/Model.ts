@@ -147,7 +147,7 @@ export class Artefact {
         this.addAspect(aspect);
         return aspect;
     }
-    addAspect<A extends Aspect>(aspect?: A, aspectCtor?: Ctor<A>) {
+    addAspect<A extends Aspect>(aspect?: A, aspectCtor?: AspectPossiblyAbstractCtor<A>) {
         if (!aspect) {
             if (!!aspectCtor) {
                 this.#aspects.delete(aspectCtor);
