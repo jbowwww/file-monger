@@ -47,6 +47,7 @@ export class FileEntry extends Aspect {
     exists() { return nodeFs.existsSync(this.path); }
 
     static async* walk(path: string) {
+        console.log(`FileEntry.walk(\"${path}\"): start ...`)
         const rootEntry = await FileEntry.create({ _: null!, path });
         yield rootEntry;
         if (Directory.is(rootEntry)) {
