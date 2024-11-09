@@ -129,7 +129,7 @@ export class MongoStore<A extends Artefact, TSchema extends Id<Timestamped<Parti
     async updateOne(artefact: A, query?: Filter<TSchema>, options: UpdateOptions = {}) {
         const /* { _id, _ts, ... */data = await artefact.toData();
         let result: UpdateResult<TSchema> = null!;
-        for await (const update of data) {
+        for await (const update of [artefact.toData(), artefact.toDataPending()]/* data */) {
             result = await this._collection.updateOne(query!, { $set: { ...update as TSchema, _ts: new Date(), } }, options);
         }
         return result;
@@ -143,7 +143,7 @@ export class MongoStore<A extends Artefact, TSchema extends Id<Timestamped<Parti
         const dbArtefact = await this._collection.findOne<TSchema>(query, options); //AndReplace(query, data as WithoutId<TSchema>, options);
         const dbId = dbArtefact?._id;
         const query2 = (!!dbId ? ({ _id: { $eq: dbId } }) : query) as Filter<TSchema>;
-        for await (const update of data) {
+        for await (const update of [artefact.toData(), await artefact.toDataPending()]/* data */) {
             const { _id, _ts, ...dbUpdate } = diff(dbArtefact ?? {}, update) as TSchema;//({ _id?: string; _ts?: Date; });
             if (Object.keys(dbUpdate).length > 0) {
                 result = { ...await this._collection.updateOne(query2, { $set: { ...dbUpdate, _ts } as TSchema }, options), _: artefact };

@@ -2,7 +2,6 @@ import yargs, { ArgumentsCamelCase } from "yargs";
 import { Artefact, ArtefactDependencies, Aspect, AspectPossiblyAbstractCtor, AspectProperties, isArtefactCtor, is } from "../Model";
 import * as db from '../db';
 import { File, Directory, FileEntry, calculateHash } from "../fs";
-import dependsOn from "@justinseibert/depends-on";
 
 export enum CalculateHashEnum {
     Disable,
@@ -19,17 +18,17 @@ export interface FileCommandArgv {
     },
 }
 
-class Hash extends Aspect {
+class Hash /* extends Aspect */ {
     sha256?: string;
 
-    constructor({ sha256, ...aspect }: AspectProperties<Hash>) {
-        super(aspect);
+    constructor({ sha256/* , ...aspect */ }: Partial<Hash>) {
+        // super(aspect);
         this.sha256 = sha256;
     }
     
-    static override async create({ _, path }: { _: Artefact, path: string }) {
+    static /* override */ async create({ /* _, */ path }: { /* _,: Artefact, */ path: string }) {
         const sha256 = await calculateHash(path);
-        return new Hash({ _, sha256 })
+        return new Hash({ /* _, */ sha256 })
     }
 }
 
@@ -91,10 +90,10 @@ class FileArtefact extends Artefact {
     File: File = null!;
     Directory: Directory = null!;
     // todo: debug this and see if anything (e.g. toData) is calling it
-    @FileArtefact.depends('file')
+    @FileArtefact.depends('File')
     get hash(): Promise<Hash> | undefined {
         console.log(`FileArtefact.hash(): this=${this}`)
-        return /* this.getAspect(Hash) ?? */ !!this.File ? Hash.create({ _: this, path: this.File.path }) : undefined;
+        return /* this.getAspect(Hash) ?? */ !!this.File ? Hash.create({ /* _: this, */ path: this.File.path }) : undefined;
     };
 
     get query() {

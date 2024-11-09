@@ -1,4 +1,4 @@
-import EventEmitter from "events";
+// import EventEmitter from "events";
 import { Filter } from "mongodb";
 import "reflect-metadata";
 
@@ -48,7 +48,7 @@ export const mapObject = <T extends {}>(source: {} | undefined, mapFn: ObjectMap
         .map((([K, V]) => ([ K, V !== null && typeof V === 'object' && (depth <= maxDepth) ?
             mapObject(V, mapFn, maxDepth, depth + 1, prefix + "." + K) : V ]))))) as T;
 
-export type AspectCtorParameters<T extends Aspect> = T extends abstract new (...args: infer P) => T ? P extends [] ? [] : P : never;
+export type AspectCtorParameters<A extends Aspect> = A extends abstract new (...args: infer P) => A ? P extends [] ? [] : P : never;
 export type AspectCtor<
     A extends Aspect,
     TArgs extends AnyParameters = AspectCtorParameters<A>,
@@ -118,49 +118,52 @@ export type ArtefactDataRequiredAndOptionalProperties<A extends Artefact, KR ext
 export type Timestamped<T> = T & { _ts: Date; };
 export type Id<T> = T & { _id?: string; };
 
-export type ArtefactDependencies<T = any> = {
-    // propertyName: string;
-    name: string;
-    getter: ((...args: AnyParameters) => T | undefined);
+export type ArtefactDependencies = {
+    [K: string]: (this: Artefact, ...args: AnyParameters) => any;
 };
 
-export class Artefact extends EventEmitter {
+export class Artefact/*  extends EventEmitter */ {
     
     static is<A extends Artefact = Artefact>(this: Ctor<A>, a: any) { return is(a, this); }
-    static #timestamp(value: any) {
-        return ({ ...value, _ts: new Date(), });
-    }
+    static #dependencies = new Map<string, ArtefactDependencies>();
+    static #aspectTypes = new Map<AspectPossiblyAbstractCtor<Aspect>, Array<AspectPossiblyAbstractCtor<Aspect>>>;
+    static aspectGetters = new Map<AspectPossiblyAbstractCtor<Aspect>, (...args: AnyParameters) => Aspect>();
     
     [K: string | symbol]: any;
     _id?: string;
-    #aspects = new Map<AspectPossiblyAbstractCtor<Aspect>, Aspect>();
+
+    private aspects = new Map<AspectPossiblyAbstractCtor<Aspect>, Aspect>();
+    private aspectsPending: Record<string, Promise<Aspect>> = {};
     
     constructor() {
-        super({ captureRejections: true });
-        this.on("aspect", async (aspect, aspectCtor) => {
-            const downstreams = Reflect.getMetadata("downstreams", this, aspectCtor.name) as ArtefactDependencies[] ?? [];
-            for (const downstream of downstreams) {
-                Object.defineProperty(this, downstream.name, { enumerable: true, configurable: true, value: await downstream.getter() });
-            }
-        });
+        // super({ captureRejections: true });
+        // this.on("addAspect", async (aspect, aspectCtor) => {
+        //     const downstreams = Reflect.getMetadata("downstreams", this, aspectCtor.name) as ArtefactDependencies[] ?? [];
+        //     console.log(`Artefact.on("aspect"): aspectCtor.name=${aspectCtor.name} aspect=${aspect} downstreams=${JSON.stringify(downstreams)}`);
+        //     const getterTasks = downstreams.map(async d => {
+        //         const value = await d.getter();
+        //         Object.defineProperty(this, d.name, { enumerable: true, configurable: true, value });
+        //         return value;
+        //     });
+        //     const getterEntries = Object.fromEntries(Array.from(await Promise.all(getterTasks)).map((v: Aspect, i: number) => ([downstreams[i], v])));
+        //     console.log(`Artefact.on("aspect"): aspectCtor.name=${aspectCtor.name} aspect=${aspect} downstreams=${downstreams} getterEntries=${getterEntries}`);
+        // });
     }
-    static #dependencies = new Map<string, ArtefactDependencies>();
-    
-    static #aspectTypes = new Map<AspectPossiblyAbstractCtor<Aspect>, Array<AspectPossiblyAbstractCtor<Aspect>>>;
 
     static depends<A extends Artefact>(this: ArtefactCtor<A>, ...dependencies: string[]) {
         return (_: any, K: string, descriptor: PropertyDescriptor) => {
-            console.log(`Artefact.depends(): this.name=${this.name} _.name=${_.name} K=${K} dependencies=${dependencies}`);
+            console.log(`Artefact.depends(): this.name=${this.name} K=${K} dependencies=${dependencies}`);// _.name=${_.toString.call(_)}
             // / TODO: store dependencies info for use by proxify below in set/get accessors
             // dependencies.map(d => Reflect.defineMetadata("dependencies", ((Reflect.getMetadata("dependencies", _, d) as string[])?.push(K) ?? [K]), _));
             const getter = descriptor.get;// ?? descriptor.value;
             if (typeof getter !== "function")
                 throw new TypeError(`Artefact.depends(): K=\"${K}\" dependencies=${dependencies/* .map(d => `\"${d}\"`).join(", ") */}: member with @depends should define a function or a getter, descriptor=${JSON.stringify(descriptor)}`);
+            // (this as unknown as typeof Artefact).aspectGetters.set(_[K], getter);
             for (const dependency of dependencies) {
-                const downstreams = Reflect.getMetadata("downstreams", _, dependency) as ArtefactDependencies[] ?? [];
-                if (!downstreams.find(d => d.name === K)) {
-                    downstreams.push({ name: K, getter });
-                    Reflect.defineMetadata("downstreams", _, dependency);
+                const downstreams = Reflect.getMetadata("downstreams", _, dependency) as ArtefactDependencies ?? {};
+                if (downstreams[K] !== getter) {
+                    downstreams[K] = getter;//.push({ name: K, getter: getter/* .bind(this) */ });
+                    Reflect.defineMetadata("downstreams", downstreams, _, dependency);
                 }
             }
         }
@@ -179,9 +182,9 @@ export class Artefact extends EventEmitter {
             _id: this._id,
             ...Object.fromEntries(
                 // Object.getOwnPropertyNames(this)//.constructor.prototype)
-                Array.from(this.#aspects.keys())
+                Array.from(this.aspects.keys())
                     .filter(K => K.name !== "query")
-                    .map(K => ([K.name, this.#aspects.get(K)])))
+                    .map(K => ([K.name, this.aspects.get(K)])))
         });
     }
     toString<A extends Artefact>(this: A) {
@@ -197,28 +200,51 @@ export class Artefact extends EventEmitter {
         this.addAspect(aspect);
         return aspect;
     }
-    addAspect<A extends Aspect>(aspect?: A, aspectCtor?: AspectPossiblyAbstractCtor<A>) {
-        console.log(`addAspect: aspect=${aspect}, aspectCreator.name=${aspectCtor?.name}, aspect?.constructor=${(aspect?.constructor as AspectPossiblyAbstractCtor<A>).name}`);
+    async addAspect<A extends Aspect>(aspect?: A, aspectCtor?: AspectPossiblyAbstractCtor<A>) {
+        console.log(`addAspect: aspect=${aspect}, aspectCreator.name=${aspectCtor?.name}, aspect?.constructor=${(aspect?.constructor as AspectPossiblyAbstractCtor<A>)?.name}`);
         if (!aspect) {
             if (!!aspectCtor) {
-                this.#aspects.delete(aspectCtor);
+                this.aspects.delete(aspectCtor);
             }
             else throw new TypeError(`addAspect(): aspect == null && aspectCtor == null`)
         } else {
-            this.#aspects.set(aspectCtor ?? aspect?.constructor as AspectPossiblyAbstractCtor<A>, aspect);
+            aspectCtor ??= aspect.constructor as AspectPossiblyAbstractCtor<A>;
+            this.aspects.set(aspectCtor /* ?? aspect?.constructor as AspectPossiblyAbstractCtor<A> */, aspect);
             aspect.onAddedToArtefact(this);
-            this.emit('addAspect', aspect, aspectCtor ?? aspect.constructor);
+            // this.emit('addAspect', aspect, aspectCtor ?? aspect.constructor);
+            const downstreams = Reflect.getMetadata("downstreams", this, aspectCtor.name) as ArtefactDependencies ?? {};
+            console.log(`addAspect(): aspectCtor.name=${aspectCtor.name} aspect=${aspect} downstreams=${JSON.stringify(downstreams)}`);
+            const getterTasks = mapObject(downstreams, ([name, getter]) => ([name,
+                (async () => {
+                    const valuePending = getter.apply(this);
+                    const value = await valuePending;
+                    // Object.defineProperty(this, name, { enumerable: true, configurable: true, value });
+                    this.addAspect(value);
+                    if (this.aspectsPending[name] === valuePending) {
+                        delete this.aspectsPending[name];
+                    }
+                    return value;
+                })()
+            ]));
+            this.aspectsPending = {
+                ...this.aspectsPending,
+                ...getterTasks,
+            };
+            // const aspectsResult = await pProps(getterTasks);
+            // this.aspectsPending = this.aspectsPending.splice(this.aspectsPending.indexOf(getterTasks), 1);
+            console.log(`addAspect(): aspectCtor.name=${aspectCtor.name} aspect=${aspect} downstreams=${JSON.stringify(downstreams)} getterTasks=${JSON.stringify(getterTasks)} this.aspectsPending=${JSON.stringify(this.aspectsPending)}`);
+            await pProps(getterTasks);
         }
         return this;
     }
     getAspect<A extends Aspect>(aspectCtor: AspectPossiblyAbstractCtor<A>) {
         console.log(`getAspect: aspectCtor.name=${aspectCtor.name}`);
-        return this.#aspects.get(aspectCtor) as A | undefined;
+        return this.aspects.get(aspectCtor) as A | undefined;
     }
 
-    async* toData<A extends Artefact>(): AsyncGenerator<Timestamped<Partial<ArtefactDataProperties<A>>>, Timestamped<Partial<ArtefactDataProperties<A>>>, undefined> {
+    /* async*  */toData<A extends Artefact>()/* : AsyncGenerator<Timestamped<Partial<ArtefactDataProperties<A>>>, Timestamped<Partial<ArtefactDataProperties<A>>>, undefined> */ {
         console.log(`toData: this=${this}`);
-        var dataAndUpdates = /* Object.fromEntries(Object.entries( */this.toJSON()/* )) */;//.constructor.prototype)
+        return /* var dataAndUpdates = */ /* Object.fromEntries(Object.entries( */this.toJSON()/* )) */;//.constructor.prototype)
             // .filter(([K, V]) => K !== 'constructor' && K !== 'query')
             // .map(([K, V]) => ([K, !!(V?.get) ? V.get.call(this) :
             //     !!(V?.value) ? typeof V.value === 'function' ? V.value.call(this) : V.value
@@ -231,13 +257,16 @@ export class Artefact extends EventEmitter {
                 //     !!V.value ? typeof V.value === 'function' ? V.value.call(this) : V.value
                 //     : undefined
                 // ])));
-        const dataOnly = dataAndUpdates;//filterObject(dataAndUpdates, (([K, V]) => typeof V !== "function"));
-        console.log(`toData(): dataUpdates = ${JSON.stringify(dataAndUpdates)} dataOnly=${JSON.stringify(dataOnly)}`);
-        yield { ...dataAndUpdates as Timestamped<Partial<ArtefactDataProperties<A>>>, _ts: new Date() };
-        const result = { ...await pProps(dataAndUpdates), _ts: new Date() };
-        console.log(`toData(): result = ${JSON.stringify(result)}`);
-        yield { ...result as Timestamped<Partial<ArtefactDataProperties<A>>>, _ts: new Date() };
-        return result;
+    }
+    async toDataPending<A extends Artefact>(): Promise<Timestamped<Partial<ArtefactDataProperties<A>>>> {
+        return await pProps(this.aspectsPending).then(result => this.toDataPending());
+        // const dataOnly = dataAndUpdates;//filterObject(dataAndUpdates, (([K, V]) => typeof V !== "function"));
+        // console.log(`toData(): dataUpdates = ${JSON.stringify(dataAndUpdates)} dataOnly=${JSON.stringify(dataOnly)}`);
+        // yield { ...dataAndUpdates as Timestamped<Partial<ArtefactDataProperties<A>>>, _ts: new Date() };
+        // const result = { ...await pProps(dataAndUpdates), _ts: new Date() };
+        // console.log(`toData(): result = ${JSON.stringify(result)}`);
+        // yield { ...result as Timestamped<Partial<ArtefactDataProperties<A>>>, _ts: new Date() };
+        // return result;
     }
     static addAspectType<A extends Aspect>(aspectCtor: AspectPossiblyAbstractCtor<A>, dependencies: Array<AspectPossiblyAbstractCtor<Aspect>>) {
         this.#aspectTypes.set(aspectCtor, dependencies);
@@ -248,7 +277,7 @@ export class Artefact extends EventEmitter {
     static getAspectTypes() {
         return this.#aspectTypes;
     }
-    static Type<A extends Artefact>(name: string, artefactType: { [K: string]: typeof Aspect | ((this: A) => any) } /* ArtefactCtor<A> */) {
+    static Type<A extends Artefact>(name: string, artefactType: { [K: string]: typeof Aspect } /* | ((this: A) => any) ArtefactCtor<A> */) {
         const C = class extends Artefact {};
         Object.defineProperty(C, "name", name);
         for (const K in artefactType) {
@@ -256,15 +285,16 @@ export class Artefact extends EventEmitter {
             Object.defineProperty(C.prototype, K, {
                 configurable: true,
                 enumerable: true,
-                get: Aspect.isPrototypeOf(artefactType[K]) ?
-                    function getter(this: Artefact) { return this.getAspect(artefactProp as typeof Aspect); } :
-                    artefactProp as ((this: A) => any)
+                // get: Aspect.isPrototypeOf(artefactType[K]) ?
+                    get: function getter(this: Artefact) { return this.getAspect(artefactProp as typeof Aspect); }// :
+                    // artefactProp as ((this: A) => any)
                     // function getter(this: Artefact) {
                     //     const cachedValue = this.getAspect(artefactType[K] as typeof Aspect);
                     //     // otherwise call getter and addAspect new value for caching
                     // }
             });
         }
+        return C;
     }
 
     // does this fn need a this parameter to construct derived classes with new this() ? or not.. check..

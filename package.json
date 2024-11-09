@@ -31,7 +31,6 @@
   },
   "homepage": "https://github.com/jbowwww/file-monger#readme",
   "dependencies": {
-    "@justinseibert/depends-on": "^1.2.1",
     "deep-object-diff": "^1.1.9",
     "mongodb": "^6.5.0",
     "reflect-metadata": "^0.2.2",
