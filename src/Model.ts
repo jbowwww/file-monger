@@ -116,9 +116,6 @@ export type Id<T> = T & { _id?: string; };
 export class Artefact {
     
     static is<A extends Artefact = Artefact>(this: Ctor<A>, a: any) { return is(a, this); }
-    static #timestamp(value: any) {
-        return ({ ...value, _ts: new Date(), });
-    }
     
     _id?: string;
     
@@ -192,6 +189,16 @@ export class Artefact {
         for await (const aspect of source) {
             yield (new this()).addAspect(aspect);
         }
+    }
+
+    static Type<T extends Record<string, Aspect>>(schema: Partial<T>) {
+        const C = class {};
+        Object.defineProperties(C.prototype, mapObject(schema, ([K, V]) => ([K, {
+            configurable: false,
+            writeable: false,
+            enumerable: true,
+            get: 
+        ])));
     }
 
     get query(): Queries<Artefact> {

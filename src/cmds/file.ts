@@ -2,7 +2,7 @@ import yargs, { ArgumentsCamelCase } from "yargs";
 import { Artefact, Aspect, AspectProperties } from "../Model";
 import * as db from '../db';
 import { File, Directory, FileEntry, calculateHash } from "../fs";
-import dependsOn from "@justinseibert/depends-on";
+import { KeysOfAType } from "mongodb";
 
 export enum CalculateHashEnum {
     Disable,
@@ -33,7 +33,27 @@ class Hash extends Aspect {
     }
 }
 
-class FileArtefact extends Artefact {
+const makeArtefactType = <A extends {}>(schema: A) => (props?: Partial<A>) => {
+    const aspectTypes = new Map<typeof Aspect, Aspect>;
+    const artefactData = {
+        _id: undefined,
+    };
+
+    const artefactFn = function(aspectType?: typeof Aspect) {
+        if (!!aspectType) {
+            return aspectTypes.get(aspectType);
+        }
+        return artefactData;
+    };
+
+    return Object.assign(artefactFn, artefactData);
+};
+
+const FileArtefact = makeArtefactType({
+    fileEntry: FileEntry,
+    file: File,
+    directory: Directory,
+}) {
 
     get fileEntry() { return this.getAspect(FileEntry); }// || this.getAspect(File) || this.getAspect(Directory); }
     set fileEntry(fileEntry: FileEntry | undefined) { this.addAspect(fileEntry); }
@@ -43,8 +63,7 @@ class FileArtefact extends Artefact {
     
     get directory() { return this.getAspect(Directory); }
     set directory(directory: Directory | undefined) { this.addAspect(directory); }
-    
-    @dependsOn(['file'])
+
     get hash(): Promise<Hash> | undefined { return this.getAspect(Hash) ?? !!this.file ? this.createAspect(Hash, { path: this.file?.path }) : undefined; };
     set hash(hash: Hash | undefined) { this.addAspect(hash, Hash); }
 
