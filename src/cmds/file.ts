@@ -1,8 +1,7 @@
 import yargs, { ArgumentsCamelCase } from "yargs";
-import { Artefact, Aspect, AspectProperties } from "../Model";
+import { Aspect, AspectProperties } from "../Model";
 import * as db from '../db';
 import { File, Directory, FileEntry, calculateHash } from "../fs";
-import dependsOn from "@justinseibert/depends-on";
 
 export enum CalculateHashEnum {
     Disable,
@@ -19,7 +18,7 @@ export interface FileCommandArgv {
     },
 }
 
-class Hash extends Aspect {
+/* class Hash extends Aspect {
     sha256?: string;
 
     constructor({ sha256, ...aspect }: AspectProperties<Hash>) {
@@ -31,9 +30,40 @@ class Hash extends Aspect {
         const sha256 = await calculateHash(path);
         return new Hash({ _, sha256 })
     }
-}
+} */
 
-class FileArtefact extends Artefact {
+type Function<TArgs extends [] | any[] = [], TReturn = any> = (...args: TArgs) => TReturn;
+type ArtefactSchema = {
+    [K: string]: typeof Aspect | Function<any[], Aspect>;
+};
+type ArtefactInstance<S extends ArtefactSchema> = {
+    [K in keyof S]:
+        S[K] extends typeof Aspect ? InstanceType<S[K]> :
+        S[K] extends Function<any[], Aspect> ? ReturnType<S[K]>;
+};
+
+const Type = <S extends ArtefactSchema>(schema: S) => {
+    class Artefact {
+        constructor() {}
+    };
+    for (const K in schema) {
+        const V = schema[K];
+        if (Aspect.isPrototypeOf(V)) {
+            Object.defineProperty(Artefact, K, { enumerable: true, value: undefined, });
+        }
+    }
+    return Artefact as (typeof Artefact & ArtefactInstance<S>);
+};
+
+const FileArtefact = Type({
+    fileEntry: FileEntry,
+    file: File,
+    directory: Directory,
+
+    // hash: 
+});
+
+const a1 = new FileArtefact()
 
     get fileEntry() { return this.getAspect(FileEntry); }// || this.getAspect(File) || this.getAspect(Directory); }
     set fileEntry(fileEntry: FileEntry | undefined) { this.addAspect(fileEntry); }
