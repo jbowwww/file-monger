@@ -33,19 +33,20 @@ class Hash extends Aspect {
     }
 }
 
-class FileArtefact extends Artefact {
+class FileArtefact {
 
-    get fileEntry() { return this.getAspect(FileEntry); }// || this.getAspect(File) || this.getAspect(Directory); }
-    set fileEntry(fileEntry: FileEntry | undefined) { this.addAspect(fileEntry); }
+    public fileEntry: FileEntry;
 
-    get file() { return this.getAspect(File); }
-    set file(file: File | undefined) { this.addAspect(file); }
+    @derivedFrom("fileEntry") public file?: File;
+    @derivedFrom("fileEntry") public directory?: Directory;
     
-    get directory() { return this.getAspect(Directory); }
-    set directory(directory: Directory | undefined) { this.addAspect(directory); }
-    
-    @dependsOn(['file'])
+    @dependency(['file'])
     get hash(): Promise<Hash> | undefined { return this.getAspect(Hash) ?? !!this.file ? this.createAspect(Hash, { path: this.file?.path }) : undefined; };
+
+    constructor({ fileEntry }: { fileEntry: FileEntry, }) {
+        this.fileEntry = fileEntry;
+    }
+    
     set hash(hash: Hash | undefined) { this.addAspect(hash, Hash); }
 
     get query() {
