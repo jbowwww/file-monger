@@ -1,7 +1,8 @@
-import yargs, { ArgumentsCamelCase } from "yargs";
-import { Artefact, ArtefactDependencies, Aspect, AspectPossiblyAbstractCtor, AspectProperties, isArtefactCtor, is } from "../Model";
+import { Artefact, ArtefactDownstreams, Aspect, AspectPossiblyAbstractCtor, AspectProperties, isArtefactCtor, is, stringify, AnyParameters, AspectCtor, Ctor } from "../Model";
 import * as db from '../db';
-import { File, Directory, FileEntry, calculateHash } from "../fs";
+import { File, Directory, FileEntry as FileSystemEntry, calculateHash } from "../fs";
+import yargs, { ArgumentsCamelCase } from "yargs";
+import { diff, updatedDiff } from "deep-object-diff";
 
 export enum CalculateHashEnum {
     Disable,
@@ -32,77 +33,60 @@ class Hash /* extends Aspect */ {
     }
 }
 
+
+// type ComputedValueInputCtor<T extends Aspect = Aspect> = Ctor<T>;//<T extends Aspect = Aspect, TArgs extends AnyParameters = AnyParameters> = AspectCtor<T, TArgs>;
+// type ComputedValueInputCtors = { [K: number]: ComputedValueInputCtor<Aspect>; };
+// type ComputedValueType<T extends ComputedValueInputCtors, K extends number = keyof T? =  = T extends ComputedValueInputCtors ? ComputedValueInputCtor<InstanceType<T[K]>> : never;
+// type ComputedValueInputs<T extends ComputedValueInputCtors> = { [K in keyof T as number]: ComputedValueType<T, K>; }
+
+type Arrayish = Array<any> & { [n: number]: unknown; }
+type AugmentElements<T extends Arrayish, A> = T & { [n: number]: T[typeof n] & A; };
+type Condition<I extends Artefact> = (_: I) => boolean;// (...aspects: AugmentElements<I, undefined>) => boolean;
+type Computation<I extends Artefact, O = any> = (_: I) => O | Promise<O> | null | Promise<null>;// (...inputs: AugmentElements<I, undefined>) => O | Promise<O> | null;
+
+// class AsyncComputedValue<I extends Artefact, O = any> {
+//     condition: Condition<I> = _ => true;
+//     compute: Computation<I, O>;
+
+//     constructor(_: I, compute: Computation<I, O>) {
+//         // this.condition = condition;
+//         this.compute = compute;
+//     }
+
+// }
+
+type ComputedValue<I extends Artefact, O extends any> = O | ((_: ResolvedValues<I>, _previous?: ResolvedValues<I>, previousValue?: File) => (O | undefined));
+type AsyncComputedValue<I extends Artefact, O extends any> = O | Promise<O> | ((_: ResolvedValues<I>, _previous?: ResolvedValues<I>, previousValue?: O) => (O | Promise<O> | undefined));
+type ResolvedValues<A extends Artefact> = {
+    [K in keyof A]: A[K] extends (ComputedValue<A, infer O> | AsyncComputedValue<A, infer O>) ? O/* ReturnType<A[K]> */ : A[K];
+};
+
 // @notifyPropertyChanges
-class FileArtefact extends Artefact {
-    constructor(...args: any[]) {
+class FileSystemArtefact extends Artefact {
+
+    constructor(FileEntry: FileSystemEntry) {
         super();
-        // const propertyNames = Object.getOwnPropertyNames(this);
-        // console.log(`FileArtefact.ctor: propertyNames=${propertyNames.join(", ")}`);
-        return new Proxy(this, {
-            set(_, K: string, newValue, receiver) {
-                console.log(`FileArtefactProxy.set() 1:  K=${K} _=${_} newValue=${newValue} receiver=${receiver}`);
-                const aspect: Aspect = _[K];
-                // if (Aspect.prototype.isPrototypeOf(aspect)) {
-                _[K] = newValue;
-                const dependencies: ArtefactDependencies[] = Reflect.getOwnMetadata("dependencies", _, K);
-                console.log(`FileArtefactProxy.set() 2:  K=${K} _=${_} newValue=${newValue} receiver=${receiver}`);
-                // }
-                return true;
-            },
-            get(_, K: string | symbol, receiver) {
-                K = typeof K === "symbol" ? K.toString() : K;
-                const debugOutput = K !== "then" && !K.startsWith("Symbol(") && K !== "toString" && K !== "toData" && K !== "addAspect";
-                if (debugOutput) console.log(`FileArtefactProxy.get() 1:  K=${K} _=${_} ... `);//  _[K]=${_[K]}receiver=${JSON.stringify(receiver)}
-                // let value = _.getAspect(K);
-                // if (!!value) return value;
-                const descriptor = Object.getOwnPropertyDescriptor(_/* .prototype */, K);
-                const aspectType = Reflect.getMetadata("design:type", _, K) as typeof Aspect;
-                const dependencies: ArtefactDependencies | undefined = Reflect.getOwnMetadata("dependencies", _, K);
-                let value = descriptor?.value;// ?? _[K];
-                if (debugOutput) console.log(`FileArtefactProxy.get() 2: descriptor=${JSON.stringify(descriptor)} aspectType?.name=${aspectType?.name} dependencies=${dependencies} value=${value}`);//  _[K]=${_[K]}receiver=${JSON.stringify(receiver)}
-                // if (Object.hasOwn(_, K)) {
-                //     
-                // }
-                // if (!descriptor) throw new TypeError(`FileArtefactProxy.get(): property K=\"${K}\" doesn't exist on _=${_}`);
-                if (!!aspectType) {
-                    const gotValue = _.getAspect(aspectType);
-                    if (!!gotValue) {
-                        return gotValue;
-                    }
-                }
-                const innerGetter = dependencies?.getter || descriptor?.get;
-                if (!!innerGetter) {
-                    const gotValue = innerGetter?.call(_);
-                    if (!!gotValue) {
-                        _.addAspect(gotValue);
-                    }
-                    return gotValue;
-                }
-                value = _[K];
-                return typeof value === "function" ?
-                    Aspect.isPrototypeOf(value) ? _.getAspect(value as AspectPossiblyAbstractCtor<any>) :
-                    (function (...args: any[]) { return (value as Function).apply(/* this === receiver ? target : this */_, args); }) :
-                    value;
-            }
-        });
+        this.FileEntry = FileEntry;
     }
-    FileEntry: FileEntry = null!;
-    File: File = null!;
-    Directory: Directory = null!;
-    // todo: debug this and see if anything (e.g. toData) is calling it
-    @FileArtefact.depends('File')
-    get hash(): Promise<Hash> | undefined {
-        console.log(`FileArtefact.hash(): this=${this}`)
-        return /* this.getAspect(Hash) ?? */ !!this.File ? Hash.create({ /* _: this, */ path: this.File.path }) : undefined;
-    };
+
+    readonly FileEntry: FileSystemEntry;
+    readonly File?: ComputedValue<FileSystemArtefact, File> = _ => _.FileEntry as File;
+    readonly Directory?: Directory;
+
+    readonly Hash?: AsyncComputedValue<FileSystemArtefact, Hash> | undefined = (_, _previous, previousValue?: Hash) =>
+        !!_.File && (!_previous || Object.keys(diff(_, _previous)).includes("File.stats")) ?
+            Hash.create({ path: _.File.path }) :
+            previousValue
+    // readonly Hash?: AsyncComputedValue<FileSystemArtefact, Hash> = (_: FileSystemArtefact) => !!this.File ? Hash.create({ path: this.File!.path }) : undefined;
+    // readonly Hash? = new AsyncComputedValue(this, _ => !!_.File ? Hash.create({ path: _.File.path }) : null);
 
     get query() {
         return ({
             unique:
                 !!this._id ? { _id: this._id } :
-                !!this.getAspect(File) ? { "file.path": this.getAspect(File)!.path } :
-                !!this.getAspect(Directory) ? { "directory.path": this.getAspect(Directory)!.path } :
-                !!this.getAspect(FileEntry) ? { "fileEntry.path": this.getAspect(FileEntry)!.path } : {},
+                // !!this.File ? { "File.path": this.File.path } :
+                // !!this.Directory ? { "Directory.path": this.Directory.path } :
+                !!this.FileEntry ? { "FileEntry.path": this.FileEntry.path } : {},
         });
     }
 }
@@ -119,12 +103,12 @@ export const builder = (yargs: yargs.Argv) => yargs
         }),
         async function (argv): Promise<void> {
             for (const path of argv.paths) {
-                const store = await db.storage.store<FileArtefact>('fileSystemEntries');
-                for await (const fsEntry of FileArtefact.stream(FileEntry.walk(path))) {
+                const store = await db.storage.store<FileSystemArtefact>('fileSystemEntries');
+                for await (const fsEntry of FileSystemArtefact.stream(FileSystemEntry.walk(path))) {
                     console.log(`fsEntry1 = ${fsEntry}`);
                     const dbEntry = (await store.updateOrCreate(fsEntry));
                     console.log(`fsEntry2 = ${fsEntry}`);
-                    if (!dbEntry?._.hash) {
+                    if (!dbEntry?._.Hash) {
 
                     }
                 }
