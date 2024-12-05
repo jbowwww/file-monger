@@ -1,5 +1,5 @@
 import { ChangeStreamDocument, ChangeStreamInsertDocument, ChangeStreamUpdateDocument, Collection, Db, Filter, MongoClient, MongoClientOptions, UpdateFilter, UpdateOptions, UpdateResult, WithId } from 'mongodb';
-import { Artefact, ArtefactDataProperties, Id, Timestamped } from './Model';
+import { Artefact, ArtefactDataProperties, filterObject, Id, mapObject, Timestamped } from './Model';
 import { diff } from 'deep-object-diff';
 
 export let client: MongoClient | null = null;
@@ -144,13 +144,19 @@ export class MongoStore<A extends Artefact, TSchema extends Id<Timestamped<Parti
         const query2 = (!!dbId ? ({ _id: { $eq: dbId } }) : query) as Filter<TSchema>;
         for await (const update of [artefact.toData()/* , await artefact.toDataPending() */]/* data */) {
             const { _id, _ts, ...dbUpdate } = diff(dbArtefact ?? {}, update) as TSchema;//({ _id?: string; _ts?: Date; });
-            if (Object.keys(dbUpdate).length > 0) {
-                result = { ...await this._collection.updateOne(query2, { $set: { ...dbUpdate, _ts } as TSchema }, options), _: artefact };
+            if (Object.keys(filterObject(Object.getOwnPropertyDescriptors(dbUpdate), ([K, V]) => V?.enumerable)).length > 0) {
+                result = await this._collection.updateOne(query2, { $set: { ...dbUpdate, _ts } as TSchema }, options) as UpdateResult<TSchema> & { _: A };
+                Object.assign(dbArtefact ?? {}, dbUpdate);
+                if (!artefact._id && !!dbId) {
+                    artefact._id = dbId;
+                }
             }
-            // console.log(`updateOrCreate(): \n\tquery = ${JSON.stringify(query)}\n\tquery2 = ${JSON.stringify(query2)}\n\toptions = ${JSON.stringify(options)}\n\tartefact = ${artefact}\n\tdata = ${JSON.stringify(data)}\n\tdbArtefact = ${JSON.stringify(dbArtefact)}\n\tupdate = ${JSON.stringify(update)}\n\tdbUpdate = ${JSON.stringify(dbUpdate)}\n\tresult = ${JSON.stringify(mapObject(result, ([K, V]) => K === '_' ? V.toString() : V))}`);        
-            Object.assign(dbArtefact ?? {}, dbUpdate);
+            // console.log(`updateOrCreate(): \n\tquery = ${JSON.stringify(query)}\n\tquery2 = ${JSON.stringify(query2)}\n\toptions = ${JSON.stringify(options)}\n\tartefact = ${artefact}\n\tdbArtefact = ${JSON.stringify(dbArtefact)}\n\tupdate = ${JSON.stringify(update)}\n\tdbUpdate = ${JSON.stringify(dbUpdate)}\n\tresult = ${JSON.stringify(mapObject(result, ([K, V]) => K === '_' ? V.toString() : V))}`);        
         }
         // console.log(`updateOrCreate(): dbArtefact=${JSON.stringify(dbArtefact)}`);
+        if (!!result) {
+            Object.assign(result as any, { _: artefact });
+        }
         return result;
     }
 }

@@ -22,5 +22,5 @@ var argv = yargs(hideBin(process.argv))
   })
   .commandDir('cmds')
   .demandCommand()
-  .help()
+  .help("help", "Help", true)
   .parse();

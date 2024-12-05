@@ -95,12 +95,21 @@ export abstract class Aspect {
     }
 }
 
-export type Queries<T> = {
-    [K: string]: Filter<T> | undefined;
-}
 
 export type ArtefactCtorParameters<A extends Artefact> = A extends new (...args: infer P) => A ? P : A extends new () => A ? [] : never;
-export type ArtefactCtor<A extends Artefact, TArgs extends AnyParameters = ArtefactCtorParameters<A>> = ((new (...args: TArgs) => A) | (new () => A)) & { name: string; prototype: any; };
+export type ArtefactCtor<A extends Artefact, TArgs extends AnyParameters = ArtefactCtorParameters<A>> = ({
+    new (...args: TArgs): A;
+} | {
+    new (): A;
+}) & {
+    name: string;
+    prototype: any;
+    is<A extends Artefact>(this: Ctor<A>, a: any): a is A;
+    asyncComputedValue<A extends Artefact>(this: Ctor<A>, triggers: string[], condition: Condition<A>, computation: Computation<A>): ReturnType<Artefact["asyncComputedValue"]>;
+    notifyPropertyChanges<A extends Artefact>(this: Ctor<A>, ): ReturnType<Artefact["notifyPropertyChanges"]>;
+    stream<S extends Aspect, A extends Artefact>(this: ArtefactCtor<A>, source: AsyncIterable<S>, selector?: (_: A, s: S) => void): ReturnType<Artefact["stream"]>;
+    [Symbol.toPrimitive](hint: string): string | number | Symbol;
+};
 export type ArtefactAbstractCtor<A extends Artefact, TArgs extends AnyParameters = ArtefactCtorParameters<A>> = (abstract new (...args: TArgs) => A & { name: string; prototype: any; });
 export type ArtefactPossiblyAbstractCtor<A extends Artefact, TArgs extends AnyParameters = ArtefactCtorParameters<A>> = ArtefactCtor<A, TArgs> | ArtefactAbstractCtor<A, TArgs>;
 export const isArtefactCtor = <A extends Artefact>(value: any): value is ArtefactCtor<A> => (function testValuePrototype(value: any, testFn: (value: any) => boolean): boolean {
@@ -126,19 +135,61 @@ export function stringify(downstreams: ArtefactDownstreams) {
     return JSON.stringify(mapObject(downstreams, ([K, V]) => ([K, V.toString()])));
 }
 
+type Condition<I extends Artefact, O = any> = (_: I, _previous?: I, previousValue?: O) => boolean;// (...aspects: AugmentElements<I, undefined>) => boolean;
+type Computation<I extends Artefact, O = any> = (_: I, _previous?: I, previousValue?: O) => O | Promise<O> | null | Promise<null>;// (...inputs: AugmentElements<I, undefined>) => O | Promise<O> | null;
+
+export type Queries<T> = {
+    [K: string]: Filter<T> | undefined;
+}
+
+export const Query = Symbol.for("Artefact.Query");
+
 export class Artefact/*  extends EventEmitter */ {
     
-    static is<A extends Artefact = Artefact>(this: Ctor<A>, a: any) { return is(a, this); }
+    static is<A extends Artefact = Artefact>(this: Ctor<A>, a: any): a is A { return is(a, this); }
     // static #dependencies = new Map<string, ArtefactDownstreams>();
     // static #aspectTypes = new Map<AspectPossiblyAbstractCtor<Aspect>, Array<AspectPossiblyAbstractCtor<Aspect>>>;
     // static aspectGetters = new Map<AspectPossiblyAbstractCtor<Aspect>, (...args: AnyParameters) => Aspect>();
-    
+
     [K: string | symbol]: any;
     _id?: string;
 
+    constructor(_?: Artefact) { Object.assign(this, _); }
+
     // private aspects = new Map<string, Aspect>();
     // private aspectsPending: Record<string, Promise<Aspect>> = {};
-    
+
+    static asyncComputedValue<A extends Artefact, T>(this: Ctor<A>, triggers: string[], condition: Condition<A>, computation: Computation<A>) {
+        return function(artefactProperty: { get: () => T, set: (value: T) => void }, context: ClassAccessorDecoratorContext<A, T>) {
+            if (context.kind === "accessor") {
+                return ({
+                    get(this: A) { return context.access.get(this); },
+                    set(this: A, value: T) { return context.access.set(this, value); },
+                });
+            }
+        };
+    }
+
+    static notifyPropertyChanges<A extends Artefact>() {
+        return function(artefactType: /* typeof Artefact */ArtefactCtor<A>, context: ClassDecoratorContext</* typeof Artefact */ArtefactCtor<A>>) {
+            if (context.kind === "class") {
+                const C = class extends artefactType {
+                    constructor() {
+                        super();
+                        for (const K in Object.getOwnPropertyNames(artefactType.prototype)) {
+                            const set = Object.getOwnPropertyDescriptor(artefactType, K)?.set;
+                            Object.defineProperty(this, K, { enumerable: true, set: (V: any) => { 
+                                set?.(V);
+                                return !!set;
+                            } });
+                        }
+                    }
+                };
+                Object.defineProperty(C, "name", { configurable: true, value: artefactType.name });
+                return C as ArtefactCtor<A>;//typeof Arteact;
+            }
+        };
+    }
     // constructor() {
     //     // super({ captureRejections: true });
     //     // this.on("addAspect", async (aspect, aspectCtor) => {
@@ -234,6 +285,7 @@ export class Artefact/*  extends EventEmitter */ {
     //                 .map(K => ([K, this[K]/* this.aspects.get(K) */])))
     //     });
     // }
+    
     toString<A extends Artefact>(this: A) {
         return `[${this.constructor.name}: _id=${this._id ?? "(undefined)"} ${JSON.stringify(this/* .toJSON() */)} query=${JSON.stringify(this.query)}`;
     }
@@ -274,7 +326,6 @@ export class Artefact/*  extends EventEmitter */ {
     // }
 
     /* async*  */toData<A extends Artefact>()/* : AsyncGenerator<Timestamped<Partial<ArtefactDataProperties<A>>>, Timestamped<Partial<ArtefactDataProperties<A>>>, undefined> */ {
-        console.log(`toData: this=${this}`);2
         return filterObject(mapObject(this, 
             ([K, V]) => ([K, typeof V === "function" ? V(this, undefined) : V])),
             ([K, V]) => !isPromise(V));
@@ -284,6 +335,7 @@ export class Artefact/*  extends EventEmitter */ {
                 //     : undefined
                 // ])));
     }
+
     // async toDataPending<A extends Artefact>(): Promise<Timestamped<Partial<ArtefactDataProperties<A>>>> {
     //     return await pProps({ ...this.aspectsPending }).then(result => ({ ...result, ...pProps(this.aspectsPending) }));
     //     // const dataOnly = dataAndUpdates;//filterObject(dataAndUpdates, (([K, V]) => typeof V !== "function"));
@@ -327,7 +379,6 @@ export class Artefact/*  extends EventEmitter */ {
     static async* stream<S extends Aspect, A extends Artefact>(this: ArtefactCtor<A>, source: AsyncIterable<S>, selector?: (_: A, s: S) => void) {
         console.log(`stream: this.name=${this.name}`);
         for await (const aspect of source) {
-            console.log(`stream: aspect=${aspect} this.length=${this.length}`);
             let _;
             if (this.length === 1) {
                 _ = new (this as ArtefactCtor<A, [S]>)(aspect);
@@ -343,5 +394,15 @@ export class Artefact/*  extends EventEmitter */ {
         return ({
             unique: !this._id ? undefined : ({ _id: { $eq: this._id } }),
         });
+    }
+
+    get [Query](): Queries<Artefact> {
+        return ({
+            unique: !this._id ? undefined : ({ _id: { $eq: this._id } }),
+        });
+    }
+
+    static [Symbol.toPrimitive](hint: string): string | number | Symbol {
+        return this.name;
     }
 }

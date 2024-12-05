@@ -33,17 +33,6 @@ class Hash /* extends Aspect */ {
     }
 }
 
-
-// type ComputedValueInputCtor<T extends Aspect = Aspect> = Ctor<T>;//<T extends Aspect = Aspect, TArgs extends AnyParameters = AnyParameters> = AspectCtor<T, TArgs>;
-// type ComputedValueInputCtors = { [K: number]: ComputedValueInputCtor<Aspect>; };
-// type ComputedValueType<T extends ComputedValueInputCtors, K extends number = keyof T? =  = T extends ComputedValueInputCtors ? ComputedValueInputCtor<InstanceType<T[K]>> : never;
-// type ComputedValueInputs<T extends ComputedValueInputCtors> = { [K in keyof T as number]: ComputedValueType<T, K>; }
-
-type Arrayish = Array<any> & { [n: number]: unknown; }
-type AugmentElements<T extends Arrayish, A> = T & { [n: number]: T[typeof n] & A; };
-type Condition<I extends Artefact> = (_: I) => boolean;// (...aspects: AugmentElements<I, undefined>) => boolean;
-type Computation<I extends Artefact, O = any> = (_: I) => O | Promise<O> | null | Promise<null>;// (...inputs: AugmentElements<I, undefined>) => O | Promise<O> | null;
-
 // class AsyncComputedValue<I extends Artefact, O = any> {
 //     condition: Condition<I> = _ => true;
 //     compute: Computation<I, O>;
@@ -61,7 +50,7 @@ type ResolvedValues<A extends Artefact> = {
     [K in keyof A]: A[K] extends (ComputedValue<A, infer O> | AsyncComputedValue<A, infer O>) ? O/* ReturnType<A[K]> */ : A[K];
 };
 
-// @notifyPropertyChanges
+@Artefact.notifyPropertyChanges()
 class FileSystemArtefact extends Artefact {
 
     constructor(FileEntry: FileSystemEntry) {
@@ -69,14 +58,14 @@ class FileSystemArtefact extends Artefact {
         this.FileEntry = FileEntry;
     }
 
-    readonly FileEntry: FileSystemEntry;
-    readonly File?: ComputedValue<FileSystemArtefact, File> = _ => _.FileEntry as File;
+    FileEntry: FileSystemEntry;
+    readonly File?: File;// ComputedValue<FileSystemArtefact, File> = _ => _.FileEntry as File;
     readonly Directory?: Directory;
 
-    readonly Hash?: AsyncComputedValue<FileSystemArtefact, Hash> | undefined = (_, _previous, previousValue?: Hash) =>
-        !!_.File && (!_previous || Object.keys(diff(_, _previous)).includes("File.stats")) ?
-            Hash.create({ path: _.File.path }) :
-            previousValue
+    @Artefact.asyncComputedValue(["File.stats"],
+        (_, _previous) => !!_.File && (!_previous || Object.keys(diff(_, _previous)).includes("File.stats")),
+        (_, _previous) => Hash.create({ path: _.File!.path }))
+    accessor Hash: Hash | undefined = undefined;
     // readonly Hash?: AsyncComputedValue<FileSystemArtefact, Hash> = (_: FileSystemArtefact) => !!this.File ? Hash.create({ path: this.File!.path }) : undefined;
     // readonly Hash? = new AsyncComputedValue(this, _ => !!_.File ? Hash.create({ path: _.File.path }) : null);
 
@@ -104,11 +93,10 @@ export const builder = (yargs: yargs.Argv) => yargs
         async function (argv): Promise<void> {
             for (const path of argv.paths) {
                 const store = await db.storage.store<FileSystemArtefact>('fileSystemEntries');
-                for await (const fsEntry of FileSystemArtefact.stream(FileSystemEntry.walk(path))) {
-                    console.log(`fsEntry1 = ${fsEntry}`);
+                for await (const fsEntry of FileSystemArtefact.stream(FileSystemEntry.walk(path), (_, e) => _.FileEntry = e)) {
                     const dbEntry = (await store.updateOrCreate(fsEntry));
-                    console.log(`fsEntry2 = ${fsEntry}`);
-                    if (!dbEntry?._.Hash) {
+                    console.log(`\ndbEntry = ${JSON.stringify(dbEntry)}`);
+                    if (!dbEntry?._.File/* Entry */) {
 
                     }
                 }
