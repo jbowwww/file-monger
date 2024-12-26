@@ -90,8 +90,24 @@ export abstract class Aspect {
     
     onAddedToArtefact<A extends Artefact>(_: A) { this.#_ = _; }
 
-    static async create<A extends Aspect>(this: AspectCtor<A>, ...props: any[]): Promise<Aspect> {
-        return new this(...props as AspectCtorParameters<A>);
+    static async create<A extends Aspect>(this: AspectCtor<Awaited<A>>, ...props: any[]) {
+        return await new this(...props as AspectCtorParameters<Awaited<A>>);
+    }
+    
+    then<TResult1 = typeof this, TResult2 = never>(onfulfilled?: ((value: TResult1) => { [K in keyof TResult1]: TResult1[K] extends Promise<any> ? | PromiseValue<TResult1[K]> : TResult1[K] }) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2> {
+        return Promise.all(
+            Object.entries(this)
+                .filter(([K, V]) => isPromise(V))
+                .map(([K, V]) => (V as Promise<unknown>).then(v => {
+                    Object.defineProperty(this, K, { enumerable: true, writable: true, value: v });
+                    return v;
+                }))
+        ).catch(reason => {
+
+        }).then(v => this as unknown as TResult1).then(onfulfilled, onrejected);
+    }
+    catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult> {
+
     }
 }
 

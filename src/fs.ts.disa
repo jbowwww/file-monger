@@ -1,7 +1,7 @@
 import nodeCrypto from 'node:crypto';
 import * as nodeFs from 'node:fs';
 import * as nodePath from 'node:path';
-import { Aspect, AspectDataRequiredAndOptionalProperties, DataProperties } from './Model';
+import { Artefact, Aspect, AspectDataRequiredAndOptionalProperties, DataProperties } from './Model';
 
 /*
  * Ongoing reminder of the things I want File aspects / models /classes/modules(<-less OOP more FP?)
@@ -28,21 +28,17 @@ import { Aspect, AspectDataRequiredAndOptionalProperties, DataProperties } from 
 
 export class FileEntry extends Aspect {
     path: string;
-    stats: nodeFs.Stats;
+    stats: nodeFs.Stats | Promise<nodeFs.Stats>;
     
-    constructor({ _, path, stats }: DataProperties<FileEntry>) {
+    constructor({ _, path, stats }: { _: Artefact, path: string, stats?: nodeFs.Stats | Promise<nodeFs.Stats> }) {
         super({ _ });
         this.path = path;
-        this.stats = stats;
+        this.stats = stats ?? nodeFs.promises.stat(path);;
     }
 
-    static override async create({ _, path }: AspectDataRequiredAndOptionalProperties<FileEntry, "path">) {
-        const stats = await nodeFs.promises.stat(path);
-        return (
-            stats.isFile() ? await File.create({ _, path, stats }) :
-            stats.isDirectory() ? await Directory.create({ _, path, stats }) :
-            new UnknownFileEntry({ _, path, stats }));
-    };
+    static override async create({ path, stats }: { path: string, stats?: nodeFs.Stats | Promise<nodeFs.Stats> }) {
+        return (super.create({ path, stats }) as Promise<FileEntry>).then(e => (await e.stats)?.isFile());
+    }
 
     exists() { return nodeFs.existsSync(this.path); }
 
