@@ -1,5 +1,5 @@
 import { World } from "miniplex-project/packages/core";
-import { File, Directory, walk, Unknown, FileSystemEntry, FileSystemEntryTypes, Hash } from "../models/fs";
+import { File, Directory, walk, Unknown, FileSystemEntry, Hash } from "../models/fs";
 import * as nodeFs from 'node:fs';
 import { calculateHash } from "../fs";
 
@@ -36,6 +36,11 @@ export const Artefact_ = {
   unknown: Unknown,
 };
 
+export type ArtefactType = {
+  file: File,
+  directory: Directory,
+  unknown: Unknown,
+};
 export type PipelineFn<T extends {}, R extends {}> = (input: T) => R | Promise<R>;
 // export const pipe = <T extends {} = {}, R extends {} = {}>(pipeFn: PipelineFn<T, R>) => {
 //   const fn = (input: T) => pipeFn(input);
@@ -43,15 +48,15 @@ export type PipelineFn<T extends {}, R extends {}> = (input: T) => R | Promise<R
 //     add<R extends {}, R2 extends {}>(pipeFn: PipelineFn<R, R2>) { return pipe<R, R2>(pipeFn); },
 //   });
 // };
-export const Artefact = <T extends {} = {}, R extends {} = {}>(pipeFn: PipelineFn<T, R>) => {
-  const fn = (input: T) => pipeFn(input);
+export const ArtefactPipeline = <T extends {} = {}, R extends {} = {}>(pipeFn: PipelineFn<T, R>) => {
+  const fn = async (input: T) => await pipeFn(input);
   return Object.assign(fn, {
-    async enhance<R2 extends {}>(pipeFn: PipelineFn<R, R2>) { return Artefact<T, R2>(async (input: T) => pipeFn(await fn(input))); },
+    async enhance<R2 extends {}>(pipeFn: PipelineFn<R, R2>) { return ArtefactPipeline<T, R2>(async (input: T) => pipeFn(await fn(input))); },
   });
 };
 
 export const Artefact__ =
-   Artefact(FileSystemEntry).with()
+   ArtefactPipeline(FileSystemEntry)
   .enhance(Hash)
   
 
