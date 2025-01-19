@@ -77,7 +77,7 @@ export type AspectDataRequiredAndOptionalProperties<A extends Aspect, KR extends
 export type AspectFunction<P extends Aspect, A extends Artefact = Artefact> = ({ _, ...props }: AspectProperties<P>) => A;
 
 export abstract class Aspect {
-    static is<A extends Aspect>(this: AspectPossiblyAbstractCtor<A>, a: any): a is A { return is(a, this); }
+    static is<A extends Aspect>(this: PossiblyAbstractCtor<A>, a: any): a is InstanceType<typeof this> { return is(a, this); }
     static isOrDerives<A>(value: any, typeCtor: typeof Aspect = this): value is A { return isOrDerives(value, typeCtor); }
     
     #_?: Artefact;
@@ -94,7 +94,7 @@ export abstract class Aspect {
         return await new this(...props as AspectCtorParameters<Awaited<A>>);
     }
     
-    then<TResult1 = typeof this, TResult2 = never>(onfulfilled?: ((value: TResult1) => { [K in keyof TResult1]: TResult1[K] extends Promise<any> ? | PromiseValue<TResult1[K]> : TResult1[K] }) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2> {
+    then<TResult1 extends Aspect, TResult2 extends never = never>(onfulfilled?: ((value: Aspect) => { [K in keyof TResult1]: TResult1[K] extends Promise<any> ? | PromiseValue<TResult1[K]> : TResult1[K] }) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2> {
         return Promise.all(
             Object.entries(this)
                 .filter(([K, V]) => isPromise(V))
@@ -104,7 +104,7 @@ export abstract class Aspect {
                 }))
         ).catch(reason => {
 
-        }).then(v => this as unknown as TResult1).then(onfulfilled, onrejected);
+        }).then(v => this).then(onfulfilled, onrejected);
     }
     catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult> {
 

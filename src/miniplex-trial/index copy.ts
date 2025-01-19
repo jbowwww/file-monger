@@ -2,6 +2,7 @@ import { World } from "miniplex-project/packages/core";
 import { File, Directory, walk, Unknown, FileSystemEntry, Hash } from "../models/fs";
 import * as nodeFs from 'node:fs';
 import { calculateHash } from "../file";
+import { Filter } from "mongodb";
 
 // type Entity = { [K in keyof FileSystemEntryTypes]: FileSystemEntryTypes; }[keyof FileSystemEntryTypes];
 // type Entity = FileSystemEntryTypes[keyof FileSystemEntryTypes];//File | Directory | Unknown;
@@ -25,15 +26,37 @@ export class Aspect {
 }
 
 export class Artefact extends Map<AspectCtor, Aspect> {
-  aspects: Map<string, unknown> = new Map();
   has(aspectCtor: AspectCtor) { return super.has(aspectCtor); }
   get(aspectCtor: AspectCtor) { return super.get(aspectCtor); }
-  set(aspect: Aspect) {
+  add(aspect: Aspect) {
     super.set(aspect.constructor as AspectCtor, aspect);
     return this;
   }
 }
 
-for await (const fsEntry of walk(".")) {
-  const _ = world.add(fsEntry);
+
+
+
+export type EntityBase = { _id: string; [K: string]: Aspect; };
+
+export interface Store<T extends EntityBase> {
+  findOne<A extends Aspect>(aspect: A, )
+  createOrUpdate(match: Filter<T>, update: ): T;
 }
+
+const createOrUpdateFileSystemEntries = async <T extends EntityBase>(store: Store<T>, source: AsyncIterable<T>) => {
+  for await (const fsEntry of FileSystemEntry.walk(".")) {
+    const _ = store.createOrUpdate({
+      $or: [{
+
+      }]
+    })
+    _.add(fsEntry);
+  }
+}
+  
+  // pipe(
+  //   source, //FileSystemEntry.walk("."),
+  //   (fsEntry: T)
+
+  // )
