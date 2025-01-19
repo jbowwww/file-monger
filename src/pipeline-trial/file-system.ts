@@ -16,20 +16,20 @@ export type File = EntryBase<EntryType.File>///* "File" */; };
 export type Directory = EntryBase<EntryType.Directory>;
 export type Unknown = EntryBase<EntryType.Unknown>;
 export type Entry = File | Directory | Unknown;
-export const Entry = pipeline<EntryBase, {}, EntryBase>({       // { name: string, arguments: { path: string, stats?: nodeFs.Stats } }
+export const Entry = pipeline<Partial<EntryBase>, {}, EntryBase>({       // { name: string, arguments: { path: string, stats?: nodeFs.Stats } }
     name: "FileSystem.Entry",
     initializer: ({ path }) => ({ }),
     stages: [
-        async (context, { name, arguments: { path } }) => ({ stats: await nodeFs.promises.stat(path) }),
-        async (context, { name, arguments: { path, stats } }) => ({ _T: stats.isFile() ? EntryType.File : stats.isDirectory() ? EntryType.Directory : EntryType.Unknown })
+        async (context, { arguments: { path } })          =>  ({ stats: await nodeFs.promises.stat(path!) }),
+        async (context, { arguments: { path, stats } })   =>  ({ _T: stats?.isFile() ? EntryType.File : stats?.isDirectory() ? EntryType.Directory : EntryType.Unknown })
     ],
-    resultsValidator: (result: Partial<EntryBase<EntryType>>): result is EntryBase<EntryType> => true,
+    resultsValidator: (result: Partial<EntryBase>): result is EntryBase => true,
 });
 
 // can these be created as one generic is<T> using these mapped discriminated unions ?
-export const isFile = (f: any): f is File => f._T === "file";
-export const isDirectory = (d: any): d is Directory => d._T === "directory";
-export const isUnknown = (u: any): u is Unknown => u._T === "unknown";
+export const isFile = (f: any): f is File => f._T === EntryType.File;
+export const isDirectory = (d: any): d is Directory => d._T === EntryType.Directory;
+export const isUnknown = (u: any): u is Unknown => u._T === EntryType.Unknown;
 
 export type WalkCallbackFn = (entry: EntryBase, depth: number) => { emit: boolean, recurse?: boolean };
 export async function *walk({
@@ -46,11 +46,12 @@ export async function *walk({
     depth?: number,
 }): AsyncGenerator<Entry> {
     try {
-        const stats = await nodeFs.promises.stat(path);
-        const entry: Entry = //create
-            stats.isFile()      ?   { _T: EntryType.File,       path, stats } :
-            stats.isDirectory() ?   { _T: EntryType.Directory,  path, stats } :
-                                    { _T: EntryType.Unknown,    path, stats } ;
+        // const stats = await nodeFs.promises.stat(path);
+        const entry = await Entry({ path });
+        // : Entry = //create
+        //     stats.isFile()      ?   { _T: EntryType.File,       path, stats } :
+        //     stats.isDirectory() ?   { _T: EntryType.Directory,  path, stats } :
+        //                             { _T: EntryType.Unknown,    path, stats } ;
         const { emit, recurse } = callback(entry, depth);
         if (emit) {
             yield entry;
