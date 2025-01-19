@@ -32,6 +32,7 @@
   },
   "homepage": "https://github.com/jbowwww/file-monger#readme",
   "dependencies": {
+    "@fieldguide/pipeline": "^1.2.2",
     "deep-object-diff": "^1.1.9",
     "miniplex-project": "github:jbowwww/miniplex",
     "mongodb": "^6.5.0",
