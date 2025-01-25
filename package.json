@@ -4,9 +4,9 @@
   "description": "Another attempt at a distributed file-mongering tool.",
   "main": "index.js",
   "scripts": {
-    "build": "npx tsc ; npx babel --delete-dir-on-start -D ./dist -d ./lib",
-    "start": "npm run build ; node --enable-source-maps ./lib/cli.js",
-    "babel": "npx babel-node --enable-source-maps lib/cli.js",
+    "build": "npx tsc",
+    "start": "npm run build ; node --enable-source-maps ./dist/cli.js",
+    "dev": "node --enable-source-maps ./dist/cli.js",
     "help": "node dist/cli.js --help",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -40,11 +40,7 @@
     "yargs": "^17.7.2"
   },
   "devDependencies": {
-    "@babel/cli": "^7.25.9",
-    "@babel/core": "^7.26.0",
-    "@babel/plugin-proposal-decorators": "^7.25.9",
-    "@babel/preset-env": "^7.26.0",
-    "@types/node": "^20.14.15",
+    "@types/node": "^22.0.0",
     "@types/yargs": "^17.0.32",
     "typescript": "^5.4.5"
   }

@@ -1,6 +1,6 @@
-import { ChangeStreamDocument, ChangeStreamInsertDocument, ChangeStreamUpdateDocument, Collection, Db, Filter, MongoClient, MongoClientOptions, UpdateFilter, UpdateOptions, UpdateResult, WithId } from 'mongodb';
-import { Artefact, ArtefactDataProperties, filterObject, Id, mapObject, Timestamped } from './Model';
-import { diff } from 'deep-object-diff';
+import { ChangeStreamDocument, ChangeStreamInsertDocument, ChangeStreamUpdateDocument, Collection, Db, Filter, MongoClient, MongoClientOptions, UpdateFilter, UpdateOptions, UpdateResult, WithId } from "mongodb";
+// import { Artefact, ArtefactDataProperties, filterObject, Id, mapObject, Timestamped } from './Model';
+import { diff } from "deep-object-diff";
 
 export let client: MongoClient | null = null;
 export let connection: MongoClient;
@@ -19,7 +19,7 @@ export interface Storage {
     isConnected(): boolean;
     connect(): Promise<Storage>;
     close(): Promise<Storage>;
-    store<A extends Artefact, TSchema extends Id<Timestamped<Partial<ArtefactDataProperties<A>>>> = Id<Timestamped<Partial<ArtefactDataProperties<A>>>>>(name: string, options?: any): Promise<Store<A, TSchema>>;
+    store<A extends Artefact>(name: string, options?: any): Promise<Store<A, TSchema>>;
 }
 
 export type StorageConfigurationFunction = () => Storage;
