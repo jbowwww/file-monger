@@ -102,7 +102,7 @@ export interface Store<A extends Artefact> {
     findOne(query: Filter<A>): Promise<WithId<A> | null>;
     findOneAndUpdate(query: Filter<A>, update: A): Promise<WithId<A> | null>;
     updateOne(artefact: A, query?: Filter<A>, options?: UpdateOptions): Promise<UpdateResult<A> | null>;
-    updateOrCreate(artefact: A, options?: UpdateOptions): Promise<(UpdateResult<A> & { _: A }) | null | undefined>;
+    updateOrCreate(artefact: A, query: Filter<A>, options: UpdateOptions): Promise<(UpdateResult<A> & { _: A }) | null | undefined>;
 }
 
 export class MongoStore<A extends Artefact> implements Store<A> {
@@ -143,9 +143,8 @@ export class MongoStore<A extends Artefact> implements Store<A> {
         const dbArtefact = await this._collection.findOne<A>(query, options); //AndReplace(query, data as WithoutId<TSchema>, options);
         const dbId = dbArtefact?._id;
         const query2 = (!!dbId ? ({ _id: { $eq: dbId } }) : query) as Filter<A>;
-        for await (const update of artefact.streamData()/* , await artefact.toDataPending() *//* data */) {
-            const { _id/* , _ts */, ...dbUpdate } = (dbArtefact?.diff(update) ?? update) as A;//({ _id?: string; _ts?: Date; });
-            const dbUpdate = dbArtefact. diff()
+        for await (const update of artefact.streamData()) {
+            const { _id/* , _ts */, ...dbUpdate } = update;
             if (Object.keys(filterObject(Object.getOwnPropertyDescriptors(dbUpdate), ([K, V]) => V?.enumerable)).length > 0) {
                 result = await this._collection.updateOne(query2, { $set: { ...dbUpdate, _ts } as A }, options) as UpdateResult<A> & { _: A };
                 Object.assign(dbArtefact ?? {}, dbUpdate);

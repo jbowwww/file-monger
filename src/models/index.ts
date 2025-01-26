@@ -43,7 +43,7 @@ export class Artefact extends Map<string, Aspect | Promise<Aspect>> {
     toData() {
         return Object.fromEntries(super.entries().filter(([_T, a]) => !isPromise(a)));
     }
-    async* streamData(prevState?: ArtefactData, yieldResolvedDataFirst: boolean = true) {
+    async* streamData(prevState?: ArtefactData, yieldResolvedDataFirst: boolean = true): AsyncGenerator<Partial<ArtefactData>> {
         if (yieldResolvedDataFirst) {
             yield prevState ? this.diff(prevState) : this.toData();
         }
