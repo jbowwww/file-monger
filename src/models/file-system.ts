@@ -2,7 +2,7 @@ import * as nodeFs from "node:fs";
 import * as nodePath from "node:path";
 import * as nodeCrypto from "node:crypto";
 import { isAsyncFunction, isGeneratorFunction } from "node:util/types";
-import { Aspect, DiscriminatedModel } from ".";
+import { wrapModuleGeneratorMetadata } from ".";
 
 export type PipelineFunctionStage<I = any, O = any> = (input: I) => O | Promise<O>;
 export type PipelineGeneratorStage<I = any, O = any> = (source: AsyncIterable<I>) => AsyncIterable<O>;
@@ -25,7 +25,7 @@ export const enum EntryType {
     Directory   = "Directory",
     Unknown     = "Unknown",
 };
-export type EntryInnerBase<_T extends EntryType = EntryType.File | EntryType.Directory | EntryType.Unknown> = Aspect & {
+export type EntryInnerBase<_T extends EntryType = EntryType.File | EntryType.Directory | EntryType.Unknown> = /* Aspect & */ {
     // [_T in EntryType]: {
         _T: EntryType;
         path: string;
@@ -49,11 +49,12 @@ export type Unknown = EntryInnerBase<EntryType.Unknown>;
 const Unknown = async ({ path, stats }: { path: string, stats: nodeFs.Stats }): Promise<Unknown> => ({ _T: EntryType.Unknown, path, stats });
 
 export type Entry = File | Directory | Unknown;// EntryInnerBase<EntryType.File | EntryType.Directory | EntryType.Unknown>;
-export type NamespacedEntry = DiscriminatedModel<Entry>;
+// export type NamespacedEntry = DiscriminatedModel<Entry>;
 export const Entry = async ({ path }: { path: string }): Promise</* Namespaced */Entry> => {
     const stats = await nodeFs.promises.stat(path!);
     const subType = getEntryType(stats);
-    return /* ({ [subType.name]: */ ({ ...await subType({ path, stats }), ...({ _T: subType.name }) }) /* }) */ as /* Namespaced */Entry;
+    return ({ ...await subType({ path, stats }), ...({ _T: subType.name }) }) /* }) */ as /* Namespaced */Entry; //await subType({ path, stats });
+     /* ({ [subType.name]: */
 };
 Entry.query = {
     byPath: (e: EntryInnerBase) => ({ [e._T]: { path: e.path } }),
@@ -65,43 +66,48 @@ export const isDirectory = (d: any): d is Directory => isEntryBase(d, EntryType.
 export const isUnknown = (u: any): u is Unknown => isEntryBase(u, EntryType.Unknown);
 
 export type WalkCallbackFn = (entry: Entry, depth: number) => { emit: boolean, recurse?: boolean };
-export async function *walk({
-    path,
-    maxDepth,
-    callback = (e, d) => ({ emit: true, recurse: !maxDepth || d <= maxDepth }),
-    emitError = true,
-    depth = 0,
-}: {
-    path: string,
-    maxDepth?: number,
-    callback?: WalkCallbackFn,
-    emitError?: boolean,
-    depth?: number,
-}): AsyncGenerator<Entry> {
-    try {
-        const entry = await Entry({ path });
-        const { emit, recurse } = callback(entry, depth);
-        if (emit) {
-            yield entry;
-        }
-        if (isDirectory(entry) && recurse) {
-            try {
-                const dir = await nodeFs.promises.opendir(path, { encoding: "utf-8", recursive: false });
-                for await (const dirEntry of dir) {
-                    yield* walk({ path: nodePath.join(dirEntry.parentPath, dirEntry.name), maxDepth, callback, emitError, depth: depth + 1 });
-                }
-            } catch (err) {
-                if (emitError) {
-                    console.error(err);
+export const walk = wrapModuleGeneratorMetadata(
+    nodePath.basename(__filename.slice(__dirname.length + 1)),
+    async function *walk({
+        path,
+        maxDepth,
+        callback = (e, d) => ({ emit: true, recurse: !maxDepth || d <= maxDepth }),
+        emitError = true,
+        depth = 0,
+    }: {
+        path: string,
+        maxDepth?: number,
+        callback?: WalkCallbackFn,
+        emitError?: boolean,
+        depth?: number,
+    }): AsyncGenerator<Entry> {
+        try {
+            const entry = await Entry({ path });
+            const { emit, recurse } = callback(entry, depth);
+            if (emit) {
+                yield entry;
+            }
+            if (isDirectory(entry) && recurse) {
+                try {
+                    const dir = await nodeFs.promises.opendir(path, { encoding: "utf-8", recursive: false });
+                    for await (const dirEntry of dir) {
+                        if (![".", ".."].includes(dirEntry.name)) {
+                            yield* walk({ path: nodePath.join(dirEntry.parentPath, dirEntry.name), maxDepth, callback, emitError, depth: depth + 1 });
+                        }
+                    }
+                } catch (err) {
+                    if (emitError) {
+                        console.error(err);
+                    }
                 }
             }
-        }
-    } catch (err) {
-        if (emitError) {
-            console.error(err);
+        } catch (err) {
+            if (emitError) {
+                console.error(err);
+            }
         }
     }
-};
+);
 
 export async function calculateHash(path: string) {
     try {

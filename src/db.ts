@@ -1,7 +1,7 @@
 import { ChangeStreamDocument, ChangeStreamInsertDocument, ChangeStreamUpdateDocument, Collection, Db, Filter, MongoClient, MongoClientOptions, UpdateFilter, UpdateOptions, UpdateResult, WithId } from "mongodb";
 // import { Artefact, ArtefactDataProperties, filterObject, Id, mapObject, Timestamped } from './Model';
 import { diff } from "deep-object-diff";
-import { Artefact } from ".";
+import { Artefact } from "./models";
 
 export let client: MongoClient | null = null;
 export let connection: MongoClient;
@@ -145,8 +145,8 @@ export class MongoStore<A extends Artefact> implements Store<A> {
         const query2 = (!!dbId ? ({ _id: { $eq: dbId } }) : query) as Filter<A>;
         for await (const update of artefact.streamData()) {
             const { _id/* , _ts */, ...dbUpdate } = update;
-            if (Object.keys(filterObject(Object.getOwnPropertyDescriptors(dbUpdate), ([K, V]) => V?.enumerable)).length > 0) {
-                result = await this._collection.updateOne(query2, { $set: { ...dbUpdate, _ts } as A }, options) as UpdateResult<A> & { _: A };
+            if (Object.keys(dbUpdate).length > 0) {
+                result = await this._collection.updateOne(query2, { $set: { ...dbUpdate } as Partial<A> }, options) as UpdateResult<A> & { _: A };
                 Object.assign(dbArtefact ?? {}, dbUpdate);
                 if (!artefact._id && !!dbId) {
                     artefact._id = dbId;

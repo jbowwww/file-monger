@@ -1,8 +1,9 @@
-import { Artefact, ArtefactDownstreams, Aspect, AspectPossiblyAbstractCtor, AspectProperties, isArtefactCtor, is, stringify, AnyParameters, AspectCtor, Ctor } from "../Model";
+import * as nodeUtil from "node:util";
 import * as db from '../db';
-import { File, Directory, FileEntry as FileSystemEntry, calculateHash } from "../fs";
+import { File, Directory, walk, calculateHash, Entry } from "../models/file-system";
 import yargs, { ArgumentsCamelCase } from "yargs";
-import { diff, updatedDiff } from "deep-object-diff";
+import { Artefact } from '../models';
+import { MongoError } from "mongodb";
 
 export enum CalculateHashEnum {
     Disable,
@@ -33,53 +34,6 @@ class Hash /* extends Aspect */ {
     }
 }
 
-// class AsyncComputedValue<I extends Artefact, O = any> {
-//     condition: Condition<I> = _ => true;
-//     compute: Computation<I, O>;
-
-//     constructor(_: I, compute: Computation<I, O>) {
-//         // this.condition = condition;
-//         this.compute = compute;
-//     }
-
-// }
-
-type ComputedValue<I extends Artefact, O extends any> = O | ((_: ResolvedValues<I>, _previous?: ResolvedValues<I>, previousValue?: File) => (O | undefined));
-type AsyncComputedValue<I extends Artefact, O extends any> = O | Promise<O> | ((_: ResolvedValues<I>, _previous?: ResolvedValues<I>, previousValue?: O) => (O | Promise<O> | undefined));
-type ResolvedValues<A extends Artefact> = {
-    [K in keyof A]: A[K] extends (ComputedValue<A, infer O> | AsyncComputedValue<A, infer O>) ? O/* ReturnType<A[K]> */ : A[K];
-};
-
-@Artefact.notifyPropertyChanges()
-class FileSystemArtefact extends Artefact {
-
-    constructor(FileEntry: FileSystemEntry) {
-        super();
-        this.FileEntry = FileEntry;
-    }
-
-    FileEntry: FileSystemEntry;
-    readonly File?: File;// ComputedValue<FileSystemArtefact, File> = _ => _.FileEntry as File;
-    readonly Directory?: Directory;
-
-    @Artefact.asyncComputedValue(["File.stats"],
-        (_, _previous) => !!_.File && (!_previous || Object.keys(diff(_, _previous)).includes("File.stats")),
-        (_, _previous) => Hash.create({ path: _.File!.path }))
-    accessor Hash: Hash | undefined = undefined;
-    // readonly Hash?: AsyncComputedValue<FileSystemArtefact, Hash> = (_: FileSystemArtefact) => !!this.File ? Hash.create({ path: this.File!.path }) : undefined;
-    // readonly Hash? = new AsyncComputedValue(this, _ => !!_.File ? Hash.create({ path: _.File.path }) : null);
-
-    get query() {
-        return ({
-            unique:
-                !!this._id ? { _id: this._id } :
-                // !!this.File ? { "File.path": this.File.path } :
-                // !!this.Directory ? { "Directory.path": this.Directory.path } :
-                !!this.FileEntry ? { "FileEntry.path": this.FileEntry.path } : {},
-        });
-    }
-}
-
 export const command = 'file';
 export const description = 'File commands';
 export const builder = (yargs: yargs.Argv) => yargs
@@ -92,18 +46,32 @@ export const builder = (yargs: yargs.Argv) => yargs
         }),
         async function (argv): Promise<void> {
             for (const path of argv.paths) {
-                const store = await db.storage.store<FileSystemArtefact>('fileSystemEntries');
-                for await (const fsEntry of FileSystemArtefact.stream(FileSystemEntry.walk(path), (_, e) => _.FileEntry = e)) {
-                    const dbEntry = (await store.updateOrCreate(fsEntry));
-                    console.log(`\ndbEntry = ${JSON.stringify(dbEntry)}`);
-                    if (!dbEntry?._.File/* Entry */) {
+                // const store = await db.storage.store<FileSystemArtefact>('fileSystemEntries');
+                // for await (const fsEntry of FileSystemArtefact.stream(walk({ path })/* , (_, e) => _.FileEntry = e */)) {
+                //     const dbEntry = (await store.updateOrCreate(fsEntry, { [fsEntry.._T]: { path: fsEntry.get(fsEntry._T).path }}));
+                //     console.log(`\ndbEntry = ${JSON.stringify(dbEntry)}`);
+                //     if (!dbEntry?._.File/* Entry */) {
 
+                //     }
+                // }
+                db.configure(() => new db.MongoStorage("mongodb://mongo:mongo@localhost:27017/"));
+                const store = await db.storage.store("fileSystemEntries");
+                for await (const fsEntry of Artefact.stream(walk({ path }))) {
+                    console.log(`fsEntry=${nodeUtil.inspect(Object.entries(fsEntry))} toData()=${nodeUtil.inspect(Object.entries(fsEntry.toData()))}`);
+                    const dbEntry = await store./* findOne */updateOrCreate(fsEntry, fsEntry.query("fileSystem/File.path"), { upsert: true });
+                    if (!dbEntry) {
+                        throw new MongoError(`Could not updateOrCreate`);
                     }
+                    // console.log(`dbEntry=${!dbEntry ? "(falsey)" : nodeUtil.inspect(Object.entries(dbEntry))} toData()=${!dbEntry ? "(falsey)" : nodeUtil.inspect(Object.entries(dbEntry.toData()))}`);
+                    // if (!dbEntry.hash) {
+
+                // // }
+                    //     }
+                    // }
+                    console.log(`Closing db.storage=${db.storage}`);
+                    await db.storage.close();
                 }
             }
-            console.log(`Closing db.storage=${db.storage}`);
-            await db.storage.close();
-
         })
     .demandCommand();
 exports.handler = async function (argv: ArgumentsCamelCase) {

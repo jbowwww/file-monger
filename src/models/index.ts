@@ -1,11 +1,14 @@
+import * as nodeUtil from "node:util";
+import * as nodePath from "node:path";
 import { isPromise } from "util/types";
-import { db } from "./db";
+import * as db from "../db";
 import * as FileSystem from "./file-system";
 // import { set } from "../prop-path";
 import { diff } from "deep-object-diff";
+import { File, Directory, Unknown } from "./file-system";
 
-export type DiscriminateUnion<T, K extends keyof T, V extends T[K]> = Extract<T, Record<K, V>>;
-export type DiscriminatedModel<T extends Record<K, T[keyof T]>, K extends PropertyKey/* keyof T */ = "_T"> = { [V in T[keyof T]]: DiscriminateUnion<T, K, V> };
+// export type DiscriminateUnion<T, K extends keyof T, V extends keyof T> = Extract<T, Record<string, V>>;
+// export type DiscriminatedModel<T extends Record<string, T[K]>, K extends keyof T = "_T"> = { [V in T[K]]: DiscriminateUnion<T, K, V> };
 
 export type Aspect = { _T: string; };
 export const isAspect = (aspect: any): aspect is Aspect => !!aspect && typeof aspect === "object" && typeof aspect._T === "string";
@@ -16,9 +19,9 @@ export type ArtefactData = { _id?: string; } & { [K: string]: Aspect; };
 export class Artefact extends Map<string, Aspect | Promise<Aspect>> {
     _id?: string;
     constructor(...artefactOrAspects: [Artefact] | Aspect[]) {
+        super();
         if (artefactOrAspects.length === 1 && isArtefact(artefactOrAspects[0])) {
             const _ = artefactOrAspects[0];
-            super();
             this._id = _._id;
             Object.entries(_).forEach(([_T, a]) => {
                 // set(this, _T, a);
@@ -41,7 +44,11 @@ export class Artefact extends Map<string, Aspect | Promise<Aspect>> {
         return super.delete(isAspect(aspect) ? aspect._T : aspect);
     }
     toData() {
-        return Object.fromEntries(super.entries().filter(([_T, a]) => !isPromise(a)));
+        return ({
+            _id: this._id,
+            ...Object.fromEntries(Array.from(super.entries())
+                .filter(([_T, a]) => !isPromise(a))) });
+                // .map(([_T, a]) => ([!isPromise(a)]))
     }
     async* streamData(prevState?: ArtefactData, yieldResolvedDataFirst: boolean = true): AsyncGenerator<Partial<ArtefactData>> {
         if (yieldResolvedDataFirst) {
@@ -49,7 +56,7 @@ export class Artefact extends Map<string, Aspect | Promise<Aspect>> {
         }
         let pendingData: Array<Promise<Aspect>>;
         do {
-            pendingData = super.entries().filter(([_T, a]) => isPromise(a)).toArray().map(([_T, a], index, arr) =>
+            pendingData = Array.fromsuper.entries())?.filter(([_T, a]) => isPromise(a))?.map(([_T, a], index, arr) =>
                 (a as Promise<Aspect>).then(a => {
                     super.set(_T, a);
                     arr.splice(index, 1);
@@ -60,32 +67,66 @@ export class Artefact extends Map<string, Aspect | Promise<Aspect>> {
             yield update;
         } while (pendingData.length > 0);
     }
-    static async* stream(source: AsyncIterable<Aspect>) {
+    static async* stream(source: WrappedModuleGenerator<AsyncIterable<Aspect>>) {
+        console.debug(`stream(): source=${nodeUtil.inspect(Object.entries(source))}`);
         for await (const aspect of source) {
+            console.debug(`stream(): aspect=${nodeUtil.inspect(Object.entries(aspect))}`);
+            let moduleName = source._M.replace(/(\-)(.?)/g, (s, ...args: string[]) => args[1].toUpperCase());
+            let extIndex = moduleName.lastIndexOf(".");
+            if (extIndex > 0) {
+                moduleName = moduleName.substring(0, extIndex);
+            }
+            aspect._T = moduleName + "/" + aspect._T;
+            console.debug(`stream()2: aspect=${nodeUtil.inspect(Object.entries(aspect))}`);
             yield new Artefact(aspect);
         }
     }
     diff(prevState: ArtefactData) {
         return diff(prevState, this);
     }
+    query(propertyPath: string) {
+        const q = ({ [propertyPath]: { "$eq": super.get(propertyPath) } });
+        console.debug(`query(): q=${nodeUtil.inspect(q)}`);
+        return q;
+    }
 }
 export const isArtefact = (a: any): a is Artefact => a instanceof Artefact;
 
-type FileArtefact = DiscriminatedModel<FileSystem.File | FileSystem.Directory | FileSystem.Unknown>;
+export type WrappedModuleGenerator<T extends AsyncIterable<any> | AsyncGenerator<any>> = T & { _M: string; };
+export const wrapModuleGeneratorMetadata = (_M: string, generator: (...args: any[]) => AsyncGenerator<any>) => {
+    return (...args: any[]) => (Object.assign(
+        async function* () {
+            for await (const item of generator(...args)) {
+                console.debug(`wrapModuleGeneratorMetadata(): item=${nodeUtil.inspect(Object.entries(item))}`);
+                yield item;
+            }
+        }(),// as (...args: any[]) => AsyncGenerator<any>,
+        { _M, }
+    ));
+};
+//         const gen = generator(...args);
+//         console.debug(`wrapModuleGeneratorMetadata(): gen=${nodeUtil.inspect(Object.entries(gen))}`);
+//         return ({
+//             ...gen,
+//             _M: nodePath.basename(__filename.slice(__dirname.length + 1))
+//         }) as WrappedModuleGenerator<AsyncIterable<any>>;// & { _M: string });//Generator<any>);
+//     });
+// }
+// type FileArtefact = DiscriminatedModel<File |Directory |Unknown>;
 
-for await (const _ of Artefact.stream(FileSystem.walk({ path: "./" }))) {
+// for await (const _ of Artefact.stream(FileSystem.walk({ path: "./" }))) {
     
-}
+// }
 
-async function main() {
-    db.configure(() => new db.MongoStorage("mongodb://mongo:mongo@localhost:27017/"));
-    const store = await db.store<FileArtefact>(FileArtefact, "fileSystemEntries");
-    for await (const fsEntry of FileArtefact.stream(FileSystem.walk({ path: "./" }))) {
-        const dbEntry = await store.findOne;
-        if (!dbEntry.hash) {
+// async function main() {
+//     db.configure(() => new db.MongoStorage("mongodb://mongo:mongo@localhost:27017/"));
+//     const store = await db.storage.store("fileSystemEntries");
+//     for await (const fsEntry of Artefact.stream(FileSystem.walk({ path: "./" }))) {
+//         const dbEntry = await store.findOne;
+//         // if (!dbEntry.hash) {
 
-        }
-    }
-}
+//         // }
+//     }
+// }
 
-main();
+// main();

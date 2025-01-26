@@ -1,13 +1,14 @@
 {
     "compilerOptions": {
         "target": "ESNext",
-        "module": "esnext",
+        "module": "Nodenext",
         "strict": true,
         "esModuleInterop": true,
-        "moduleResolution": "Node",
+        "moduleResolution": "node16",
         "sourceMap": true,
         "rootDir": "src",
-        "outDir": "dist/"
+        "outDir": "dist/",
+        "allowSyntheticDefaultImports": true,
     },
     "include": [
         "src/"
