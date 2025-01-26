@@ -1,6 +1,7 @@
 import { ChangeStreamDocument, ChangeStreamInsertDocument, ChangeStreamUpdateDocument, Collection, Db, Filter, MongoClient, MongoClientOptions, UpdateFilter, UpdateOptions, UpdateResult, WithId } from "mongodb";
 // import { Artefact, ArtefactDataProperties, filterObject, Id, mapObject, Timestamped } from './Model';
 import { diff } from "deep-object-diff";
+import { Artefact } from ".";
 
 export let client: MongoClient | null = null;
 export let connection: MongoClient;
@@ -19,7 +20,7 @@ export interface Storage {
     isConnected(): boolean;
     connect(): Promise<Storage>;
     close(): Promise<Storage>;
-    store<A extends Artefact>(name: string, options?: any): Promise<Store<A, TSchema>>;
+    store<A extends Artefact>(name: string, options?: any): Promise<Store<A>>;
 }
 
 export type StorageConfigurationFunction = () => Storage;
@@ -85,67 +86,68 @@ export class MongoStorage implements Storage {
         return this as Storage;
     }
 
-    async store<A extends Artefact, TSchema extends Id<Timestamped<Partial<ArtefactDataProperties<A>>>> = Id<Timestamped<Partial<ArtefactDataProperties<A>>>>>(name: string, options?: any): Promise<Store<A, TSchema>> {
+    async store<A extends Artefact>(name: string, options?: any): Promise<Store<A>> {
         await this.connect();
         process.stdout.write(`Getting store '${name} ${options !== undefined ? ("options=" + JSON.stringify(options)) : ""} ... `);
-        const collection = this._db!.collection<TSchema>(name, options);
-        const store: Store<A, TSchema> = new MongoStore<A, TSchema>(this as Storage, name, options, collection);
+        const collection = this._db!.collection<A>(name, options);
+        const store: Store<A> = new MongoStore<A>(this as Storage, name, options, collection);
         process.stdout.write("OK\n");
         return store;
     }
 
 }
 
-export interface Store<A extends Artefact, TSchema extends Id<Timestamped<Partial<ArtefactDataProperties<A>>>> = Id<Timestamped<Partial<ArtefactDataProperties<A>>>>> {
-    find(query: Filter<TSchema>): AsyncGenerator<WithId<TSchema>>;
-    findOne(query: Filter<TSchema>): Promise<WithId<TSchema> | null>;
-    findOneAndUpdate(query: Filter<TSchema>, update: TSchema): Promise<WithId<TSchema> | null>;
-    updateOne(artefact: A, query?: Filter<TSchema>, options?: UpdateOptions): Promise<UpdateResult<TSchema> | null>;
-    updateOrCreate(artefact: A, options?: UpdateOptions): Promise<(UpdateResult<TSchema> & { _: A }) | null | undefined>;
+export interface Store<A extends Artefact> {
+    find(query: Filter<A>): AsyncGenerator<WithId<A>>;
+    findOne(query: Filter<A>): Promise<WithId<A> | null>;
+    findOneAndUpdate(query: Filter<A>, update: A): Promise<WithId<A> | null>;
+    updateOne(artefact: A, query?: Filter<A>, options?: UpdateOptions): Promise<UpdateResult<A> | null>;
+    updateOrCreate(artefact: A, options?: UpdateOptions): Promise<(UpdateResult<A> & { _: A }) | null | undefined>;
 }
 
-export class MongoStore<A extends Artefact, TSchema extends Id<Timestamped<Partial<ArtefactDataProperties<A>>>> = Id<Timestamped<Partial<ArtefactDataProperties<A>>>>> implements Store<A, TSchema> {
+export class MongoStore<A extends Artefact> implements Store<A> {
 
     constructor(
         public readonly storage: Storage,
         public readonly name: string,
         public readonly options: any,
-        private _collection: Collection<TSchema>,
+        private _collection: Collection<A>,
     ) { }
 
-    async* find(query: Filter<TSchema>) {
+    async* find(query: Filter<A>) {
         for await (const item of this._collection.find(query))
             yield item;
     }
 
-    async findOne(query: Filter<TSchema>) {
+    async findOne(query: Filter<A>) {
         return await this._collection.findOne(query);
     }
 
-    async findOneAndUpdate(query: Filter<TSchema>, update: UpdateFilter<TSchema>) {
+    async findOneAndUpdate(query: Filter<A>, update: UpdateFilter<A>) {
         return await this._collection.findOneAndUpdate(query, update);
     }
 
-    async updateOne(artefact: A, query?: Filter<TSchema>, options: UpdateOptions = {}) {
+    async updateOne(artefact: A, query?: Filter<A>, options: UpdateOptions = {}) {
         const /* { _id, _ts, ... */data = await artefact/* .toData() */;
-        let result: UpdateResult<TSchema> = null!;
+        let result: UpdateResult<A> = null!;
         for await (const update of [artefact/* .toData() *//* , artefact.toDataPending() */]/* data */) {
             result = await this._collection.updateOne(query!, { $set: { ...update as any/* TSchema */, _ts: new Date(), } }, options);
         }
         return result;
     }
 
-    async updateOrCreate(artefact: A, options: UpdateOptions = {}) {
+    async updateOrCreate(artefact: A, query: Filter<A>, options: UpdateOptions = {}) {
         options = { ...options, upsert: true, /* ignoreUndefined: true, includeResultMetadata: true, returnDocument: 'after', */ };
         let result;
-        const query = artefact.query.unique as Filter<TSchema>;
-        const dbArtefact = await this._collection.findOne<TSchema>(query, options); //AndReplace(query, data as WithoutId<TSchema>, options);
+        // /* const  */query = /* artefact. */query?.unique as Filter<A>;
+        const dbArtefact = await this._collection.findOne<A>(query, options); //AndReplace(query, data as WithoutId<TSchema>, options);
         const dbId = dbArtefact?._id;
-        const query2 = (!!dbId ? ({ _id: { $eq: dbId } }) : query) as Filter<TSchema>;
-        for await (const update of [artefact.toData()/* , await artefact.toDataPending() */]/* data */) {
-            const { _id, _ts, ...dbUpdate } = diff(dbArtefact ?? {}, update) as TSchema;//({ _id?: string; _ts?: Date; });
+        const query2 = (!!dbId ? ({ _id: { $eq: dbId } }) : query) as Filter<A>;
+        for await (const update of artefact.streamData()/* , await artefact.toDataPending() *//* data */) {
+            const { _id/* , _ts */, ...dbUpdate } = (dbArtefact?.diff(update) ?? update) as A;//({ _id?: string; _ts?: Date; });
+            const dbUpdate = dbArtefact. diff()
             if (Object.keys(filterObject(Object.getOwnPropertyDescriptors(dbUpdate), ([K, V]) => V?.enumerable)).length > 0) {
-                result = await this._collection.updateOne(query2, { $set: { ...dbUpdate, _ts } as TSchema }, options) as UpdateResult<TSchema> & { _: A };
+                result = await this._collection.updateOne(query2, { $set: { ...dbUpdate, _ts } as A }, options) as UpdateResult<A> & { _: A };
                 Object.assign(dbArtefact ?? {}, dbUpdate);
                 if (!artefact._id && !!dbId) {
                     artefact._id = dbId;

@@ -2,6 +2,7 @@ import * as nodeFs from "node:fs";
 import * as nodePath from "node:path";
 import * as nodeCrypto from "node:crypto";
 import { isAsyncFunction, isGeneratorFunction } from "node:util/types";
+import { Aspect, DiscriminatedModel } from ".";
 
 export type PipelineFunctionStage<I = any, O = any> = (input: I) => O | Promise<O>;
 export type PipelineGeneratorStage<I = any, O = any> = (source: AsyncIterable<I>) => AsyncIterable<O>;
@@ -19,40 +20,49 @@ export const compose = <I = any, O = any>(...stages: PipelineStage[]) => (source
         (curr as any as AsyncGeneratorFunction)(acc) :
         makeGeneratorFromFunction(curr)(acc), source as AsyncIterable<any>);
 
-export type EntryTypeName = string;// "File" | "Directory" | "Unknown";// EntryType.File | EntryType.Directory | EntryType.Unknown;
-export const getEntryType = (s: nodeFs.Stats) => (([
-    ["File", () => s.isFile()],
-    ["Directory", () => s.isDirectory()],
-] as [EntryTypeName, () => boolean][])
-    .find<[EntryTypeName, () => boolean]>(
-        (value): value is [EntryTypeName, () => boolean] => value[1]()
-    ) ?? ["Unknown", ])[0];
-
-export type EntryInnerBase = {
-    path: string;
-    stats: nodeFs.Stats;
+export const enum EntryType {
+    File        = "File",
+    Directory   = "Directory",
+    Unknown     = "Unknown",
+};
+export type EntryInnerBase<_T extends EntryType = EntryType.File | EntryType.Directory | EntryType.Unknown> = Aspect & {
+    // [_T in EntryType]: {
+        _T: EntryType;
+        path: string;
+        stats: nodeFs.Stats;
+    // }
 };
 
-export type File = { File: EntryInnerBase; };
-export type Directory = { Directory: EntryInnerBase; };
-export type Unknown = { Unknown: EntryInnerBase; };
+export const getEntryType = (s: nodeFs.Stats) => (([
+    [File, () => s.isFile()],
+    [Directory, () => s.isDirectory()],
+] as [(...args: any[]) => Promise<EntryInnerBase>, () => boolean][])
+    .find<[(...args: any[]) => Promise<EntryInnerBase>, () => boolean]>(
+        (value): value is [(...args: any[]) => Promise<EntryInnerBase>, () => boolean] => value[1]()
+    ) ?? [Unknown, ])[0];
 
-export type Entry = File | Directory | Unknown;// Awaited<ReturnType<typeof Entry>>;
-export const Entry = async ({ path }: { path: string }): Promise<Entry> => {
+export type File = EntryInnerBase<EntryType.File>;
+const File = async ({ path, stats }: { path: string, stats: nodeFs.Stats }): Promise<File> => ({ _T: EntryType.File, path, stats });
+export type Directory = EntryInnerBase<EntryType.Directory>;
+const Directory = async ({ path, stats }: { path: string, stats: nodeFs.Stats }): Promise<Directory> => ({ _T: EntryType.Directory, path, stats });
+export type Unknown = EntryInnerBase<EntryType.Unknown>;
+const Unknown = async ({ path, stats }: { path: string, stats: nodeFs.Stats }): Promise<Unknown> => ({ _T: EntryType.Unknown, path, stats });
+
+export type Entry = File | Directory | Unknown;// EntryInnerBase<EntryType.File | EntryType.Directory | EntryType.Unknown>;
+export type NamespacedEntry = DiscriminatedModel<Entry>;
+export const Entry = async ({ path }: { path: string }): Promise</* Namespaced */Entry> => {
     const stats = await nodeFs.promises.stat(path!);
-    return ({ [getEntryType(stats)]: { path, stats } }) as Entry;
+    const subType = getEntryType(stats);
+    return /* ({ [subType.name]: */ ({ ...await subType({ path, stats }), ...({ _T: subType.name }) }) /* }) */ as /* Namespaced */Entry;
 };
 Entry.query = {
-    byPath: (entry: Entry) =>
-        isFile(entry)       ?   { "File.path":      entry.File.path         } :
-        isDirectory(entry)  ?   { "Directory.path": entry.Directory.path    } :
-                                { "Unknown.path":   entry.Unknown.path      },// isUnknown(entry) ? { "Unknown.path": entry.Unknown.path }, //{ const K = Object.keys(entry)?.[0] as EntryTypeName; return ({ [`${K}.path`]: entry[K].path }); },
+    byPath: (e: EntryInnerBase) => ({ [e._T]: { path: e.path } }),
 };
 
-export const isEntryInnerBase = (e: any): e is EntryInnerBase => !!e && typeof e.path === 'string' && typeof e.stats === 'object';
-export const isFile = (f: any): f is File => isEntryInnerBase(f.File);//.path === 'string' && typeof f.File.stats === 'object';// === EntryType.File;
-export const isDirectory = (d: any): d is Directory => isEntryInnerBase(d.Directory);//d._T === EntryType.Directory;
-export const isUnknown = (u: any): u is Unknown => isEntryInnerBase(u.Unknown);//_T === EntryType.Unknown;
+export const isEntryBase = (e: any, _T: EntryType): e is EntryInnerBase => !!e && e._T === _T && typeof e.path === 'string' && typeof e.stats === 'object';
+export const isFile = (f: any): f is File => isEntryBase(f, EntryType.File);
+export const isDirectory = (d: any): d is Directory => isEntryBase(d, EntryType.Directory);
+export const isUnknown = (u: any): u is Unknown => isEntryBase(u, EntryType.Unknown);
 
 export type WalkCallbackFn = (entry: Entry, depth: number) => { emit: boolean, recurse?: boolean };
 export async function *walk({
