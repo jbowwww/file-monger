@@ -16,58 +16,19 @@ export const isAspect = (aspect: any): aspect is Aspect => !!aspect && typeof as
 export type ArtefactData = { _id?: string; } & { [K: string]: Aspect; };
 // export const Artefact = (...aspects: Aspect[]) => Object.assign({}, aspects.map(a => ({ [a._T]: a })));
 
-export class Artefact extends Map<string, Aspect | Promise<Aspect>> {
-    _id?: string;
-    constructor(...artefactOrAspects: [Artefact] | Aspect[]) {
-        super();
-        if (artefactOrAspects.length === 1 && isArtefact(artefactOrAspects[0])) {
-            const _ = artefactOrAspects[0];
-            this._id = _._id;
-            Object.entries(_).forEach(([_T, a]) => {
-                // set(this, _T, a);
-                this.add(_T, a);
-            });
-        } else {
-            artefactOrAspects.forEach(a => this.add(a as Aspect));
-        }
-    }
-    add(aspectOrName: string | Aspect, aspect?: Aspect) {
-        if (typeof aspectOrName === "string" && !!aspect) {
-            super.set(aspectOrName, aspect);
-        } else if (isAspect(aspectOrName)) {
-            super.set(aspectOrName._T, aspectOrName);
-        } else {
-            throw new TypeError(`Artefact.add(): aspectOrName=${aspectOrName} aspect=${aspect}`);
-        }
-    }
-    delete(aspect: string | Aspect) {
-        return super.delete(isAspect(aspect) ? aspect._T : aspect);
-    }
-    toData() {
-        return ({
-            _id: this._id,
-            ...Object.fromEntries(Array.from(super.entries())
-                .filter(([_T, a]) => !isPromise(a))) });
-                // .map(([_T, a]) => ([!isPromise(a)]))
-    }
-    async* streamData(prevState?: ArtefactData, yieldResolvedDataFirst: boolean = true): AsyncGenerator<Partial<ArtefactData>> {
-        if (yieldResolvedDataFirst) {
-            yield prevState ? this.diff(prevState) : this.toData();
-        }
-        let pendingData: Array<Promise<Aspect>>;
-        do {
-            pendingData = Array.fromsuper.entries())?.filter(([_T, a]) => isPromise(a))?.map(([_T, a], index, arr) =>
-                (a as Promise<Aspect>).then(a => {
-                    super.set(_T, a);
-                    arr.splice(index, 1);
-                    return a;
-                }));
-            const a = await Promise.race(pendingData);
-            const update = ({ [a._T]: a });
-            yield update;
-        } while (pendingData.length > 0);
-    }
-    static async* stream(source: WrappedModuleGenerator<AsyncIterable<Aspect>>) {
+export type Artefact = { [K: string]: { [K: string]: ArtefactData; } } & { _id?: string; prototype: { query: (propertyPath: string) => any; } };//ReturnType<typeof Artefact>;
+export const Artefact = Object.assign((moduleName: string, aspect: Aspect): Artefact => Object.assign(Object.create({
+    
+    // diff(prevState: ArtefactData) {
+    //     return diff(prevState, this);
+    // }
+    query(propertyPath: string) {
+        const q = ({ [propertyPath]: { "$eq": super.get(propertyPath) } });
+        console.debug(`query(): q=${nodeUtil.inspect(q)}`);
+        return q;
+    },
+}), ({ [moduleName]: { [aspect._T]: aspect } })), {
+    async* stream(source: WrappedModuleGenerator<AsyncIterable<Aspect>>) {
         console.debug(`stream(): source=${nodeUtil.inspect(Object.entries(source))}`);
         for await (const aspect of source) {
             console.debug(`stream(): aspect=${nodeUtil.inspect(Object.entries(aspect))}`);
@@ -78,18 +39,63 @@ export class Artefact extends Map<string, Aspect | Promise<Aspect>> {
             }
             aspect._T = moduleName + "/" + aspect._T;
             console.debug(`stream()2: aspect=${nodeUtil.inspect(Object.entries(aspect))}`);
-            yield new Artefact(aspect);
+            yield Artefact(moduleName, aspect);
         }
-    }
-    diff(prevState: ArtefactData) {
-        return diff(prevState, this);
-    }
-    query(propertyPath: string) {
-        const q = ({ [propertyPath]: { "$eq": super.get(propertyPath) } });
-        console.debug(`query(): q=${nodeUtil.inspect(q)}`);
-        return q;
-    }
-}
+    },
+});///*  extends Map<string, Aspect | Promise<Aspect>> */ {
+    // constructor(...artefactOrAspects: [Artefact] | Aspect[]) {
+    //     super();
+    //     if (artefactOrAspects.length === 1 && isArtefact(artefactOrAspects[0])) {
+    //         const _ = artefactOrAspects[0];
+    //         this._id = _._id;
+    //         Object.entries(_).forEach(([_T, a]) => {
+    //             // set(this, _T, a);
+    //             this.add(_T, a);
+    //         });
+    //     } else {
+    //         artefactOrAspects.forEach(a => this.add(a as Aspect));
+    //     }
+    // }
+    // constructor(data: ArtefactData) {
+    //     super();
+    // }
+    // add(aspectOrName: string | Aspect, aspect?: Aspect) {
+    //     if (typeof aspectOrName === "string" && !!aspect) {
+    //         super.set(aspectOrName, aspect);
+    //     } else if (isAspect(aspectOrName)) {
+    //         super.set(aspectOrName._T, aspectOrName);
+    //     } else {
+    //         throw new TypeError(`Artefact.add(): aspectOrName=${aspectOrName} aspect=${aspect}`);
+    //     }
+    // }
+    // delete(aspect: string | Aspect) {
+    //     return super.delete(isAspect(aspect) ? aspect._T : aspect);
+    // }
+    // toData() {
+    //     return ({
+    //         _id: this._id,
+    //         ...Object.fromEntries(Array.from(super.entries())
+    //             .filter(([_T, a]) => !isPromise(a))) });
+    //             // .map(([_T, a]) => ([!isPromise(a)]))
+    // }
+    // async* streamData(prevState?: ArtefactData, yieldResolvedDataFirst: boolean = true): AsyncGenerator<Partial<ArtefactData>> {
+    //     if (yieldResolvedDataFirst) {
+    //         yield prevState ? this.diff(prevState) : this.toData();
+    //     }
+    //     let pendingData: Array<Promise<Aspect>>;
+    //     do {
+    //         pendingData = Array.from(super.entries())?.filter(([_T, a]) => isPromise(a))?.map(([_T, a], index, arr) =>
+    //             (a as Promise<Aspect>).then(a => {
+    //                 super.set(_T, a);
+    //                 arr.splice(index, 1);
+    //                 return a;
+    //             }));
+    //         const a = await Promise.race(pendingData);
+    //         const update = ({ [a._T]: a });
+    //         yield update;
+    //     } while (pendingData.length > 0);
+    // }
+// }
 export const isArtefact = (a: any): a is Artefact => a instanceof Artefact;
 
 export type WrappedModuleGenerator<T extends AsyncIterable<any> | AsyncGenerator<any>> = T & { _M: string; };

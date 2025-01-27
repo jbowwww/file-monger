@@ -2,7 +2,7 @@ import * as nodeFs from "node:fs";
 import * as nodePath from "node:path";
 import * as nodeCrypto from "node:crypto";
 import { isAsyncFunction, isGeneratorFunction } from "node:util/types";
-import { wrapModuleGeneratorMetadata } from ".";
+import { Aspect, wrapModuleGeneratorMetadata } from ".";
 
 export type PipelineFunctionStage<I = any, O = any> = (input: I) => O | Promise<O>;
 export type PipelineGeneratorStage<I = any, O = any> = (source: AsyncIterable<I>) => AsyncIterable<O>;
@@ -25,12 +25,12 @@ export const enum EntryType {
     Directory   = "Directory",
     Unknown     = "Unknown",
 };
-export type EntryInnerBase<_T extends EntryType = EntryType.File | EntryType.Directory | EntryType.Unknown> = /* Aspect & */ {
-    // [_T in EntryType]: {
-        _T: EntryType;
+export type EntryInnerBase<_T extends EntryType = EntryType.File | EntryType.Directory | EntryType.Unknown> = Aspect & {
+    [T in _T]: {
+        // _T: EntryType;
         path: string;
         stats: nodeFs.Stats;
-    // }
+    }
 };
 
 export const getEntryType = (s: nodeFs.Stats) => (([
@@ -50,10 +50,10 @@ const Unknown = async ({ path, stats }: { path: string, stats: nodeFs.Stats }): 
 
 export type Entry = File | Directory | Unknown;// EntryInnerBase<EntryType.File | EntryType.Directory | EntryType.Unknown>;
 // export type NamespacedEntry = DiscriminatedModel<Entry>;
-export const Entry = async ({ path }: { path: string }): Promise</* Namespaced */Entry> => {
+export const Entry = async ({ path }: { path: string }): Promise<{ [K in keyof Entry]: any }> => {
     const stats = await nodeFs.promises.stat(path!);
     const subType = getEntryType(stats);
-    return ({ ...await subType({ path, stats }), ...({ _T: subType.name }) }) /* }) */ as /* Namespaced */Entry; //await subType({ path, stats });
+    return ({ [subType.name]: await subType({ path, stats }) })
      /* ({ [subType.name]: */
 };
 Entry.query = {
