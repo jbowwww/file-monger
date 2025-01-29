@@ -3,6 +3,7 @@ import * as nodePath from "node:path";
 import * as nodeCrypto from "node:crypto";
 import { isAsyncFunction, isGeneratorFunction } from "node:util/types";
 import { Aspect, DiscriminatedModel, wrapModuleGeneratorMetadata } from ".";
+import { get, ObjectWithProperties } from "../prop-path";
 
 export type PipelineFunctionStage<I = any, O = any> = (input: I) => O | Promise<O>;
 export type PipelineGeneratorStage<I = any, O = any> = (source: AsyncIterable<I>) => AsyncIterable<O>;
@@ -18,7 +19,17 @@ export const makeGeneratorFromFunction = <I = any, O = any>(stage: PipelineFunct
 export const compose = <I = any, O = any>(...stages: PipelineStage[]) => (source: AsyncIterable<I>) =>
     stages.reduce((acc, curr, i, arr) => isGeneratorFunction(curr) && isAsyncFunction(curr) ?
         (curr as any as AsyncGeneratorFunction)(acc) :
-        makeGeneratorFromFunction(curr)(acc), source as AsyncIterable<any>);
+        makeGeneratorFromFunction(curr)(acc), source as AsyncIterable<any>) as AsyncIterable<O>;
+export const iff = <I = any, O = any>(condition: (input: I) => boolean, stage: PipelineStage<I, O>) =>
+    async function* (source: AsyncIterable<I>) {
+        if (isGeneratorFunction(stage) && isAsyncFunction(stage)) {
+            return stage(source);
+        }
+        for await (const input of source) {
+            yield (condition(input) ? (stage as PipelineFunctionStage)(input) : input);
+        }
+    };
+export const exists = <I = any>(propertyPath: string) => (input: I) => !!get(input as ObjectWithProperties, propertyPath);
 
 export const moduleName = __filename.replace(/(\-)(.?)/g, (s, ...args: string[]) => args[1].toUpperCase());
 //             let extIndex = moduleName.lastIndexOf(".");

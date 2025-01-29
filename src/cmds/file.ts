@@ -62,7 +62,7 @@ export const builder = (yargs: yargs.Argv) => yargs
                 // }
                 db.configure(() => new db.MongoStorage("mongodb://mongo:mongo@localhost:27017/"));
                 const store = await db.storage.store("fileSystemEntries");
-                const FileArtefactPipeline = compose(
+                const FileArtefactPipeline = compose<Entry, FileArtefact>(
                     // walk({ path })), 
                     (e: Entry) => ({ [e._T]: e }),
                     async ({ File }: { File?: File }) => ({ File, Hash: !!File && await Hash({ path: File?.path }) }),
