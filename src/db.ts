@@ -1,4 +1,5 @@
-import { ChangeStreamDocument, ChangeStreamInsertDocument, ChangeStreamUpdateDocument, Collection, Db, Filter, MongoClient, MongoClientOptions, UpdateFilter, UpdateOptions, UpdateResult, WithId } from "mongodb";
+import * as nodeUtil from "node:util";
+import { ChangeStreamDocument, ChangeStreamInsertDocument, ChangeStreamUpdateDocument, Collection, Db, Filter, MongoClient, MongoClientOptions, MongoError, UpdateFilter, UpdateOptions, UpdateResult, WithId } from "mongodb";
 // import { Artefact, ArtefactDataProperties, filterObject, Id, mapObject, Timestamped } from './Model';
 import { diff } from "deep-object-diff";
 import { Artefact } from "./models";
@@ -136,28 +137,37 @@ export class MongoStore<A extends Artefact> implements Store<A> {
         return result;
     }
 
-    async updateOrCreate(artefact: A, query: Filter<A>, options: UpdateOptions = {}) {
+    async updateOrCreate(artefact: A, query: Filter<A>, options: UpdateOptions = {}): Promise<(UpdateResult<A> & { _: A }) | null | undefined> {
         options = { ...options, upsert: true, /* ignoreUndefined: true, includeResultMetadata: true, returnDocument: 'after', */ };
         let result;
         // /* const  */query = /* artefact. */query?.unique as Filter<A>;
         const dbArtefact = await this._collection.findOne<A>(query, options); //AndReplace(query, data as WithoutId<TSchema>, options);
         const dbId = dbArtefact?._id;
         const query2 = (!!dbId ? ({ _id: { $eq: dbId } }) : query) as Filter<A>;
-        for await (const update of artefact.streamData()) {
-            const { _id/* , _ts */, ...dbUpdate } = update;
-            if (Object.keys(dbUpdate).length > 0) {
+        // for await (const update of artefact.streamData()) {
+            const { _id/* , _ts */, ...dbUpdate } = diff(dbArtefact ?? { _id: undefined, }, artefact) as Partial<A>;
+            // if (Object.keys(dbUpdate).length > 0) {
                 result = await this._collection.updateOne(query2, { $set: { ...dbUpdate } as Partial<A> }, options) as UpdateResult<A> & { _: A };
-                Object.assign(dbArtefact ?? {}, dbUpdate);
-                if (!artefact._id && !!dbId) {
-                    artefact._id = dbId;
+                if (!result || !result.acknowledged) {
+                    throw new MongoError("updateOne not acknowledged for dbArtefact=${dbArtefact} dbUpdate=${dbUpdate}");
+                } else {
+                    if (!!result.upsertedId) {
+                        artefact._id = result.upsertedId.toString();
+                    } else if (!artefact._id && !!dbId) {
+                        artefact._id = dbId;
+                    }
+                    // This left here just for now to remind you of artefact async computations being representible by a streaming function from Artefact
+                    // Object.assign(dbArtefact ?? {}, dbUpdate);
                 }
-            }
+                // return 
+            // }
             // console.log(`updateOrCreate(): \n\tquery = ${JSON.stringify(query)}\n\tquery2 = ${JSON.stringify(query2)}\n\toptions = ${JSON.stringify(options)}\n\tartefact = ${artefact}\n\tdbArtefact = ${JSON.stringify(dbArtefact)}\n\tupdate = ${JSON.stringify(update)}\n\tdbUpdate = ${JSON.stringify(dbUpdate)}\n\tresult = ${JSON.stringify(mapObject(result, ([K, V]) => K === '_' ? V.toString() : V))}`);        
-        }
+        // }
         // console.log(`updateOrCreate(): dbArtefact=${JSON.stringify(dbArtefact)}`);
         if (!!result) {
             Object.assign(result as any, { _: artefact });
         }
+        console.log(`dbArtefact=${nodeUtil.inspect(dbArtefact)} dbId=${dbId} query2=${nodeUtil.inspect(query2)} dbUpdate=${nodeUtil.inspect(dbUpdate)} result=${nodeUtil.inspect(result)}`);
         return result;
     }
 }

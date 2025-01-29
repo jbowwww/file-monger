@@ -1,9 +1,11 @@
 import * as nodeUtil from "node:util";
 import * as db from '../db';
-import { File, Directory, walk, calculateHash, Entry } from "../models/file-system";
+import { File, Directory, walk, Hash, Entry, moduleName, isFile, isDirectory, isUnknown, Unknown, compose } from "../models/file-system";
 import yargs, { ArgumentsCamelCase } from "yargs";
 import { Artefact } from '../models';
 import { MongoError } from "mongodb";
+import {} from "@fieldguide/pipeline"
+import { Duplex, pipeline, Readable, Transform } from "node:stream";
 
 export enum CalculateHashEnum {
     Disable,
@@ -20,19 +22,23 @@ export interface FileCommandArgv {
     },
 }
 
-class Hash /* extends Aspect */ {
-    sha256?: string;
+// class FileArtefact extends Artefact {
+//     constructor(private Entry: Entry) { super(); }
 
-    constructor({ sha256/* , ...aspect */ }: Partial<Hash>) {
-        // super(aspect);
-        this.sha256 = sha256;
-    }
+//     // Subclasses of Entry
+//     public get File(): File | undefined { return isFile(this.Entry) ? this.Entry as File : undefined; }
+//     public get Directory(): Directory | undefined { return isDirectory(this.Entry) ? this.Entry as Directory : undefined; }
+//     public get Unknown(): Unknown | undefined { return isUnknown(this.Entry) ? this.Entry as Unknown : undefined; }
     
-    static /* override */ async create({ /* _, */ path }: { /* _,: Artefact, */ path: string }) {
-        const sha256 = await calculateHash(path);
-        return new Hash({ /* _, */ sha256 })
-    }
-}
+//     public Hash: Hash | undefined;
+// }
+
+type FileArtefact = Artefact<{
+    File?: File;
+    Directory?: Directory;
+    Unknown?: Unknown;
+    Hash?: Hash;
+}>;
 
 export const command = 'file';
 export const description = 'File commands';
@@ -56,21 +62,28 @@ export const builder = (yargs: yargs.Argv) => yargs
                 // }
                 db.configure(() => new db.MongoStorage("mongodb://mongo:mongo@localhost:27017/"));
                 const store = await db.storage.store("fileSystemEntries");
-                for await (const fsEntry of Artefact.stream(walk({ path }))) {
-                    console.log(`fsEntry=${nodeUtil.inspect(Object.entries(fsEntry))} toData()=${nodeUtil.inspect(Object.entries(fsEntry.toData()))}`);
-                    const dbEntry = await store./* findOne */updateOrCreate(fsEntry, fsEntry.query("fileSystem/File.path"), { upsert: true });
-                    if (!dbEntry) {
-                        throw new MongoError(`Could not updateOrCreate`);
-                    }
+                const FileArtefactPipeline = compose(
+                    // walk({ path })), 
+                    (e: Entry) => ({ [e._T]: e }),
+                    async ({ File }: { File?: File }) => ({ File, Hash: !!File && await Hash({ path: File?.path }) }),
+                    async (_: FileArtefact) => await store.updateOrCreate(_, _.File ? File.query.byPath(_.File.path) : {}, { upsert: true })
+                );
+                for await (const _ of await FileArtefactPipeline(walk({ path }))) {
+                // for await (const fsEntry of /* Artefact.stream */(walk({ path }))) {
+                    // const _ = ({ [fsEntry._T]: fsEntry });// new FileArtefact(fsEntry);
+                    console.log(`_=${nodeUtil.inspect(_)}`);// toData()=${nodeUtil.inspect(Object.entries(_/* .toData() */))}`);
+                    // const dbEntry = await store./* findOne */updateOrCreate(_, File.query.byPath(_.File.path), { upsert: true });
+                    // if (!dbEntry) {
+                    //     throw new MongoError(`Could not updateOrCreate`);
+                    // }
                     // console.log(`dbEntry=${!dbEntry ? "(falsey)" : nodeUtil.inspect(Object.entries(dbEntry))} toData()=${!dbEntry ? "(falsey)" : nodeUtil.inspect(Object.entries(dbEntry.toData()))}`);
                     // if (!dbEntry.hash) {
-
+                }
                 // // }
                     //     }
                     // }
-                    console.log(`Closing db.storage=${db.storage}`);
-                    await db.storage.close();
-                }
+                console.log(`Closing db.storage=${nodeUtil.inspect(db.storage)}`);
+                await db.storage.close();
             }
         })
     .demandCommand();

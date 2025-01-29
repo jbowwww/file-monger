@@ -3,46 +3,60 @@ import * as nodePath from "node:path";
 import { isPromise } from "util/types";
 import * as db from "../db";
 import * as FileSystem from "./file-system";
-// import { set } from "../prop-path";
+import { get, set } from "../prop-path";
 import { diff } from "deep-object-diff";
-import { File, Directory, Unknown } from "./file-system";
+import { File, Directory, Unknown, Entry, isFile, isDirectory, isUnknown, Hash } from "./file-system";
 
 // export type DiscriminateUnion<T, K extends keyof T, V extends keyof T> = Extract<T, Record<string, V>>;
 // export type DiscriminatedModel<T extends Record<string, T[K]>, K extends keyof T = "_T"> = { [V in T[K]]: DiscriminateUnion<T, K, V> };
+export type DiscriminateUnion<T, K extends keyof T, V extends T[K]> = Extract<T, Record<K, V>>;
+export type DiscriminatedModel<T extends Record<K, T[keyof T]>, K extends PropertyKey/* keyof T */ = "_T"> = { [V in T[K]]: DiscriminateUnion<T, K, V> };
+
+export type Id<T> = {[K in keyof T]: T[K]};
+export type Converter<T, K extends string, V> = T extends any ? { [P in keyof Id<Record<K, V> & T>]: Id<Record<K, V> & T>[P] } : never;
 
 export type Aspect = { _T: string; };
 export const isAspect = (aspect: any): aspect is Aspect => !!aspect && typeof aspect === "object" && typeof aspect._T === "string";
 
-export type ArtefactData = { _id?: string; } & { [K: string]: Aspect; };
+export type Artefact<A extends {} = {}> = A & { _id?: string; };
+
+// export type ArtefactData = { _id?: string; } & { [K: string]: any; };
 // export const Artefact = (...aspects: Aspect[]) => Object.assign({}, aspects.map(a => ({ [a._T]: a })));
 
-export type Artefact = { [K: string]: { [K: string]: ArtefactData; } } & { _id?: string; prototype: { query: (propertyPath: string) => any; } };//ReturnType<typeof Artefact>;
-export const Artefact = Object.assign((moduleName: string, aspect: Aspect): Artefact => Object.assign(Object.create({
+// export type Artefact = { [K: string]: { [K: string]: ArtefactData; } } & { _id?: string; prototype: { query: (propertyPath: string) => any; } };//ReturnType<typeof Artefact>;
+// export class Artefact /* extends Map<string, any> */{
+
+//     _id?: string;
     
-    // diff(prevState: ArtefactData) {
-    //     return diff(prevState, this);
-    // }
-    query(propertyPath: string) {
-        const q = ({ [propertyPath]: { "$eq": super.get(propertyPath) } });
-        console.debug(`query(): q=${nodeUtil.inspect(q)}`);
-        return q;
-    },
-}), ({ [moduleName]: { [aspect._T]: aspect } })), {
-    async* stream(source: WrappedModuleGenerator<AsyncIterable<Aspect>>) {
-        console.debug(`stream(): source=${nodeUtil.inspect(Object.entries(source))}`);
-        for await (const aspect of source) {
-            console.debug(`stream(): aspect=${nodeUtil.inspect(Object.entries(aspect))}`);
-            let moduleName = source._M.replace(/(\-)(.?)/g, (s, ...args: string[]) => args[1].toUpperCase());
-            let extIndex = moduleName.lastIndexOf(".");
-            if (extIndex > 0) {
-                moduleName = moduleName.substring(0, extIndex);
-            }
-            aspect._T = moduleName + "/" + aspect._T;
-            console.debug(`stream()2: aspect=${nodeUtil.inspect(Object.entries(aspect))}`);
-            yield Artefact(moduleName, aspect);
-        }
-    },
-});///*  extends Map<string, Aspect | Promise<Aspect>> */ {
+//     diff(prevState: ArtefactData): Partial<ArtefactData> {
+//         return diff(prevState, this);
+//     }
+
+//     query(propertyPath: string) {
+//         const q = ({ [propertyPath]: { "$eq": /* super */get(this, propertyPath) } });
+//         console.debug(`query(): q=${nodeUtil.inspect(q)}`);
+//         return q;
+//     }
+
+// // , ({ [moduleName]: { [aspect._T]: aspect } })), {
+
+//     static async* stream<A extends typeof Artefact>(this: A,/* moduleName: string, */ source: WrappedModuleGenerator<AsyncIterable<Aspect>>) {
+//         console.debug(`stream(): source=${nodeUtil.inspect(Object.entries(source))}`);
+//         for await (const aspect of source) {
+//             console.debug(`stream(): aspect=${nodeUtil.inspect(Object.entries(aspect))}`);
+//             // let moduleName = source._M.replace(/(\-)(.?)/g, (s, ...args: string[]) => args[1].toUpperCase());
+//             // let extIndex = moduleName.lastIndexOf(".");
+//             // if (extIndex > 0) {
+//             //     moduleName = moduleName.substring(0, extIndex);
+//             // }
+//             // aspect._T = moduleName + "/" + aspect._T;
+//             console.debug(`stream()2: aspect=${nodeUtil.inspect(Object.entries(aspect))}`);
+//             yield new Artefact(/* moduleName, */ /* aspect as any as Entry */);
+//         }
+//     }
+// }
+// export const isArtefact = (a: any): a is Artefact => a instanceof Artefact;
+// });///*  extends Map<string, Aspect | Promise<Aspect>> */ {
     // constructor(...artefactOrAspects: [Artefact] | Aspect[]) {
     //     super();
     //     if (artefactOrAspects.length === 1 && isArtefact(artefactOrAspects[0])) {
@@ -96,7 +110,6 @@ export const Artefact = Object.assign((moduleName: string, aspect: Aspect): Arte
     //     } while (pendingData.length > 0);
     // }
 // }
-export const isArtefact = (a: any): a is Artefact => a instanceof Artefact;
 
 export type WrappedModuleGenerator<T extends AsyncIterable<any> | AsyncGenerator<any>> = T & { _M: string; };
 export const wrapModuleGeneratorMetadata = (_M: string, generator: (...args: any[]) => AsyncGenerator<any>) => {
