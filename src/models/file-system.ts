@@ -1,35 +1,7 @@
 import * as nodeFs from "node:fs";
 import * as nodePath from "node:path";
 import * as nodeCrypto from "node:crypto";
-import { isAsyncFunction, isGeneratorFunction } from "node:util/types";
-import { Aspect, DiscriminatedModel, wrapModuleGeneratorMetadata } from ".";
-import { get, ObjectWithProperties } from "../prop-path";
-
-export type PipelineFunctionStage<I = any, O = any> = (input: I) => O | Promise<O>;
-export type PipelineGeneratorStage<I = any, O = any> = (source: AsyncIterable<I>) => AsyncIterable<O>;
-export type PipelineStage<I = any, O = any> = PipelineFunctionStage<I, O> | PipelineGeneratorStage<IArguments, O>;
-
-export const makeGeneratorFromFunction = <I = any, O = any>(stage: PipelineFunctionStage<I, O | Promise<O>>) =>
-    async function* generatorStage(source: AsyncIterable<I>) {
-        for await (const input of source) {
-            yield await stage(input) as O;
-        }
-    };
-
-export const compose = <I = any, O = any>(...stages: PipelineStage[]) => (source: AsyncIterable<I>) =>
-    stages.reduce((acc, curr, i, arr) => isGeneratorFunction(curr) && isAsyncFunction(curr) ?
-        (curr as any as AsyncGeneratorFunction)(acc) :
-        makeGeneratorFromFunction(curr)(acc), source as AsyncIterable<any>) as AsyncIterable<O>;
-export const iff = <I = any, O = any>(condition: (input: I) => boolean, stage: PipelineStage<I, O>) =>
-    async function* (source: AsyncIterable<I>) {
-        if (isGeneratorFunction(stage) && isAsyncFunction(stage)) {
-            return stage(source);
-        }
-        for await (const input of source) {
-            yield (condition(input) ? (stage as PipelineFunctionStage)(input) : input);
-        }
-    };
-export const exists = <I = any>(propertyPath: string) => (input: I) => !!get(input as ObjectWithProperties, propertyPath);
+// import { Aspect, DiscriminatedModel, wrapModuleGeneratorMetadata } from ".";
 
 export const moduleName = __filename.replace(/(\-)(.?)/g, (s, ...args: string[]) => args[1].toUpperCase());
 //             let extIndex = moduleName.lastIndexOf(".");
@@ -66,9 +38,9 @@ File.query = {
     byPath(path: string) { return ({ path }); },
 };
 export type Directory = EntryInnerBase<EntryType.Directory>;
-const Directory = async ({ path, stats }: { path: string, stats: nodeFs.Stats }): Promise<Directory> => (/* { [EntryType.Directory]: */ { _T: EntryType.Directory, path, stats });
+export const Directory = async ({ path, stats }: { path: string, stats: nodeFs.Stats }): Promise<Directory> => (/* { [EntryType.Directory]: */ { _T: EntryType.Directory, path, stats });
 export type Unknown = EntryInnerBase<EntryType.Unknown>;
-const Unknown = async ({ path, stats }: { path: string, stats: nodeFs.Stats }): Promise<Unknown> => (/* { [EntryType.Unknown]: */ { _T: EntryType.Unknown, path, stats });
+export const Unknown = async ({ path, stats }: { path: string, stats: nodeFs.Stats }): Promise<Unknown> => (/* { [EntryType.Unknown]: */ { _T: EntryType.Unknown, path, stats });
 
 export type Entry = File | Directory | Unknown;// EntryInnerBase<EntryType.File | EntryType.Directory | EntryType.Unknown>;
 // export type NamespacedEntry = DiscriminatedModel<Entry>;

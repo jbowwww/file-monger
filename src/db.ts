@@ -98,12 +98,20 @@ export class MongoStorage implements Storage {
 
 }
 
+export type UpdateOrCreateResult<A extends Artefact> = {
+    didWrite: boolean;
+    result: UpdateResult<A>;
+    query: Filter<A>;
+    update: Partial<A>;
+    _: A;
+};
+
 export interface Store<A extends Artefact> {
     find(query: Filter<A>): AsyncGenerator<WithId<A>>;
     findOne(query: Filter<A>): Promise<WithId<A> | null>;
     findOneAndUpdate(query: Filter<A>, update: A): Promise<WithId<A> | null>;
     updateOne(artefact: A, query?: Filter<A>, options?: UpdateOptions): Promise<UpdateResult<A> | null>;
-    updateOrCreate(artefact: A, query: Filter<A>, options: UpdateOptions): Promise<(UpdateResult<A> & { _: A }) | null | undefined>;
+    updateOrCreate(artefact: A, query: Filter<A>, options: UpdateOptions): Promise<UpdateOrCreateResult<A>>;
 }
 
 export class MongoStore<A extends Artefact> implements Store<A> {
@@ -137,37 +145,27 @@ export class MongoStore<A extends Artefact> implements Store<A> {
         return result;
     }
 
-    async updateOrCreate(artefact: A, query: Filter<A>, options: UpdateOptions = {}): Promise<(UpdateResult<A> & { _: A }) | null | undefined> {
+    async updateOrCreate(artefact: A, query: Filter<A>, options: UpdateOptions = {}): Promise<UpdateOrCreateResult<A>> {
         options = { ...options, upsert: true, /* ignoreUndefined: true, includeResultMetadata: true, returnDocument: 'after', */ };
-        let result;
-        // /* const  */query = /* artefact. */query?.unique as Filter<A>;
-        const dbArtefact = await this._collection.findOne<A>(query, options); //AndReplace(query, data as WithoutId<TSchema>, options);
+        let dbResult: UpdateResult<A> | undefined = undefined;
+        const dbArtefact = await this._collection.findOne<A>(query, options);
         const dbId = dbArtefact?._id;
         const query2 = (!!dbId ? ({ _id: { $eq: dbId } }) : query) as Filter<A>;
-        // for await (const update of artefact.streamData()) {
-            const { _id/* , _ts */, ...dbUpdate } = diff(dbArtefact ?? { _id: undefined, }, artefact) as Partial<A>;
-            // if (Object.keys(dbUpdate).length > 0) {
-                result = await this._collection.updateOne(query2, { $set: { ...dbUpdate } as Partial<A> }, options) as UpdateResult<A> & { _: A };
-                if (!result || !result.acknowledged) {
-                    throw new MongoError("updateOne not acknowledged for dbArtefact=${dbArtefact} dbUpdate=${dbUpdate}");
-                } else {
-                    if (!!result.upsertedId) {
-                        artefact._id = result.upsertedId.toString();
-                    } else if (!artefact._id && !!dbId) {
-                        artefact._id = dbId;
-                    }
-                    // This left here just for now to remind you of artefact async computations being representible by a streaming function from Artefact
-                    // Object.assign(dbArtefact ?? {}, dbUpdate);
+        const { _id, ...update } = diff(dbArtefact ?? { }, artefact) as Partial<A>;
+        if (Object.keys(update).length > 0) {
+            dbResult = await this._collection.updateOne(query2, { $set: { ...update } as Partial<A> }, options);
+            if (!dbResult || !dbResult.acknowledged) {
+                throw new MongoError("updateOne not acknowledged for dbArtefact=${dbArtefact} dbUpdate=${dbUpdate}");
+            } else {
+                if (!!dbResult.upsertedId) {
+                    artefact._id = dbResult.upsertedId.toString();
+                } else if (!artefact._id && !!dbId) {
+                    artefact._id = dbId;
                 }
-                // return 
-            // }
-            // console.log(`updateOrCreate(): \n\tquery = ${JSON.stringify(query)}\n\tquery2 = ${JSON.stringify(query2)}\n\toptions = ${JSON.stringify(options)}\n\tartefact = ${artefact}\n\tdbArtefact = ${JSON.stringify(dbArtefact)}\n\tupdate = ${JSON.stringify(update)}\n\tdbUpdate = ${JSON.stringify(dbUpdate)}\n\tresult = ${JSON.stringify(mapObject(result, ([K, V]) => K === '_' ? V.toString() : V))}`);        
-        // }
-        // console.log(`updateOrCreate(): dbArtefact=${JSON.stringify(dbArtefact)}`);
-        if (!!result) {
-            Object.assign(result as any, { _: artefact });
+            }
         }
-        console.log(`dbArtefact=${nodeUtil.inspect(dbArtefact)} dbId=${dbId} query2=${nodeUtil.inspect(query2)} dbUpdate=${nodeUtil.inspect(dbUpdate)} result=${nodeUtil.inspect(result)}`);
+        const result = Object.assign({ didWrite: !!dbResult, result: dbResult, query, update, _: artefact });
+        console.log(`dbArtefact=${nodeUtil.inspect(dbArtefact)} dbId=${dbId} query=${nodeUtil.inspect(query)} query2=${nodeUtil.inspect(query2)} dbUpdate=${nodeUtil.inspect(update)} result=${nodeUtil.inspect(result)}`);
         return result;
     }
 }
