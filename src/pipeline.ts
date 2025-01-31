@@ -34,6 +34,8 @@ export const pipeline = <I = any, O = any>(...stages: PipelineFunctionStage[]) =
     };
 };
 
+export const pipe = <I = any, O = any>(source: AsyncIterable<I>, ...stages: PipelineFunctionStage[]) => pipeline(...stages)(source);
+
 export const run =
     async function* <I = any, O = any>(source: AsyncIterable<I>, pipeline: Pipeline<I, O>): AsyncIterable<O> {
         for await (const input of source) {
