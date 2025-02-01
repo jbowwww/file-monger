@@ -104,7 +104,7 @@ export const walk = /* wrapModuleGeneratorMetadata(
     };
 // );
 
-export type Hash = ReturnType<typeof Hash>;
+export type Hash = Awaited<ReturnType<typeof Hash>>;
 export const Hash = async ({ path }: { path: string }) => {
     try {
         const hashDigest = nodeCrypto.createHash('sha256');

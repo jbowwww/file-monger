@@ -41,18 +41,14 @@ export const builder = (yargs: yargs.Argv) => yargs
         async function (argv): Promise<void> {
             for (const path of argv.paths) {
                 db.configure(() => new db.MongoStorage("mongodb://mongo:mongo@localhost:27017/"));
-                const store = await db.storage.store("fileSystemEntries");
-                const FileArtefactPipeline = pipeline<Entry, FileArtefact>(
-                    (e: Entry) => ({ [e._T]: e }),
-                    async ({ File }: { File?: File }) => ({ File, Hash: !!File && await Hash({ path: File?.path }) }),
-                );
-                for await (const _ of FileArtefactPipeline(walk({ path }))) {
-                    const fsEntryType = [File, Directory, Unknown].find(T => !!_[T.name as keyof FileArtefact]) ?? Entry;
-                    const result = await store.updateOrCreate(
-                        _,
-                        ({ [`${fsEntryType.name}.path`]: (_[fsEntryType.name as keyof FileArtefact] as Awaited<ReturnType<typeof fsEntryType>>).path }),
-                        { upsert: true });
-                    console.log(`_=${nodeUtil.inspect(_)} result=${nodeUtil.inspect(result)}`);
+                const store = await db.storage.store<FileArtefact>("fileSystemEntries");
+                for await (const e of walk({ path })) {
+                    const _: FileArtefact = { [e._T]: e };
+                    if (!!_.File) {
+                        _.Hash = await Hash({ path: _.File.path });
+                    }
+                    const result = await store.updateOrCreate(_, ({ [`${e._T}.path`]: _[e._T]?.path }), { upsert: true });
+                    console.log(`_=${nodeUtil.inspect(_)} result=${nodeUtil.inspect(result)}`);// task.progress=
                 }
                 console.log(`Closing db.storage=${db}`);
                 await db.storage.close();

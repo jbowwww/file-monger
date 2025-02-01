@@ -107,6 +107,7 @@ export type UpdateOrCreateResult<A extends Artefact> = {
 };
 
 export interface Store<A extends Artefact> {
+    count(query: Filter<A>): Promise<number>;
     find(query: Filter<A>): AsyncGenerator<WithId<A>>;
     findOne(query: Filter<A>): Promise<WithId<A> | null>;
     findOneAndUpdate(query: Filter<A>, update: A): Promise<WithId<A> | null>;
@@ -122,6 +123,10 @@ export class MongoStore<A extends Artefact> implements Store<A> {
         public readonly options: any,
         private _collection: Collection<A>,
     ) { }
+
+    async count(query: Filter<A>) {
+        return this._collection.countDocuments(query, { });
+    }
 
     async* find(query: Filter<A>) {
         for await (const item of this._collection.find(query))
@@ -149,7 +154,7 @@ export class MongoStore<A extends Artefact> implements Store<A> {
         options = { ...options, upsert: true, /* ignoreUndefined: true, includeResultMetadata: true, returnDocument: 'after', */ };
         let dbResult: UpdateResult<A> | undefined = undefined;
         const dbArtefact = await this._collection.findOne<A>(query, options);
-        const dbId = dbArtefact?._id;
+        const dbId = artefact._id = dbArtefact?._id;
         const query2 = (!!dbId ? ({ _id: { $eq: dbId } }) : query) as Filter<A>;
         const { _id, ...update } = diff(dbArtefact ?? { }, artefact) as Partial<A>;
         if (Object.keys(update).length > 0) {
@@ -157,10 +162,8 @@ export class MongoStore<A extends Artefact> implements Store<A> {
             if (!dbResult || !dbResult.acknowledged) {
                 throw new MongoError("updateOne not acknowledged for dbArtefact=${dbArtefact} dbUpdate=${dbUpdate}");
             } else {
-                if (!!dbResult.upsertedId) {
+                if (!artefact._id && !!dbResult.upsertedId) {
                     artefact._id = dbResult.upsertedId.toString();
-                } else if (!artefact._id && !!dbId) {
-                    artefact._id = dbId;
                 }
             }
         }
