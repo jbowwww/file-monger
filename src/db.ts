@@ -3,6 +3,7 @@ import { ChangeStreamDocument, ChangeStreamInsertDocument, ChangeStreamUpdateDoc
 // import { Artefact, ArtefactDataProperties, filterObject, Id, mapObject, Timestamped } from './Model';
 import { diff } from "deep-object-diff";
 import { Artefact } from "./models";
+import { buildObjectWithKeys, getKeysOfUndefinedValues } from "./utility";
 
 export let client: MongoClient | null = null;
 export let connection: MongoClient;
@@ -157,8 +158,9 @@ export class MongoStore<A extends Artefact> implements Store<A> {
         const dbId = artefact._id = dbArtefact?._id;
         const query2 = (!!dbId ? ({ _id: { $eq: dbId } }) : query) as Filter<A>;
         const { _id, ...update } = diff(dbArtefact ?? { }, artefact) as Partial<A>;
+        const deleteKeys = getKeysOfUndefinedValues(update);
         if (Object.keys(update).length > 0) {
-            dbResult = await this._collection.updateOne(query2, { $set: { ...update } as Partial<A> }, options);
+            dbResult = await this._collection.updateOne(query2, { $set: { ...update } as Partial<A>, $unset: buildObjectWithKeys(deleteKeys, "") }, options);
             if (!dbResult || !dbResult.acknowledged) {
                 throw new MongoError("updateOne not acknowledged for dbArtefact=${dbArtefact} dbUpdate=${dbUpdate}");
             } else {

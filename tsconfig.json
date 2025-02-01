@@ -1,7 +1,7 @@
 {
     "compilerOptions": {
         "target": "ESNext",
-        "module": "Nodenext",
+        "module": "NodeNext",
         "strict": true,
         "esModuleInterop": true,
         "moduleResolution": "node16",
@@ -9,6 +9,8 @@
         "rootDir": "src",
         "outDir": "dist/",
         "allowSyntheticDefaultImports": true,
+        "experimentalDecorators": true,
+        "emitDecoratorMetadata": true,
     },
     "include": [
         "src/"

@@ -6,6 +6,7 @@ import * as FileSystem from "./file-system";
 import { get, set } from "../prop-path";
 import { diff } from "deep-object-diff";
 import { File, Directory, Unknown, Entry, isFile, isDirectory, isUnknown, Hash } from "./file-system";
+import { Filter } from "mongodb";
 
 // export type DiscriminateUnion<T, K extends keyof T, V extends keyof T> = Extract<T, Record<string, V>>;
 // export type DiscriminatedModel<T extends Record<string, T[K]>, K extends keyof T = "_T"> = { [V in T[K]]: DiscriminateUnion<T, K, V> };
@@ -18,7 +19,25 @@ export type Converter<T, K extends string, V> = T extends any ? { [P in keyof Id
 export type Aspect = { _T: string; };
 export const isAspect = (aspect: any): aspect is Aspect => !!aspect && typeof aspect === "object" && typeof aspect._T === "string";
 
-export type Artefact<A extends {} = {}> = A & { _id?: string; };
+export class Artefact {
+    _id?: string;
+    get isNew() { return !this._id; }
+    get query() {
+        return {
+            byId: (): Filter<Artefact> => ({ _id: this._id }),
+        };
+    };
+};
+
+// export const Artefact = <T extends { _id?: string } = { _id?: string}>(data: any): Artefact =>
+//     Object.assign(this ?? { prototype: Artefact.prototype }, data);
+// Artefact.prototype = {
+//     isNew() { return !this._id; },
+//     query: {
+//         byId: (: Artefact) = ({ _id: this._id }),
+//     },
+// };
+// export type Artefact = ReturnType<typeof Artefact>;
 
 // export type ArtefactData = { _id?: string; } & { [K: string]: any; };
 // export const Artefact = (...aspects: Aspect[]) => Object.assign({}, aspects.map(a => ({ [a._T]: a })));
