@@ -12,7 +12,7 @@ export type Pipeline<I = any, O = any> = PipelineFunctionStage<I, O>;
 //     run(source: AsyncGenerator<I>): AsyncGenerator<O>;
 // }
 
-export const makeGeneratorFromFunction = <I = any, O = any>(stage: PipelineFunctionStage<I, O | Promise<O>>) =>
+export const makeGeneratorFnFromFn = <I = any, O = any>(stage: PipelineFunctionStage<I, O | Promise<O>>) =>
     async function* generatorStage(source: AsyncGenerator<I>) {
         for await (const input of source) {
             yield await stage(input) as O;
@@ -23,13 +23,13 @@ export const isAsyncGenerator = (generator: any): generator is AsyncGenerator =>
 export const isAsyncGeneratorFunction = (generatorFn: any): generatorFn is AsyncGeneratorFunction => isAsyncGenerator(generatorFn.prototype);
 
 export const compose = <I = any, O = any>(...stages: PipelineFunctionStage[]) => stages.reduce(
-    (prevStages, stage, i, arr) => (input: any) => stage(prevStages(input)) as O | Promise<O>) as Pipeline<I, O>;
+    (prevStages, stage, i, arr) => async (input: any) => stage(prevStages(await input)) as O | Promise<O>) as Pipeline<I, O>;
 
 export const pipeline = <I = any, O = any>(...stages: PipelineFunctionStage[]) => {
     const transform = compose<I, O>(...stages);
     return async function* (source: AsyncIterable<I>) {
         for await (const input of source) {
-            yield transform(input);
+            yield await transform(input);
         }
     };
 };
@@ -46,3 +46,29 @@ export const run =
 export const iff = <I = any, O = any>(condition: (input: I) => boolean | Promise<boolean>, stage: PipelineFunctionStage<I, O>) =>
     async (input: I) => (await condition(input) ? await (stage as PipelineFunctionStage<I, O>)(input) : input);
 export const exists = <I = any>(propertyPath: string) => (input: I) => !!get(input as ObjectWithProperties, propertyPath);
+
+export const interval = async function* interval(timeoutMs: number): AsyncGenerator<undefined> {
+    while (true) {
+        await new Promise((resolve, reject) => setTimeout(resolve, timeoutMs));
+        yield;
+    }
+};
+interval.YieldResult = {}; //new Object();
+
+export const cargo = async function* <I = any, T = Array<I>>(maxBatchSize: number, timeoutMs: number, source: AsyncGenerator<Promise<I>>) {
+    let batch: I[] = [];
+    let intervalGen = interval(timeoutMs);
+    let intervalPr = intervalGen.next();
+    let sourceGen = source;
+    let inputPr = sourceGen.next();
+    let r = { done: false };
+    while (!r.done) {
+        const r = await Promise.race([intervalPr, inputPr]);
+        if (r.value === interval.YieldResult && batch.length > 0) {
+            yield batch;
+            batch = [];
+        } else {
+            batch.push(r.value);
+        }
+    }
+};

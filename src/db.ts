@@ -1,9 +1,9 @@
 import * as nodeUtil from "node:util";
-import { ChangeStreamDocument, ChangeStreamInsertDocument, ChangeStreamUpdateDocument, Collection, Db, Filter, MongoClient, MongoClientOptions, MongoError, UpdateFilter, UpdateOptions, UpdateResult, WithId } from "mongodb";
-// import { Artefact, ArtefactDataProperties, filterObject, Id, mapObject, Timestamped } from './Model';
+import { AnyBulkWriteOperation, BulkWriteOptions, ChangeStreamDocument, ChangeStreamInsertDocument, ChangeStreamUpdateDocument, Collection, Db, Filter, MongoClient, MongoClientOptions, MongoError, OrderedBulkOperation, UpdateFilter, UpdateOptions, UpdateResult, WithId } from "mongodb";
 import { diff } from "deep-object-diff";
 import { Artefact } from "./models";
-import { buildObjectWithKeys, getKeysOfUndefinedValues } from "./utility";
+import { AsyncFunction, buildObjectWithKeys, getKeysOfUndefinedValues } from "./utility";
+import { isAsyncGenerator } from "./pipeline";
 
 export let client: MongoClient | null = null;
 export let connection: MongoClient;
@@ -107,6 +107,13 @@ export type UpdateOrCreateResult<A extends Artefact> = {
     _: A;
 };
 
+export type BulkWriteOp<A extends Artefact> = AnyBulkWriteOperation<A>;
+
+export type BulkWriterResult<A extends Artefact> = {
+    opCount: number;
+    // etc
+};
+
 export interface Store<A extends Artefact> {
     count(query: Filter<A>): Promise<number>;
     find(query: Filter<A>): AsyncGenerator<WithId<A>>;
@@ -114,6 +121,7 @@ export interface Store<A extends Artefact> {
     findOneAndUpdate(query: Filter<A>, update: A): Promise<WithId<A> | null>;
     updateOne(artefact: A, query?: Filter<A>, options?: UpdateOptions): Promise<UpdateResult<A> | null>;
     updateOrCreate(artefact: A, query: Filter<A>, options: UpdateOptions): Promise<UpdateOrCreateResult<A>>;
+    bulkWriter(optionsOrSource: BulkWriteOptions | AsyncGenerator<AnyBulkWriteOperation<A>>, source?: AsyncGenerator<AnyBulkWriteOperation<A>>): Promise<BulkWriterResult<A>> | AsyncFunction<[AsyncGenerator<AnyBulkWriteOperation<A>>], Promise<BulkWriterResult<A>>>;
 }
 
 export class MongoStore<A extends Artefact> implements Store<A> {
@@ -157,10 +165,10 @@ export class MongoStore<A extends Artefact> implements Store<A> {
         const dbArtefact = await this._collection.findOne<A>(query, options);
         const dbId = artefact._id = dbArtefact?._id;
         const query2 = (!!dbId ? ({ _id: { $eq: dbId } }) : query) as Filter<A>;
-        const { _id, ...update } = diff(dbArtefact ?? { }, artefact) as Partial<A>;
-        const deleteKeys = getKeysOfUndefinedValues(update);
-        if (Object.keys(update).length > 0) {
-            dbResult = await this._collection.updateOne(query2, { $set: { ...update } as Partial<A>, $unset: buildObjectWithKeys(deleteKeys, "") }, options);
+        const { _id, ...dbUpdate } = diff(dbArtefact ?? { }, artefact) as Partial<A>;
+        const deleteKeys = getKeysOfUndefinedValues(dbUpdate);
+        if (Object.keys(dbUpdate).length > 0) {
+            dbResult = await this._collection.updateOne(query2, { $set: { ...dbUpdate } as Partial<A>, $unset: buildObjectWithKeys(deleteKeys, "") }, options);
             if (!dbResult || !dbResult.acknowledged) {
                 throw new MongoError("updateOne not acknowledged for dbArtefact=${dbArtefact} dbUpdate=${dbUpdate}");
             } else {
@@ -169,9 +177,38 @@ export class MongoStore<A extends Artefact> implements Store<A> {
                 }
             }
         }
-        const result = Object.assign({ didWrite: !!dbResult, result: dbResult, query, update, _: artefact });
-        console.log(`dbArtefact=${nodeUtil.inspect(dbArtefact)} dbId=${dbId} query=${nodeUtil.inspect(query)} query2=${nodeUtil.inspect(query2)} dbUpdate=${nodeUtil.inspect(update)} result=${nodeUtil.inspect(result)}`);
+        const result = Object.assign({ didWrite: !!dbResult, result: dbResult, query, update: dbUpdate, _: artefact });
+        console.log(`dbArtefact=${nodeUtil.inspect(dbArtefact)} dbId=${dbId} query=${nodeUtil.inspect(query)} query2=${nodeUtil.inspect(query2)} dbUpdate=${nodeUtil.inspect(dbUpdate)} result=${nodeUtil.inspect(result)}`);
         return result;
+    }
+
+    bulkWriter(
+        optionsOrSource: BulkWriteOptions | AsyncGenerator<AnyBulkWriteOperation<A>>,
+        source?: AsyncGenerator<AnyBulkWriteOperation<A>>
+    ):
+        Promise<BulkWriterResult<A>> |
+        AsyncFunction<[AsyncGenerator<AnyBulkWriteOperation<A>>], Promise<BulkWriterResult<A>>>
+    {
+        const _this = this;
+        let options: BulkWriteOptions;
+        if (isAsyncGenerator(optionsOrSource)) {
+            source = optionsOrSource;
+            options = {};
+        } else {
+            options = optionsOrSource;
+        }
+        if (!source) {
+            return bulkWrite;
+        } else {
+            return bulkWrite(source)
+        }
+        async function bulkWrite(source: AsyncGenerator<AnyBulkWriteOperation<A>>) {
+            for await (const op of source) {
+                _this._collection.bulkWrite([op], options);
+            }
+            var result: BulkWriterResult<A> = { opCount: 0, };
+            return result;
+        };
     }
 }
 

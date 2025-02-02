@@ -1,5 +1,5 @@
 export type ObjectWithProperties = { [K: string]: any };
-export const get = (obj: ObjectWithProperties, path: string): ObjectWithProperties => {
+export const get = (obj: ObjectWithProperties, path: string): any => {
     const paths = path.split(".");
     if (paths.length === 1) {
         return obj[paths.shift()!];
