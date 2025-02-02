@@ -47,12 +47,16 @@ function enumerable(enumerable: boolean) {
 };
 
 class FileArtefact extends Artefact {
-    #Entry: Entry;
+
     constructor(Entry: Entry) { super(); this.#Entry = Entry; /* this[e._T] = e; */ }
+    #Entry: Entry;
+    
     get File(): File | undefined { return this.#Entry._T === EntryType.File ? this.#Entry as File : undefined; }
     get Directory(): Directory | undefined { return this.#Entry._T === EntryType.Directory ? this.#Entry as Directory : undefined; }
     get Unknown(): Unknown | undefined { return this.#Entry._T === EntryType.Unknown ? this.#Entry as Unknown : undefined; }
+    
     Hash?: Hash | undefined
+    
     // @enumerable(false)
     get query() {
         return {

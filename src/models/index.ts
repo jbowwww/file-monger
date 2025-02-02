@@ -19,7 +19,7 @@ export type Converter<T, K extends string, V> = T extends any ? { [P in keyof Id
 export type Aspect = { _T: string; };
 export const isAspect = (aspect: any): aspect is Aspect => !!aspect && typeof aspect === "object" && typeof aspect._T === "string";
 
-export class Artefact {
+export abstract class Artefact {
     _id?: string;
     get isNew() { return !this._id; }
     get query() {
