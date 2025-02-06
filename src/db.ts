@@ -1,4 +1,5 @@
 import * as nodeUtil from "node:util";
+import { isDate } from "node:util/types";
 import { AnyBulkWriteOperation, BulkWriteOptions, ChangeStreamDocument, ChangeStreamInsertDocument, ChangeStreamUpdateDocument, Collection, Db, Filter, MongoClient, MongoClientOptions, MongoError, OrderedBulkOperation, UpdateFilter, UpdateOptions, UpdateResult, WithId } from "mongodb";
 import { diff } from "deep-object-diff";
 import { Artefact } from "./models";
@@ -49,6 +50,30 @@ export async function useStorage(
         }
     }
     await command(storage);
+}
+
+export function diffDotNotation(original: { [K: string]: any; }, updated: { [K: string]: any; }): ({ [K: string]: any; }) {
+    const update = diff(original, updated);
+    console.debug(`update=${nodeUtil.inspect(update)}`);
+    const result = appendSubPropNames(update);
+    console.debug(`result=${nodeUtil.inspect(result)}}`);
+    return result;
+    function appendSubPropNames(source: { [K: string]: any; }, result: ({ [K: string]: any; }) = {}, prefix: string = "") {
+        console.debug(`appendSubPropNames(): source=${nodeUtil.inspect(source)}`);
+        for (const K in source) {
+            const V = source[K];
+            console.debug(`appendSubPropNames(): K=${K} V=${nodeUtil.inspect(V)}`);
+            if (V !== null && V !== undefined && V.prototype === Function.prototype) {
+                continue;
+            } else if (V !== null && V !== undefined && typeof V === "object" && !isDate(V)) {  //V.prototype !== Date.prototype
+                appendSubPropNames(V, result, prefix + K + ".");
+            } else {
+                console.debug(`appendSubPropNames(): result["${prefix + K}"] = ${nodeUtil.inspect(V)}`);
+                result[prefix + K] = V;
+            }
+        }
+        return result;
+    }
 }
 
 export class MongoStorage implements Storage {
@@ -165,7 +190,7 @@ export class MongoStore<A extends Artefact> implements Store<A> {
         const dbArtefact = await this._collection.findOne<A>(query, options);
         const dbId = artefact._id = dbArtefact?._id;
         const query2 = (!!dbId ? ({ _id: { $eq: dbId } }) : query) as Filter<A>;
-        const { _id, ...dbUpdate } = diff(dbArtefact ?? { }, artefact) as Partial<A>;
+        const { _id, ...dbUpdate } = diffDotNotation(dbArtefact ?? { }, artefact) as Partial<A>;
         const deleteKeys = getKeysOfUndefinedValues(dbUpdate);
         if (Object.keys(dbUpdate).length > 0) {
             dbResult = await this._collection.updateOne(query2, { $set: { ...dbUpdate } as Partial<A>, $unset: buildObjectWithKeys(deleteKeys, "") }, options);

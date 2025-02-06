@@ -1,7 +1,7 @@
 import * as nodeFs from "node:fs";
 import * as nodePath from "node:path";
 import * as nodeCrypto from "node:crypto";
-import { Aspect, DiscriminatedModel } from ".";
+import { DiscriminatedModel } from ".";
 
 export const enum EntryType {
     File        = "File",
