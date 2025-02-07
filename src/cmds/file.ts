@@ -1,11 +1,8 @@
 import * as nodeUtil from "node:util";
 import * as db from '../db';
-import { Entry, File, Directory, Unknown, walk, Hash, EntryType, isEntry, isFile, isDirectory, isUnknown } from "../models/file-system";
+import { Entry, walk, Hash, isFile } from "../models/file-system";
 import yargs, { ArgumentsCamelCase } from "yargs";
 import { Artefact, DiscriminatedModel, Query } from '../models';
-import {} from "@fieldguide/pipeline"
-import { pipe, pipeline } from "../pipeline";
-import { Filter } from "mongodb";
 
 export enum CalculateHashEnum {
     Disable,
@@ -41,7 +38,7 @@ export const builder = (yargs: yargs.Argv) => yargs
         async function (argv): Promise<void> {
             for (const path of argv.paths) {
                 db.configure(() => new db.MongoStorage("mongodb://mongo:mongo@localhost:27017/"));
-                const store = await db.storage.store<FileSystemArtefact>("fileSystemEntries");
+                const store = (await db.storage.store<FileSystemArtefact>("fileSystemEntries")).bulkWriter();
                 for await (const e of walk({ path })) {
                     const _ = FileSystemArtefact(e);
                     if (_.File && isFile(_.File)) {
