@@ -2,6 +2,7 @@ import * as nodeFs from "node:fs";
 import * as nodePath from "node:path";
 import * as nodeCrypto from "node:crypto";
 import { DiscriminatedModel } from ".";
+import { Progress } from "../progress";
 
 export const enum EntryType {
     File = "File",
@@ -40,12 +41,14 @@ export const walk = /* wrapModuleGeneratorMetadata(
         callback = (e, d) => ({ emit: true, recurse: !maxDepth || d <= maxDepth }),
         emitError = true,
         depth = 0,
+        progress,
     }: {
         path: string,
         maxDepth?: number,
         callback?: WalkCallbackFn,
         emitError?: boolean,
         depth?: number,
+        progress?: Progress,
     }): AsyncGenerator<Entry> {
         try {
             const entry = await Entry({ path });
@@ -53,12 +56,14 @@ export const walk = /* wrapModuleGeneratorMetadata(
             if (emit) {
                 yield entry;
             }
+            if (progress) progress.count++;
             if (isDirectory(entry) && recurse) {
                 try {
-                    const dir = await nodeFs.promises.opendir(path, { encoding: "utf-8", recursive: false });
-                    for await (const dirEntry of dir) {
-                        if (![".", ".."].includes(dirEntry.name)) {
-                            yield* walk({ path: nodePath.join(path, dirEntry.name), maxDepth, callback, emitError, depth: depth + 1 });
+                    const entries = await nodeFs.promises.readdir(path, { encoding: "utf-8", recursive: false });
+                    if (progress) progress.total += entries.length;
+                    for await (const dirEntry of entries) {
+                        if (![".", ".."].includes(dirEntry)) {
+                            yield* walk({ path: nodePath.join(path, dirEntry), maxDepth, callback, emitError, depth: depth + 1, progress });
                         }
                     }
                 } catch (err) {

@@ -3,6 +3,7 @@ import * as db from '../db';
 import { Entry, walk, Hash, isFile } from "../models/file-system";
 import yargs, { ArgumentsCamelCase } from "yargs";
 import { Artefact, DiscriminatedModel, Query } from '../models';
+import { Progress } from "../progress";
 
 export enum CalculateHashEnum {
     Disable,
@@ -37,18 +38,19 @@ export const builder = (yargs: yargs.Argv) => yargs
         }),
         async function (argv): Promise<void> {
             for (const path of argv.paths) {
-                db.configure(() => new db.MongoStorage("mongodb://mongo:mongo@localhost:27017/"));
-                const store = (await db.storage.store<FileSystemArtefact>("fileSystemEntries"));//.bulkWriterStore();
-                for await (const e of walk({ path })) {
+                const storage = new db.MongoStorage("mongodb://mongo:mongo@localhost:27017/");
+                const store = (await storage.store<FileSystemArtefact>("fileSystemEntries"));//.bulkWriterStore();
+                const progress = new Progress();
+                for await (const e of walk({ path, progress: progress })) {
                     const _ = FileSystemArtefact(e);
                     if (_.File && isFile(_.File)) {
                         _.Hash = await Hash({ path: _.File.path });
                     }
                     const result = await store.updateOrCreate(_, Query(_, `${e._T}.path`), { upsert: true, ignoreUndefined: true }); // ({ [`${e._T}.path`]: _[e._T]?.path })
-                    console.log(`_=${nodeUtil.inspect(_)} result=${nodeUtil.inspect(result)}`);// task.progress=
+                    console.log(`result=${nodeUtil.inspect(result)} progress=${progress}`); //_=${nodeUtil.inspect(_)} 
                 }
                 console.log(`Closing db.storage=${db}`);
-                await db.storage.close();
+                await storage.close();
             }
         })
     .demandCommand();

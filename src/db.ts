@@ -6,12 +6,6 @@ import { Artefact } from "./models";
 import { AsyncFunction, buildObjectWithKeys, getKeysOfUndefinedValues } from "./utility";
 import { cargo, isAsyncGenerator } from "./pipeline";
 
-export let client: MongoClient | null = null;
-export let connection: MongoClient;
-export let db: Db;
-
-export let storage: Storage;
-
 export function isChangeInsert(value: ChangeStreamDocument): value is ChangeStreamInsertDocument {
     return value.operationType === "insert";
 }
@@ -26,49 +20,18 @@ export interface Storage {
     store<A extends Artefact>(name: string, options?: any): Promise<Store<A>>;
 }
 
-export type StorageConfigurationFunction = () => Storage;
-export type StorageCommandFunction = (storage: Storage) => Promise<void>
-
-export function configure(config: StorageConfigurationFunction) {
-    return storage = config();
-}
-
-export async function useStorage(command: StorageCommandFunction): Promise<void>;
-export async function useStorage(config: StorageConfigurationFunction, command: StorageCommandFunction): Promise<void>;
-export async function useStorage(
-    commandOrConfig: StorageCommandFunction | StorageConfigurationFunction,
-    commandOrConfig2?: StorageCommandFunction | StorageConfigurationFunction
-): Promise<void> {
-    const command = (commandOrConfig2 ?? commandOrConfig) as StorageCommandFunction;
-    const config = (commandOrConfig2 ? commandOrConfig : undefined) as StorageConfigurationFunction | undefined;
-    if (!storage) {
-        if (!!config) {
-            storage = configure(config);
-        }
-        if (!storage) {
-            throw new RangeError("useStorage(): db.storage is undefined");
-        }
-    }
-    await command(storage);
-}
-
 export function diffDotNotation(original: { [K: string]: any; }, updated: { [K: string]: any; }): ({ [K: string]: any; }) {
     const update = diff(original, updated);
-    console.debug(`update=${nodeUtil.inspect(update)}`);
     const result = appendSubPropNames(update);
-    console.debug(`result=${nodeUtil.inspect(result)}}`);
     return result;
     function appendSubPropNames(source: { [K: string]: any; }, result: ({ [K: string]: any; }) = {}, prefix: string = "") {
-        console.debug(`appendSubPropNames(): source=${nodeUtil.inspect(source)}`);
         for (const K in source) {
             const V = source[K];
-            console.debug(`appendSubPropNames(): K=${K} V=${nodeUtil.inspect(V)}`);
             if (V !== null && V !== undefined && typeof V === "function") {
                 continue;
             } else if (V !== null && V !== undefined && typeof V === "object" && !isDate(V)) {  //V.prototype !== Date.prototype
                 appendSubPropNames(V, result, prefix + K + ".");
             } else {
-                console.debug(`appendSubPropNames(): result["${prefix + K}"] = ${nodeUtil.inspect(V)}`);
                 result[prefix + K] = V;
             }
         }
@@ -121,7 +84,6 @@ export class MongoStorage implements Storage {
         process.stdout.write("OK\n");
         return store;
     }
-
 }
 
 export type UpdateOrCreateResult<A extends Artefact> = {
@@ -208,7 +170,7 @@ export class MongoStore<A extends Artefact> implements Store<A> {
             }
         }
         const result = Object.assign({ didWrite: !!dbResult, result: dbResult, query, update: dbUpdate, _: artefact });
-        console.log(`dbArtefact=${nodeUtil.inspect(dbArtefact)} dbId=${dbId} query=${nodeUtil.inspect(query)} query2=${nodeUtil.inspect(query2)} dbUpdate=${nodeUtil.inspect(dbUpdate)} result=${nodeUtil.inspect(result)}`);
+        // console.log(`dbArtefact=${nodeUtil.inspect(dbArtefact)} dbId=${dbId} query=${nodeUtil.inspect(query)} query2=${nodeUtil.inspect(query2)} dbUpdate=${nodeUtil.inspect(dbUpdate)} result=${nodeUtil.inspect(result)}`);
         return result;
     }
 
@@ -241,40 +203,5 @@ export class MongoStore<A extends Artefact> implements Store<A> {
             bulkWriterFn: this.bulkWriterFn.bind(this),
             bulkWriterStore: this.bulkWriterStore.bind(this),
         });
-    }
-}
-
-export function isConnected() {
-    return client !== null;
-}
-
-export async function connect(url: string, options?: MongoClientOptions) {
-    if (client === null) {
-        process.stdout.write(`Initialising DB connection to ${url} ${options !== undefined ? ("options=" + JSON.stringify(options)) : ""} ... `);
-        client = new MongoClient(url, options);
-        connection = await client.connect();
-        db = connection.db();
-        process.stdout.write("OK\n");
-    }
-    return connection;
-}
-
-export async function close() {
-    if (!!connection) {
-        process.stdout.write(`Closing DB connection ... `);
-        await connection.close();
-        client = null;
-        process.stdout.write("OK\n");
-    }
-}
-
-export async function useConnection(url: string, options: MongoClientOptions = {}, command: (db: MongoClient) => Promise<void>) {
-    await connect(url, options);
-    try {
-        await command(connection);
-    } catch (err) {
-        throw err;
-    } finally {
-        await close();
     }
 }
