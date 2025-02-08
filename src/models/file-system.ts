@@ -4,9 +4,9 @@ import * as nodeCrypto from "node:crypto";
 import { DiscriminatedModel } from ".";
 
 export const enum EntryType {
-    File        = "File",
-    Directory   = "Directory",
-    Unknown     = "Unknown",
+    File = "File",
+    Directory = "Directory",
+    Unknown = "Unknown",
 };
 export type EntryBase<_T extends EntryType> = {
     _T: _T;
@@ -34,7 +34,7 @@ export const isUnknown = (u: any): u is Unknown => isEntry(u, EntryType.Unknown)
 export type WalkCallbackFn = (entry: Entry, depth: number) => { emit: boolean, recurse?: boolean };
 export const walk = /* wrapModuleGeneratorMetadata(
     nodePath.basename(__filename.slice(__dirname.length + 1)), */
-    async function *walk({
+    async function* walk({
         path,
         maxDepth,
         callback = (e, d) => ({ emit: true, recurse: !maxDepth || d <= maxDepth }),
@@ -58,7 +58,7 @@ export const walk = /* wrapModuleGeneratorMetadata(
                     const dir = await nodeFs.promises.opendir(path, { encoding: "utf-8", recursive: false });
                     for await (const dirEntry of dir) {
                         if (![".", ".."].includes(dirEntry.name)) {
-                            yield* walk({ path: nodePath.join(dirEntry.parentPath, dirEntry.name), maxDepth, callback, emitError, depth: depth + 1 });
+                            yield* walk({ path: nodePath.join(path, dirEntry.name), maxDepth, callback, emitError, depth: depth + 1 });
                         }
                     }
                 } catch (err) {
