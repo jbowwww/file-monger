@@ -38,7 +38,7 @@ export const builder = (yargs: yargs.Argv) => yargs
         async function (argv): Promise<void> {
             for (const path of argv.paths) {
                 db.configure(() => new db.MongoStorage("mongodb://mongo:mongo@localhost:27017/"));
-                const store = (await db.storage.store<FileSystemArtefact>("fileSystemEntries")).bulkWriter();
+                const store = (await db.storage.store<FileSystemArtefact>("fileSystemEntries"));//.bulkWriterStore();
                 for await (const e of walk({ path })) {
                     const _ = FileSystemArtefact(e);
                     if (_.File && isFile(_.File)) {

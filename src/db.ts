@@ -63,7 +63,7 @@ export function diffDotNotation(original: { [K: string]: any; }, updated: { [K: 
         for (const K in source) {
             const V = source[K];
             console.debug(`appendSubPropNames(): K=${K} V=${nodeUtil.inspect(V)}`);
-            if (V !== null && V !== undefined && V.prototype === Function.prototype) {
+            if (V !== null && V !== undefined && typeof V === "function") {
                 continue;
             } else if (V !== null && V !== undefined && typeof V === "object" && !isDate(V)) {  //V.prototype !== Date.prototype
                 appendSubPropNames(V, result, prefix + K + ".");
@@ -154,8 +154,8 @@ export interface Store<A extends Artefact> {
     updateOne(query: Filter<A>, update: UpdateFilter<A>, options?: UpdateOptions): Promise<UpdateResult<A> | null>;
     updateOrCreate(artefact: A, query: Filter<A>, options?: UpdateOptions): Promise<UpdateOrCreateResult<A>>;
     bulkWrite(operations: AnyBulkWriteOperation<A>[], options?: BulkWriteOptions): Promise<BulkWriteResult>;
-    bulkWriterFn(options: BulkWriterOptions): BulkWriterFn<A>;
-    bulkWriterStore(options: BulkWriterOptions): BulkWriterStore<A>;
+    bulkWriterFn(options?: BulkWriterOptions): BulkWriterFn<A>;
+    bulkWriterStore(options?: BulkWriterOptions): BulkWriterStore<A>;
 }
 
 export class MongoStore<A extends Artefact> implements Store<A> {
