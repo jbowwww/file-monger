@@ -16,14 +16,16 @@ export type EntryBase<_T extends EntryType> = {
 };
 
 export type File = EntryBase<EntryType.File>;
+export const File = ({ path, stats }: ({ path: string, stats: nodeFs.Stats })) => ({ _T: EntryType.File, path, stats });
 export type Directory = EntryBase<EntryType.Directory>;
+export const Directory = ({ path, stats }: ({ path: string, stats: nodeFs.Stats })) => ({ _T: EntryType.Directory, path, stats });
 export type Unknown = EntryBase<EntryType.Unknown>;
+export const Unknown = ({ path, stats }: ({ path: string, stats: nodeFs.Stats })) => ({ _T: EntryType.Unknown, path, stats });
 
 export type Entry = File | Directory | Unknown;
 export const Entry = async ({ path }: { path: string }): Promise<Entry> => {
     const stats = await nodeFs.promises.stat(path!);
-    const _T = stats.isFile() ? EntryType.File : stats.isDirectory() ? EntryType.Directory : EntryType.Unknown;
-    return await ({ _T, path, stats });
+    return stats.isFile() ? File({ path, stats }) : stats.isDirectory() ? Directory({ path, stats }) : Unknown({ path, stats });
 };
 export type NamespacedEntry = DiscriminatedModel<Entry, "_T">;
 
@@ -53,10 +55,10 @@ export const walk = /* wrapModuleGeneratorMetadata(
         try {
             const entry = await Entry({ path });
             const { emit, recurse } = callback(entry, depth);
+            if (progress) progress.count++;
             if (emit) {
                 yield entry;
             }
-            if (progress) progress.count++;
             if (isDirectory(entry) && recurse) {
                 try {
                     const entries = await nodeFs.promises.readdir(path, { encoding: "utf-8", recursive: false });
@@ -96,7 +98,7 @@ export const Hash = async ({ path }: { path: string })/* : Hash */ => {
                     hashDigest.update(data);
             });
         });
-        return ({ _T: HashType.Hash, sha256 });
+        return ({ _T: HashType.Hash, _ts: Date.now(), sha256 });
     } catch (error) {
         throw new Error(`Error hashing file '${path}': ${error}`);
     }

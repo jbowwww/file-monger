@@ -1,9 +1,12 @@
 import * as nodeUtil from "node:util";
-import * as db from '../db';
-import { Entry, walk, Hash, isFile } from "../models/file-system";
+import { Entry, File, Directory, walk, Hash, isFile } from "../models/file-system";
 import yargs, { ArgumentsCamelCase } from "yargs";
-import { Artefact, DiscriminatedModel, Query } from '../models';
+import { Artefact, DiscriminatedModel } from '../models';
 import { Progress } from "../progress";
+import { Task } from "../task";
+import { MongoStorage/* , Query */ } from "../db";
+import { Filter, WithId } from "mongodb";
+import { get } from "../prop-path";
 
 export enum CalculateHashEnum {
     Disable,
@@ -26,6 +29,8 @@ export type FileSystemArtefact = Artefact<
     }>;
 export const FileSystemArtefact = (e: Entry) => ({ [e._T]: e }) as FileSystemArtefact;
 
+export const Query = <A extends Artefact>(_: A, path: string): Filter<A> => ({ [path]: get(_, path) }) as Filter<A>;
+
 export const command = 'file';
 export const description = 'File commands';
 export const builder = (yargs: yargs.Argv) => yargs
@@ -37,21 +42,42 @@ export const builder = (yargs: yargs.Argv) => yargs
             demandOption: true
         }),
         async function (argv): Promise<void> {
-            for (const path of argv.paths) {
-                const storage = new db.MongoStorage("mongodb://mongo:mongo@localhost:27017/");
-                const store = (await storage.store<FileSystemArtefact>("fileSystemEntries"));//.bulkWriterStore();
-                const progress = new Progress();
-                for await (const e of walk({ path, progress: progress })) {
-                    const _ = FileSystemArtefact(e);
-                    if (_.File && isFile(_.File)) {
-                        _.Hash = await Hash({ path: _.File.path });
+            Task.start(
+                async function indexFileSystem(task: Task) {
+                    for (const path of argv.paths) {
+                        const storage = new MongoStorage("mongodb://mongo:mongo@localhost:27017/");
+                        const store = (await storage.store<FileSystemArtefact>("fileSystemEntries"));//.bulkWriterStore();
+                        for await (const e of walk({ path, progress: task.progress })) {
+                            const _ = FileSystemArtefact(e);
+                            // if (_.File && isFile(_.File)) {
+                            //     _.Hash = await Hash({ path: _.File.path });
+                            // }
+                            const result = await store.updateOrCreate(_, Query(_, `${e._T}.path`)); // ({ [`${e._T}.path`]: _[e._T]?.path })
+                            console.log(`result=${nodeUtil.inspect(result)} task.progress=${task.progress}`); //_=${nodeUtil.inspect(_)} 
+                        }
+                        console.log(`Closing storage=${storage}`);
+                        await storage.close();
                     }
-                    const result = await store.updateOrCreate(_, Query(_, `${e._T}.path`), { upsert: true, ignoreUndefined: true }); // ({ [`${e._T}.path`]: _[e._T]?.path })
-                    console.log(`result=${nodeUtil.inspect(result)} progress=${progress}`); //_=${nodeUtil.inspect(_)} 
+                },
+                async function hashFiles(task: Task) {
+                    const storage = new MongoStorage("mongodb://mongo:mongo@localhost:27017/");
+                    const store = (await storage.store<FileSystemArtefact>("fileSystemEntries"));//.bulkWriterStore();
+                    for await (const _ of store.find({  //Query.and(Query(File).exists(),)) {
+                        $and: [
+                            { File: { $exists: true } },
+                            {
+                                $or: [
+                                    { Hash: { $exists: false } },
+                                    { $expr: { $lt: ["Hash._ts.updated", "$File.stats.mtime"] } }
+                                ]
+                            }
+                        ]
+                    }, { progress: task.progress })) {
+                        const result = await store.updateOne(Query(_, "_id"), { $set: { Hash: await Hash({ path: _.File!.path }) } });
+                        console.log(`result=${nodeUtil.inspect(result)} task.progress=${task.progress}`); //_=${nodeUtil.inspect(_)} 
+                    }
                 }
-                console.log(`Closing db.storage=${db}`);
-                await storage.close();
-            }
+            );
         })
     .demandCommand();
 exports.handler = async function (argv: ArgumentsCamelCase) {
