@@ -69,12 +69,42 @@ export const cargo = async function* <I = any>(maxBatchSize: number, timeoutMs: 
         if (r.value === interval.YieldResult && batch.length > 0) {
             yield batch;
             batch = [];
+            intervalPr = intervalGen.next();
         } else {
             if (batch.length === maxBatchSize) {
                 yield batch;
                 batch = [];
+                intervalPr = intervalGen.next();
             }
             batch.push(r.value);
         }
     }
 };
+
+export type GeneratorStats<T> = {
+    inCount: number;    // items from source
+    outCount: number;   // items yielded
+};
+
+export type GeneratorObjectStats<T> = {
+    expectedTotalCount: number;
+};
+
+export type GeneratorReturnStats<T> = {
+
+};
+
+export const wrapGeneratorStats = <T extends { [K: string]: GeneratorStats<T>; }, ItemStatsKey = "_stats">(generator: AsyncGenerator<T & GeneratorStats<T> & GeneratorObjectStats<T>>, options: { itemStatsPropName: string; } = { itemStatsPropName: "_stats", }): GeneratorReturnStats<T> =>
+    async function* generatorStatsWrapper(source: AsyncGenerator<T>) {
+        const stats: GeneratorStats<T> = {
+            inCount: 0,
+            outCount: 0,
+        };
+
+        for await (const item of source) {
+            stats.inCount++;
+            if (!!item[options.itemStatsPropName]) {
+
+            }
+        }
+    }
