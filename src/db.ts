@@ -140,13 +140,12 @@ export type BulkWriterResult<A extends Artefact> = {
 };
 
 export interface Store<A extends Artefact> {
-    count(query: Filter<A>): Promise<number>;
-    find(query: Filter<A>): AsyncGenerator<WithId<A>>;
-    findOne(query: Filter<A>): Promise<WithId<A> | null>;
-    findOneAndUpdate(query: Filter<A>, update: A): Promise<WithId<A> | null>;
-    updateOne(artefact: A, query?: Filter<A>, options?: UpdateOptions): Promise<UpdateResult<A> | null>;
-    updateOrCreate(artefact: A, query: Filter<A>, options: UpdateOptions): Promise<UpdateOrCreateResult<A>>;
-    bulkWriter(optionsOrSource: BulkWriteOptions | AsyncGenerator<AnyBulkWriteOperation<A>>, source?: AsyncGenerator<AnyBulkWriteOperation<A>>): Promise<BulkWriterResult<A>> | AsyncFunction<[AsyncGenerator<AnyBulkWriteOperation<A>>], Promise<BulkWriterResult<A>>>;
+    count(query: Filter<A>, options?: CountOptions): Promise<number>;
+    find(query: Filter<A>, options?: FindOptions): AsyncGenerator<WithId<A>>;
+    findOne(query: Filter<A>, options?: FindOptions): Promise<WithId<A> | null>;
+    findOneAndUpdate(query: Filter<A>, update: A, options?: FindOneAndUpdateOptions): Promise<WithId<A> | null>;
+    updateOne(query: Filter<A>, update: UpdateFilter<A>, options?: UpdateOptions): Promise<UpdateResult<A> | null>;
+    updateOrCreate(artefact: A, query: Filter<A>, options?: UpdateOptions): Promise<UpdateOrCreateResult<A>>;
 }
 
 export class MongoStore<A extends Artefact> implements Store<A> {
@@ -158,30 +157,26 @@ export class MongoStore<A extends Artefact> implements Store<A> {
         private _collection: Collection<A>,
     ) { }
 
-    async count(query: Filter<A>) {
-        return this._collection.countDocuments(query, { });
+    async count(query: Filter<A>, options: CountOptions = {}) {
+        return this._collection.countDocuments(query, options);
     }
 
-    async* find(query: Filter<A>) {
-        for await (const item of this._collection.find(query))
-            yield item;
+    async* find(query: Filter<A>, options: FindOptions = {}) {
+        // for await (const item of this._collection.find(query))
+        //     yield item;
+        yield* this._collection.find(query, options);
     }
 
-    async findOne(query: Filter<A>) {
-        return await this._collection.findOne(query);
+    async findOne(query: Filter<A>, options: FindOptions = {}) {
+        return await this._collection.findOne(query, options);
     }
 
-    async findOneAndUpdate(query: Filter<A>, update: UpdateFilter<A>) {
-        return await this._collection.findOneAndUpdate(query, update);
+    async findOneAndUpdate(query: Filter<A>, update: UpdateFilter<A>, options: FindOneAndUpdateOptions = {}) {
+        return await this._collection.findOneAndUpdate(query, update, options);
     }
 
-    async updateOne(artefact: A, query?: Filter<A>, options: UpdateOptions = {}) {
-        const /* { _id, _ts, ... */data = await artefact/* .toData() */;
-        let result: UpdateResult<A> = null!;
-        for await (const update of [artefact/* .toData() *//* , artefact.toDataPending() */]/* data */) {
-            result = await this._collection.updateOne(query!, { $set: { ...update as any/* TSchema */, _ts: new Date(), } }, options);
-        }
-        return result;
+    async updateOne(query: Filter<A>, update: UpdateFilter<A>, options: UpdateOptions = {}) {
+        return await this._collection.updateOne(query!, { $set: { ...update as any/* TSchema */, _ts: new Date(), } }, options);
     }
 
     async updateOrCreate(artefact: A, query: Filter<A>, options: UpdateOptions = {}): Promise<UpdateOrCreateResult<A>> {
@@ -190,7 +185,7 @@ export class MongoStore<A extends Artefact> implements Store<A> {
         const dbArtefact = await this._collection.findOne<A>(query, options);
         const dbId = artefact._id = dbArtefact?._id;
         const query2 = (!!dbId ? ({ _id: { $eq: dbId } }) : query) as Filter<A>;
-        const { _id, ...dbUpdate } = diffDotNotation(dbArtefact ?? { }, artefact) as Partial<A>;
+        const { _id, ...dbUpdate } = diffDotNotation(dbArtefact ?? {}, artefact) as Partial<A>;
         const deleteKeys = getKeysOfUndefinedValues(dbUpdate);
         if (Object.keys(dbUpdate).length > 0) {
             dbResult = await this._collection.updateOne(query2, { $set: { ...dbUpdate } as Partial<A>, $unset: buildObjectWithKeys(deleteKeys, "") }, options);
