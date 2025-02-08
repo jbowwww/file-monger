@@ -57,7 +57,7 @@ export const interval = async function* interval(timeoutMs: number): AsyncGenera
 };
 interval.YieldResult = {}; //new Object();
 
-export const cargo = async function* <I = any, T = Array<I>>(maxBatchSize: number, timeoutMs: number, source: AsyncGenerator<Promise<I>>) {
+export const cargo = async function* <I = any>(maxBatchSize: number, timeoutMs: number, source: AsyncGenerator<I>) {
     let batch: I[] = [];
     let intervalGen = interval(timeoutMs);
     let intervalPr = intervalGen.next();
@@ -70,6 +70,10 @@ export const cargo = async function* <I = any, T = Array<I>>(maxBatchSize: numbe
             yield batch;
             batch = [];
         } else {
+            if (batch.length === maxBatchSize) {
+                yield batch;
+                batch = [];
+            }
             batch.push(r.value);
         }
     }

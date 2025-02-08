@@ -1,10 +1,10 @@
 import * as nodeUtil from "node:util";
 import { isDate } from "node:util/types";
-import { AnyBulkWriteOperation, BulkWriteOptions, ChangeStreamDocument, ChangeStreamInsertDocument, ChangeStreamUpdateDocument, Collection, Db, Filter, MongoClient, MongoClientOptions, MongoError, OrderedBulkOperation, UpdateFilter, UpdateOptions, UpdateResult, WithId } from "mongodb";
+import { AnyBulkWriteOperation, BulkWriteOptions, BulkWriteResult, ChangeStreamDocument, ChangeStreamInsertDocument, ChangeStreamUpdateDocument, Collection, CollectionOptions, CountOptions, Db, Filter, FindOneAndUpdateOptions, FindOptions, ModifyResult, MongoClient, MongoClientOptions, MongoError, OrderedBulkOperation, UpdateFilter, UpdateOptions, UpdateResult, WithId } from "mongodb";
 import { diff } from "deep-object-diff";
 import { Artefact } from "./models";
 import { AsyncFunction, buildObjectWithKeys, getKeysOfUndefinedValues } from "./utility";
-import { isAsyncGenerator } from "./pipeline";
+import { cargo, isAsyncGenerator } from "./pipeline";
 
 export let client: MongoClient | null = null;
 export let connection: MongoClient;
@@ -113,7 +113,7 @@ export class MongoStorage implements Storage {
         return this as Storage;
     }
 
-    async store<A extends Artefact>(name: string, options?: any): Promise<Store<A>> {
+    async store<A extends Artefact>(name: string, options?: CollectionOptions): Promise<Store<A>> {
         await this.connect();
         process.stdout.write(`Getting store '${name} ${options !== undefined ? ("options=" + JSON.stringify(options)) : ""} ... `);
         const collection = this._db!.collection<A>(name, options);
@@ -132,11 +132,18 @@ export type UpdateOrCreateResult<A extends Artefact> = {
     _: A;
 };
 
-export type BulkWriteOp<A extends Artefact> = AnyBulkWriteOperation<A>;
+export type BulkWriterStore<A extends Artefact> = Store<A>;
+export type BulkWriterFn<A extends Artefact> = AsyncFunction<[AsyncGenerator<AnyBulkWriteOperation<A>>], BulkWriteResult>;
 
-export type BulkWriterResult<A extends Artefact> = {
-    opCount: number;
-    // etc
+export type BulkWriterOptions = BulkWriteOptions & {
+    maxBatchSize: number;
+    timeoutMs: number;
+};
+export var BulkWriterOptions = {
+    default: {
+        maxBatchSize: 10,
+        timeoutMs: 200,
+    } as BulkWriterOptions,
 };
 
 export interface Store<A extends Artefact> {
@@ -146,6 +153,9 @@ export interface Store<A extends Artefact> {
     findOneAndUpdate(query: Filter<A>, update: A, options?: FindOneAndUpdateOptions): Promise<WithId<A> | null>;
     updateOne(query: Filter<A>, update: UpdateFilter<A>, options?: UpdateOptions): Promise<UpdateResult<A> | null>;
     updateOrCreate(artefact: A, query: Filter<A>, options?: UpdateOptions): Promise<UpdateOrCreateResult<A>>;
+    bulkWrite(operations: AnyBulkWriteOperation<A>[], options?: BulkWriteOptions): Promise<BulkWriteResult>;
+    bulkWriterFn(options: BulkWriterOptions): BulkWriterFn<A>;
+    bulkWriterStore(options: BulkWriterOptions): BulkWriterStore<A>;
 }
 
 export class MongoStore<A extends Artefact> implements Store<A> {
@@ -202,33 +212,35 @@ export class MongoStore<A extends Artefact> implements Store<A> {
         return result;
     }
 
-    bulkWriter(
-        optionsOrSource: BulkWriteOptions | AsyncGenerator<AnyBulkWriteOperation<A>>,
-        source?: AsyncGenerator<AnyBulkWriteOperation<A>>
-    ):
-        Promise<BulkWriterResult<A>> |
-        AsyncFunction<[AsyncGenerator<AnyBulkWriteOperation<A>>], Promise<BulkWriterResult<A>>>
-    {
+    bulkWrite(opsOrSource: AnyBulkWriteOperation<A>[] | AsyncGenerator<AnyBulkWriteOperation<A>>, options: BulkWriterOptions = BulkWriterOptions.default): Promise<BulkWriteResult> {
+        return Array.isArray(opsOrSource) ?
+            this._collection.bulkWrite(opsOrSource, options) :
+            this.bulkWriterFn(options)(opsOrSource);
+    }
+
+    bulkWriterFn(options: BulkWriterOptions = BulkWriterOptions.default): BulkWriterFn<A> {
         const _this = this;
-        let options: BulkWriteOptions;
-        if (isAsyncGenerator(optionsOrSource)) {
-            source = optionsOrSource;
-            options = {};
-        } else {
-            options = optionsOrSource;
-        }
-        if (!source) {
-            return bulkWrite;
-        } else {
-            return bulkWrite(source)
-        }
-        async function bulkWrite(source: AsyncGenerator<AnyBulkWriteOperation<A>>) {
-            for await (const op of source) {
-                _this._collection.bulkWrite([op], options);
+        return async function bulkWrite(source: AsyncGenerator<AnyBulkWriteOperation<A>>) {
+            var result: BulkWriteResult = new BulkWriteResult();
+            for await (const ops of cargo(options.maxBatchSize, options.timeoutMs, source)) {
+                result = await _this._collection.bulkWrite(ops, options);
             }
-            var result: BulkWriterResult<A> = { opCount: 0, };
             return result;
-        };
+        }
+    };
+
+    bulkWriterStore(options: BulkWriterOptions): BulkWriterStore<A> {
+        return ({
+            count: this.count,
+            find: this.find,
+            findOne: this.findOne,
+            findOneAndUpdate: this.findOneAndUpdate,
+            updateOne: this.updateOne,
+            updateOrCreate: this.updateOrCreate,
+            bulkWrite: this.bulkWrite,
+            bulkWriterFn: this.bulkWriterFn.bind(this),
+            bulkWriterStore: this.bulkWriterStore.bind(this),
+        });
     }
 }
 
