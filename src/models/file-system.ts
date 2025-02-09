@@ -1,7 +1,7 @@
 import * as nodeFs from "node:fs";
 import * as nodePath from "node:path";
 import * as nodeCrypto from "node:crypto";
-import { DiscriminatedModel } from ".";
+import { Aspect, DiscriminatedModel, Timestamped } from ".";
 import { Progress } from "../progress";
 
 export const enum EntryType {
@@ -16,11 +16,11 @@ export type EntryBase<_T extends EntryType> = {
 };
 
 export type File = EntryBase<EntryType.File>;
-export const File = ({ path, stats }: ({ path: string, stats: nodeFs.Stats })) => ({ _T: EntryType.File, path, stats });
+export const File = ({ path, stats }: ({ path: string, stats: nodeFs.Stats })) => ({ _T: EntryType.File, _ts: new Date(), path, stats });
 export type Directory = EntryBase<EntryType.Directory>;
-export const Directory = ({ path, stats }: ({ path: string, stats: nodeFs.Stats })) => ({ _T: EntryType.Directory, path, stats });
+export const Directory = ({ path, stats }: ({ path: string, stats: nodeFs.Stats })) => ({ _T: EntryType.Directory, _ts: new Date(), path, stats });
 export type Unknown = EntryBase<EntryType.Unknown>;
-export const Unknown = ({ path, stats }: ({ path: string, stats: nodeFs.Stats })) => ({ _T: EntryType.Unknown, path, stats });
+export const Unknown = ({ path, stats }: ({ path: string, stats: nodeFs.Stats })) => ({ _T: EntryType.Unknown, _ts: new Date(), path, stats });
 
 export type Entry = File | Directory | Unknown;
 export const Entry = async ({ path }: { path: string }): Promise<Entry> => {
@@ -83,7 +83,7 @@ export const walk = /* wrapModuleGeneratorMetadata(
 // );
 
 export const enum HashType { Hash = "Hash" };
-export type Hash = { _T: /* string; */ HashType.Hash; sha256: string; };//Awaited<ReturnType<typeof Hash>>
+export type Hash = Aspect<HashType.Hash, Timestamped<{ sha256: string; }>>;
 
 export const Hash = async ({ path }: { path: string })/* : Hash */ => {
     try {
@@ -98,7 +98,7 @@ export const Hash = async ({ path }: { path: string })/* : Hash */ => {
                     hashDigest.update(data);
             });
         });
-        return ({ _T: HashType.Hash, _ts: Date.now(), sha256 });
+        return ({ _T: HashType.Hash, _ts: new Date(), sha256 });
     } catch (error) {
         throw new Error(`Error hashing file '${path}': ${error}`);
     }

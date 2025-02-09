@@ -1,10 +1,10 @@
 import * as nodeUtil from "node:util";
 import { isDate } from "node:util/types";
-import { AnyBulkWriteOperation, BulkWriteOptions, BulkWriteResult, ChangeStreamDocument, ChangeStreamInsertDocument, ChangeStreamUpdateDocument, Collection, CollectionOptions, CountOptions, Db, Filter, FindOneAndUpdateOptions, FindOptions, ModifyResult, MongoClient, MongoClientOptions, MongoError, OrderedBulkOperation, UpdateFilter, UpdateOptions, UpdateResult, WithId } from "mongodb";
+import { AnyBulkWriteOperation, BulkWriteOptions, BulkWriteResult, ChangeStream, ChangeStreamOptions, ChangeStreamDocument, ChangeStreamInsertDocument, ChangeStreamUpdateDocument, Collection, CollectionOptions, CountOptions, Db, Document, Filter, FindOneAndUpdateOptions, FindOptions, ModifyResult, MongoClient, MongoClientOptions, MongoError, OrderedBulkOperation, UpdateFilter, UpdateOptions, UpdateResult, WithId } from "mongodb";
 import { diff } from "deep-object-diff";
 import { Artefact, Aspect, AspectFn, Constructor, isAspect } from "./models";
 import { AsyncFunction, buildObjectWithKeys, getKeysOfUndefinedValues } from "./utility";
-import { cargo, isAsyncGenerator } from "./pipeline";
+import { cargo, isAsyncGenerator, pipe } from "./pipeline";
 import { get } from "./prop-path";
 import { Progress } from "./progress";
 
@@ -22,7 +22,11 @@ export interface Storage {
     store<A extends Artefact>(name: string, options?: any): Promise<Store<A>>;
 }
 
-export function diffDotNotation(original: { [K: string]: any; }, updated: { [K: string]: any; }): ({ [K: string]: any; }) {
+export function diffDotNotation(original: { [K: string]: any; }, updated?: { [K: string]: any; }): ({ [K: string]: any; }) {
+    if (!updated) {
+        updated = original;
+        original = {};
+    }
     const update = diff(original, updated);
     const result = appendSubPropNames(update);
     return result;
@@ -122,6 +126,7 @@ export interface Store<A extends Artefact> {
     bulkWrite(operations: AnyBulkWriteOperation<A>[], options?: BulkWriteOptions & ProgressOption): Promise<BulkWriteResult>;
     bulkWriterFn(options?: BulkWriterOptions & ProgressOption): BulkWriterFn<A>;
     bulkWriterStore(options?: BulkWriterOptions & ProgressOption): BulkWriterStore<A>;
+    watch(pipeline?: Filter<A>/* Document[] */, options?: ChangeStreamOptions & ProgressOption): AsyncGenerator<ChangeStreamDocument<A>>;//: ChangeStream<A, ChangeStreamDocument<A>>;
 }
 
 export class MongoStore<A extends Artefact> implements Store<A> {
@@ -219,7 +224,15 @@ export class MongoStore<A extends Artefact> implements Store<A> {
             bulkWrite: this.bulkWrite,
             bulkWriterFn: this.bulkWriterFn.bind(this),
             bulkWriterStore: this.bulkWriterStore.bind(this),
+            watch: this.watch.bind(this),
         });
+    }
+
+    async* watch(query: Filter<A>/* Document[] = [] */, options: ChangeStreamOptions & ProgressOption = {})/* : Promise<ChangeStream<A, ChangeStreamDocument<A>>> */ {
+        if (options.progress) {
+            options.progress.count = await this._collection.countDocuments(query);
+        }
+        /* return */yield* this._collection.watch([{ $match: query }], options);
     }
 }
 
