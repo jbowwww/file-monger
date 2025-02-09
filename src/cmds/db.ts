@@ -1,5 +1,4 @@
 import yargs, { ArgumentsCamelCase } from "yargs";
-// import * as db from '../db';
 
 export interface DbCommandArgv {
     dbUrl: string;

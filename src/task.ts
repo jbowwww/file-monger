@@ -19,11 +19,10 @@ export class Task<TArgs extends any[] = [], TResult = void> {
         this.progress = new Progress(this.name);
     }
     public start(...args: TArgs) {
-        this.#taskPr = this.taskFn(this, ...args).then(result => this.#result = result ?? {} as TResult);
-        return this;
+        return this.#taskPr = this.taskFn(this, ...args).then(result => this.#result = result ?? {} as TResult);
     }
     public static start(...taskFns: TaskFn<[], void>[]) {
-        return taskFns.map(taskFn => new Task(taskFn).start());
+        return Promise.all(taskFns.map(taskFn => new Task(taskFn).start()));
     }
 
     public static async delay(ms: number) {
@@ -32,8 +31,7 @@ export class Task<TArgs extends any[] = [], TResult = void> {
 
     public static async repeat(taskFn: TaskFn<[], void>) {
         while (true) {
-            const task = new Task(taskFn).start();
-            await task.#taskPr;
+            await new Task(taskFn).start();
         }
     }
 }

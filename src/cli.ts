@@ -2,7 +2,6 @@
 import process from "process";
 import yargs from "yargs/yargs";
 import { hideBin } from "yargs/helpers";
-import * as db from "./db";
 
 export const globalOptions = {
     dbUrl: {

@@ -36,54 +36,53 @@ export const isUnknown = (u: any): u is Unknown => isEntry(u, EntryType.Unknown)
 
 export type WalkCallbackFn = (entry: Entry, depth: number) => { emit: boolean, recurse?: boolean };
 export const walk = async function *walk({
-        path,
-        maxDepth,
-        callback = (e, d) => ({ emit: true, recurse: !maxDepth || d <= maxDepth }),
-        emitError = true,
-        depth = 0,
-        progress,
-    }: {
-        path: string,
-        maxDepth?: number,
-        callback?: WalkCallbackFn,
-        emitError?: boolean,
-        depth?: number,
-        progress?: Progress,
-    }): AsyncGenerator<Entry> {
-        try {
-            const entry = await Entry({ path });
-            const { emit, recurse } = callback(entry, depth);
-            if (progress) progress.count++;
-            if (emit) {
-                yield entry;
-            }
-            if (isDirectory(entry) && recurse) {
-                try {
-                    const entries = await nodeFs.promises.readdir(path, { encoding: "utf-8", recursive: false });
-                    if (progress) progress.total += entries.length;
-                    for await (const dirEntry of entries) {
-                        if (![".", ".."].includes(dirEntry)) {
-                            yield* walk({ path: nodePath.join(path, dirEntry), maxDepth, callback, emitError, depth: depth + 1, progress });
-                        }
-                    }
-                } catch (err) {
-                    if (emitError) {
-                        console.error(err);
+    path,
+    maxDepth,
+    callback = (e, d) => ({ emit: true, recurse: !maxDepth || d <= maxDepth }),
+    emitError = true,
+    depth = 0,
+    progress,
+}: {
+    path: string,
+    maxDepth?: number,
+    callback?: WalkCallbackFn,
+    emitError?: boolean,
+    depth?: number,
+    progress?: Progress,
+}): AsyncGenerator<Entry> {
+    try {
+        const entry = await Entry({ path });
+        const { emit, recurse } = callback(entry, depth);
+        if (progress) progress.count++;
+        if (emit) {
+            yield entry;
+        }
+        if (isDirectory(entry) && recurse) {
+            try {
+                const entries = await nodeFs.promises.readdir(path, { encoding: "utf-8", recursive: false });
+                if (progress) progress.total += entries.length;
+                for await (const dirEntry of entries) {
+                    if (![".", ".."].includes(dirEntry)) {
+                        yield* walk({ path: nodePath.join(path, dirEntry), maxDepth, callback, emitError, depth: depth + 1, progress });
                     }
                 }
-            }
-        } catch (err) {
-            if (emitError) {
-                console.error(err);
+            } catch (err) {
+                if (emitError) {
+                    console.error(err);
+                }
             }
         }
-    };
-// );
+    } catch (err) {
+        if (emitError) {
+            console.error(err);
+        }
+    }
+};
 
 export const enum HashType { Hash = "Hash" };
 export type Hash = Aspect<HashType.Hash, Timestamped<{ sha256: string; }>>;
 
-export const Hash = async ({ path }: { path: string })/* : Hash */ => {
+export const Hash = async (path: string): Promise<Hash> => {
     try {
         const hashDigest = nodeCrypto.createHash('sha256');
         const input = nodeFs.createReadStream(path);

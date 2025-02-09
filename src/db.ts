@@ -22,6 +22,11 @@ export interface Storage {
     store<A extends Artefact>(name: string, options?: any): Promise<Store<A>>;
 }
 
+export const Query = <A extends Artefact>(_: A, path: string): Filter<A> => ({ [path]: get(_, path) }) as Filter<A>;
+
+export const resultToString = (result: UpdateResult | null | undefined) => result === null ? "(null)" : result === undefined ? "(undef)" :
+    `{ ack.=${result.acknowledged} modifiedCount=${result.modifiedCount} upsertedId=${result.upsertedId} upsertedCount=${result.upsertedCount} matchedCount=${result.matchedCount} }`;
+
 export function diffDotNotation(original: { [K: string]: any; }, updated?: { [K: string]: any; }): ({ [K: string]: any; }) {
     if (!updated) {
         updated = original;
@@ -165,6 +170,7 @@ export class MongoStore<A extends Artefact> implements Store<A> {
     }
 
     async updateOne(query: Filter<A>, update: UpdateFilter<A>, options: UpdateOptions = {}) {
+        console.debug(`updateOne(): query=${nodeUtil.inspect(query)} update=${nodeUtil.inspect(update)} options=${nodeUtil.inspect(options)}`);
         return await this._collection.updateOne(query!, {
             // $set: {
             ...update as any/* TSchema */,
