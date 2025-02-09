@@ -15,16 +15,9 @@ export function isChangeUpdate(value: ChangeStreamDocument): value is ChangeStre
     return value.operationType === "update";
 }
 
-export interface Storage {
-    isConnected(): boolean;
-    connect(): Promise<Storage>;
-    close(): Promise<Storage>;
-    store<A extends Artefact>(name: string, options?: any): Promise<Store<A>>;
-}
-
 export const Query = <A extends Artefact>(_: A, path: string): Filter<A> => ({ [path]: get(_, path) }) as Filter<A>;
 
-export const resultToString = (result: UpdateResult | null | undefined) => result === null ? "(null)" : result === undefined ? "(undef)" :
+export const updateResultToString = (result: UpdateResult | null | undefined) => result === null ? "(null)" : result === undefined ? "(undef)" :
     `{ ack.=${result.acknowledged} modifiedCount=${result.modifiedCount} upsertedId=${result.upsertedId} upsertedCount=${result.upsertedCount} matchedCount=${result.matchedCount} }`;
 
 export function diffDotNotation(original: { [K: string]: any; }, updated?: { [K: string]: any; }): ({ [K: string]: any; }) {
@@ -48,6 +41,13 @@ export function diffDotNotation(original: { [K: string]: any; }, updated?: { [K:
         }
         return result;
     }
+}
+
+export interface Storage {
+    isConnected(): boolean;
+    connect(): Promise<Storage>;
+    close(): Promise<Storage>;
+    store<A extends Artefact>(name: string, options?: any): Promise<Store<A>>;
 }
 
 export class MongoStorage implements Storage {
