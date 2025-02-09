@@ -6,7 +6,7 @@ export type AsyncGeneratorFunction<I = any, O = any> = (source: AsyncIterable<I>
 export type PipelineFunctionStage<I = any, O = any> = (input: I) => O | Promise<O>;
 export type PipelineGeneratorStage<I = any, O = any> = (source: AsyncIterable<I>) => AsyncGenerator<O>;
 export type PipelineStage<I = any, O = any> = PipelineFunctionStage<I, O> | PipelineGeneratorStage<I, O>;
-export type Pipeline<I = any, O = any> = PipelineFunctionStage<I, O>;
+export type Pipeline<I = any, O = any> = PipelineGeneratorStage<I, O>;
 
 // export type Pipeline<I = any, O = any> = (source: AsyncGenerator<I>) => AsyncGenerator<O> & {
 //     run(source: AsyncGenerator<I>): AsyncGenerator<O>;
@@ -22,30 +22,28 @@ export const makeGeneratorFnFromFn = <I = any, O = any>(stage: PipelineFunctionS
 export const isAsyncGenerator = (generator: any): generator is AsyncGenerator => (["next", "return", "throw", Symbol.asyncIterator]).every(prop => typeof prop === "function");
 export const isAsyncGeneratorFunction = (generatorFn: any): generatorFn is AsyncGeneratorFunction => isAsyncGenerator(generatorFn.prototype);
 
-export const compose = <I = any, O = any>(...stages: PipelineStage[]) => stages.reduce(
-    (prevStages, stage, i, arr) =>
-        isAsyncFunction(stage) && !isAsyncGeneratorFunction(stage) ?
-            makeGeneratorFnFromFn(stage) :
-            (source: AsyncIterable<any>) => stage(prevStages(source)));//async (input: any) => stage(prevStages(await input)) as O | Promise<O>) as Pipeline<I, O>;
+// export const compose = <I = any, O = any>(...stages: PipelineFunctionStage[]) => stages.reduce(
+//     (prevStages, stage, i, arr) => async (input: any) => stage(prevStages(await input)) as O | Promise<O>) as Pipeline<I/* , O>;
+export const compose = <I = any, O = any>(...stages: PipelineGeneratorStage<any>[]) => (source: AsyncGenerator<I>) =>
+    stages.reduce<AsyncGenerator<any>>((prevStages, stage, i, arr) => stage(prevStages), source) as AsyncGenerator<O> /* as Pipeline<I, O> */;
 
-export const pipeline = <I = any, O = any>(...stages: PipelineStage[]) => {
+export const pipeline = compose;/*  <I = any, O = any>(...stages: PipelineFunctionStage[]) => {
     const transform = compose<I, O>(...stages);
-    return transform;
-    // return async function* (source: AsyncIterable<I>) {
-    //     for await (const input of source) {
-    //         yield await transform(input);
-    //     }
-    // };
-};
-
-export const pipe = <I = any, O = any>(source: AsyncIterable<I>, ...stages: PipelineStage[]) => pipeline(...stages)(source);
-
-export const run =
-    async function* <I = any, O = any>(source: AsyncIterable<I>, pipeline: Pipeline<I, O>): AsyncIterable<O> {
+    return async function* (source: AsyncIterable<I>) {
         for await (const input of source) {
-            yield await pipeline(input);
+            yield await transform(input);
         }
     };
+}; */
+
+export const pipe = <I = any, O = any>(source: AsyncGenerator<I>, ...stages: PipelineFunctionStage[]) => pipeline(...stages)(source);
+
+// export const run =
+//     async function* <I = any, O = any>(source: AsyncIterable<I>, pipeline: Pipeline<I, O>): AsyncIterable<O> {
+//         for await (const input of source) {
+//             yield await pipeline(input);
+//         }
+//     };
 
 export const iff = <I = any, O = any>(condition: (input: I) => boolean | Promise<boolean>, stage: PipelineFunctionStage<I, O>) =>
         makeGeneratorFnFromFn(
@@ -61,7 +59,7 @@ export const interval = async function* interval(timeoutMs: number): AsyncGenera
 };
 interval.YieldResult = {}; //new Object();
 
-export const cargo = async function* <I = any, T = Array<I>>(maxBatchSize: number, timeoutMs: number, source: AsyncGenerator<Promise<I>>) {
+export const cargo = async function* <I = any>(maxBatchSize: number, timeoutMs: number, source: AsyncGenerator<I>) {
     let batch: I[] = [];
     let intervalGen = interval(timeoutMs);
     let intervalPr = intervalGen.next();
@@ -73,8 +71,42 @@ export const cargo = async function* <I = any, T = Array<I>>(maxBatchSize: numbe
         if (r.value === interval.YieldResult && batch.length > 0) {
             yield batch;
             batch = [];
+            intervalPr = intervalGen.next();
         } else {
+            if (batch.length === maxBatchSize) {
+                yield batch;
+                batch = [];
+                intervalPr = intervalGen.next();
+            }
             batch.push(r.value);
         }
     }
 };
+
+export type GeneratorStats<T> = {
+    inCount: number;    // items from source
+    outCount: number;   // items yielded
+};
+
+export type GeneratorObjectStats<T> = {
+    expectedTotalCount: number;
+};
+
+export type GeneratorReturnStats<T> = {
+
+};
+
+export const wrapGeneratorStats = <T extends { [K: string]: GeneratorStats<T>; }, ItemStatsKey = "_stats">(generator: AsyncGenerator<T & GeneratorStats<T> & GeneratorObjectStats<T>>, options: { itemStatsPropName: string; } = { itemStatsPropName: "_stats", }): GeneratorReturnStats<T> =>
+    async function* generatorStatsWrapper(source: AsyncGenerator<T>) {
+        const stats: GeneratorStats<T> = {
+            inCount: 0,
+            outCount: 0,
+        };
+
+        for await (const item of source) {
+            stats.inCount++;
+            if (!!item[options.itemStatsPropName]) {
+
+            }
+        }
+    }

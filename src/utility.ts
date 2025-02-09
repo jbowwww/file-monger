@@ -1,12 +1,12 @@
 import * as nodeUtil from "node:util";
 
-export type AsyncFunction<TArgs extends any[] = [], TReturn extends any = void> = (...args: TArgs) => TReturn;
+export type AsyncFunction<TArgs extends any[] = [], TReturn extends any = void> = (...args: TArgs) => Promise<TReturn>;
 
 export const getKeysOfUndefinedValues = (obj: any) => Object.entries(obj).filter(([K, V]) => V === undefined).map(([K, V]) => K);
 export const buildObjectWithKeys = <R extends {}>(keys: string[], value?: any) => Object.fromEntries(keys.map(K => ([K, value]))) as R;
 
 export function enumerable(enumerable: boolean) {
-    return function(target: any, key: string/* , desc: any */ /* context: ClassFieldDecoratorContext<FileArtefact> */): any {
+    return function (target: any, key: string/* , desc: any */ /* context: ClassFieldDecoratorContext<FileArtefact> */): any {
         // const key = context.name as string;
         console.debug(`enumerable(${enumerable}): key=${key} target=${nodeUtil.inspect(target)} / ${target} target.prototype=${nodeUtil.inspect(target.prototype)} / ${target.prototype} target[key] = ${nodeUtil.inspect(target[key])}`);
         // while (!!target && !Object.hasOwn(target, key)) {

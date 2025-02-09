@@ -1,11 +1,7 @@
 # ToDo
 
-- Get cmds/file.ts index command running, confirm that Directory's and File's are getting created and namespaced appropriately
-- Confirm on subsequent indexing's, previous FileSystem Entry documents are found by queries
-- Confirm / ensure
-  - pre-existing Entry's are updated with new data and only new data where necessary
-  - no updates are made where there are no FS changes
-- Reimplement hash, as part of File object. Use calculateHash directly
-- Confirm / ensure
-  - Artefact data is being emitted multiple times by Artefact.streamData()
-  - Only newly resolved data properties are applied to DB
+- Somehow prevent indexFileSystem task from clearing the Hash values on _ when it's undefined
+  - Any logic here around invalidating the Hash when File.stats.mtime changes (or sinilar) ? Or just in the hashFiles task?
+- Decide whether you still want to diff each _ Artefact before update(), or do you just want to $set specific properties?
+  - This might lend itself better to slicing the Artefact computations into tasks by avoiding a need to findOne() first
+- Implement an UpdateOneResult type similar to UpdateOrCreateResult

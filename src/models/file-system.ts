@@ -1,12 +1,13 @@
 import * as nodeFs from "node:fs";
 import * as nodePath from "node:path";
 import * as nodeCrypto from "node:crypto";
-import { DiscriminatedModel } from ".";
+import { Aspect, DiscriminatedModel, Timestamped } from ".";
+import { Progress } from "../progress";
 
 export const enum EntryType {
-    File        = "File",
-    Directory   = "Directory",
-    Unknown     = "Unknown",
+    File = "File",
+    Directory = "Directory",
+    Unknown = "Unknown",
 };
 export type EntryBase<_T extends EntryType> = {
     _T: _T;
@@ -15,14 +16,16 @@ export type EntryBase<_T extends EntryType> = {
 };
 
 export type File = EntryBase<EntryType.File>;
+export const File = ({ path, stats }: ({ path: string, stats: nodeFs.Stats })) => ({ _T: EntryType.File, _ts: new Date(), path, stats });
 export type Directory = EntryBase<EntryType.Directory>;
+export const Directory = ({ path, stats }: ({ path: string, stats: nodeFs.Stats })) => ({ _T: EntryType.Directory, _ts: new Date(), path, stats });
 export type Unknown = EntryBase<EntryType.Unknown>;
+export const Unknown = ({ path, stats }: ({ path: string, stats: nodeFs.Stats })) => ({ _T: EntryType.Unknown, _ts: new Date(), path, stats });
 
 export type Entry = File | Directory | Unknown;
 export const Entry = async ({ path }: { path: string }): Promise<Entry> => {
     const stats = await nodeFs.promises.stat(path!);
-    const _T = stats.isFile() ? EntryType.File : stats.isDirectory() ? EntryType.Directory : EntryType.Unknown;
-    return await ({ _T, path, stats });
+    return stats.isFile() ? File({ path, stats }) : stats.isDirectory() ? Directory({ path, stats }) : Unknown({ path, stats });
 };
 export type NamespacedEntry = DiscriminatedModel<Entry, "_T">;
 
@@ -38,25 +41,29 @@ export const walk = async function *walk({
         callback = (e, d) => ({ emit: true, recurse: !maxDepth || d <= maxDepth }),
         emitError = true,
         depth = 0,
+        progress,
     }: {
         path: string,
         maxDepth?: number,
         callback?: WalkCallbackFn,
         emitError?: boolean,
         depth?: number,
+        progress?: Progress,
     }): AsyncGenerator<Entry> {
         try {
             const entry = await Entry({ path });
             const { emit, recurse } = callback(entry, depth);
+            if (progress) progress.count++;
             if (emit) {
                 yield entry;
             }
             if (isDirectory(entry) && recurse) {
                 try {
-                    const dir = await nodeFs.promises.opendir(path, { encoding: "utf-8", recursive: false });
-                    for await (const dirEntry of dir) {
-                        if (![".", ".."].includes(dirEntry.name)) {
-                            yield* walk({ path: nodePath.join(dirEntry.parentPath, dirEntry.name), maxDepth, callback, emitError, depth: depth + 1 });
+                    const entries = await nodeFs.promises.readdir(path, { encoding: "utf-8", recursive: false });
+                    if (progress) progress.total += entries.length;
+                    for await (const dirEntry of entries) {
+                        if (![".", ".."].includes(dirEntry)) {
+                            yield* walk({ path: nodePath.join(path, dirEntry), maxDepth, callback, emitError, depth: depth + 1, progress });
                         }
                     }
                 } catch (err) {
@@ -74,7 +81,7 @@ export const walk = async function *walk({
 // );
 
 export const enum HashType { Hash = "Hash" };
-export type Hash = { _T: /* string; */ HashType.Hash; sha256: string; };//Awaited<ReturnType<typeof Hash>>
+export type Hash = Aspect<HashType.Hash, Timestamped<{ sha256: string; }>>;
 
 export const Hash = async ({ path }: { path: string })/* : Hash */ => {
     try {
@@ -89,7 +96,7 @@ export const Hash = async ({ path }: { path: string })/* : Hash */ => {
                     hashDigest.update(data);
             });
         });
-        return ({ _T: HashType.Hash, sha256 });
+        return ({ _T: HashType.Hash, _ts: new Date(), sha256 });
     } catch (error) {
         throw new Error(`Error hashing file '${path}': ${error}`);
     }
