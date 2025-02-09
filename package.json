@@ -33,6 +33,7 @@
   "homepage": "https://github.com/jbowwww/file-monger#readme",
   "dependencies": {
     "@fieldguide/pipeline": "^1.2.2",
+    "async-exit-hook": "^2.0.1",
     "deep-object-diff": "^1.1.9",
     "miniplex-project": "github:jbowwww/miniplex",
     "mongodb": "^6.5.0",
@@ -40,6 +41,7 @@
     "yargs": "^17.7.2"
   },
   "devDependencies": {
+    "@types/async-exit-hook": "^2.0.2",
     "@types/node": "^22.0.0",
     "@types/yargs": "^17.0.32",
     "typescript": "^5.4.5"

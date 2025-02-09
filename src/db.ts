@@ -75,7 +75,7 @@ export class MongoStorage implements Storage {
 
     async close(): Promise<Storage> {
         if (!!this._connection) {
-            process.stdout.write(`close(): Closing DB connection ... `);
+            process.stdout.write(`close(): Closing DB connection to ${this.url} ... `);
             await this._connection.close();
             this._client = null;
             this._connection = null;

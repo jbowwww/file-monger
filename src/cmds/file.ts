@@ -4,6 +4,7 @@ import { Task } from "../task";
 import { diffDotNotation, MongoStorage, Query, resultToString as updateResultToString} from "../db";
 import { Artefact, DiscriminatedModel } from '../models';
 import { Entry, walk, Hash } from "../models/file-system";
+import exitHook from "async-exit-hook";
 
 export type FileSystemArtefact = Artefact<
     Partial<DiscriminatedModel<Entry>> & { // File | Directory | Unknown
@@ -25,6 +26,13 @@ export const builder = (yargs: yargs.Argv) => yargs
         async function (argv): Promise<void> {
             const storage = new MongoStorage(argv.dbUrl);
             const store = (await storage.store<FileSystemArtefact>("fileSystemEntries"));//.bulkWriterStore();
+            exitHook(async (cb) => {
+                console.log("Exiting ...");
+                if (!!storage && storage.isConnected()) {
+                    await storage.close();
+                }
+                cb();
+            });
             await Task.start(
                 async function indexFileSystem(task: Task) {
                     for (const path of argv.paths) {
@@ -52,7 +60,7 @@ export const builder = (yargs: yargs.Argv) => yargs
                     });
                 }
             );
-            console.log(`Closing storage.url=${storage.url}`);
-            await storage.close();
+            // console.log(`Closing storage.url=${storage.url}`);
+            // await storage.close();
         }
     ).demandCommand();
