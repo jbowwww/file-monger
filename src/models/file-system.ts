@@ -32,9 +32,7 @@ export const isDirectory = (d: any): d is Directory => isEntry(d, EntryType.Dire
 export const isUnknown = (u: any): u is Unknown => isEntry(u, EntryType.Unknown);
 
 export type WalkCallbackFn = (entry: Entry, depth: number) => { emit: boolean, recurse?: boolean };
-export const walk = /* wrapModuleGeneratorMetadata(
-    nodePath.basename(__filename.slice(__dirname.length + 1)), */
-    async function *walk({
+export const walk = async function *walk({
         path,
         maxDepth,
         callback = (e, d) => ({ emit: true, recurse: !maxDepth || d <= maxDepth }),

@@ -1,4 +1,3 @@
-import * as nodeUtil from "node:util";
 import { get } from "../prop-path";
 import { Filter } from "mongodb";
 
