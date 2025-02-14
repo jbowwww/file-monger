@@ -9,11 +9,10 @@ export const enum EntryType {
     Directory = "Directory",
     Unknown = "Unknown",
 };
-export type EntryBase<_T extends EntryType> = {
-    _T: _T;
+export type EntryBase<_T extends EntryType> = Aspect<_T, {
     path: string;
     stats: nodeFs.Stats;
-};
+}>;
 
 export type File = EntryBase<EntryType.File>;
 export const File = ({ path, stats }: ({ path: string, stats: nodeFs.Stats })) => ({ _T: EntryType.File, _ts: new Date(), path, stats });
