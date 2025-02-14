@@ -4,5 +4,9 @@ export class Progress {
     count = 0;    // yielded by the generator
     get progress() { return this.count / this.total * 100; }
     constructor(private prefix: string = "") { }
+    reset() {
+        this.total = 1;
+        this.count = 0;
+    }
     toString() { return `${this.prefix ? this.prefix + ": " : ""}Progress ${this.count} / ${this.total} : ${this.progress.toFixed(2)}%` }
 };

@@ -36,23 +36,21 @@ export const builder = (yargs: yargs.Argv) => yargs
                 cb();
             });
 
-            await Task.start(
+            await Task.start([
 
                 async function indexFileSystem(task: Task) {
-                    await Task.repeat(async () => {
+                    await Task.repeat({ postDelay: 180000, }, async () => {
                         for (const path of argv.paths) {
                             for await (const e of walk({ path, progress: task.progress })) {
                                 const result = await store.updateOne({ [`${e._T}.path`]: e.path }, { $set: diffDotNotation({ [`${e._T}`]: e }), }, { upsert: true });
                                 console.log(`result=${updateResultToString(result)} task.progress=${task.progress}`);
                             }
                         }
-                        await Task.delay(180000);   // 30 minutes
-                    });
+                    });   // 30 minutes
                 },
 
                 async function hashFiles(task: Task) {
-                    await Task.repeat(async () => {
-                        await Task.delay(3000);     // 3 seconds
+                    await Task.repeat({ preDelay: 3000, }, async () => {
                         for await (const _ of store.find({
                             $and: [
                                 { File: { $exists: true } },
@@ -65,12 +63,11 @@ export const builder = (yargs: yargs.Argv) => yargs
                             const result = await store.updateOne(Query(_, "_id"), { $set: { Hash: await Hash(_.File!.path) } });
                             console.log(`result=${updateResultToString(result)} task.progress=${task.progress}`);
                         }
-                    });
+                    });     // 3 seconds
                 },
 
                 async function analyzeAudioFiles(task: Task) {
-                    await Task.repeat(async () => {
-                        await Task.delay(3000);     // 3 seconds
+                    await Task.repeat({ preDelay: 3000, }, async () => {
                         for await (const _ of store.find({
                             $and: [
                                 { File: { path: { $in: Audio.fileExtensions } } },
@@ -83,10 +80,10 @@ export const builder = (yargs: yargs.Argv) => yargs
                             const result = await store.updateOne(Query(_, "_id"), { $set: { Audio: await Audio(_.File!.path) } });
                             console.log(`result=${updateResultToString(result)} task.progress=${task.progress}`);
                         }
-                    });
+                    });     // 3 seconds
                 },
             
-            );
+            ]);
 
         }
     ).demandCommand();
