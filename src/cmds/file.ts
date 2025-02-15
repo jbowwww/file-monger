@@ -1,14 +1,20 @@
 import yargs from "yargs";
 import { globalOptions } from "../cli";
 import { Task } from "../task";
-import { diffDotNotation, MongoStorage, Query, updateResultToString } from "../db";
-import { Artefact, DiscriminatedModel } from '../models';
+import { getUpdates, MongoStorage, Query, updateResultToString } from "../db";
+import { Artefact, ArtefactFn, ArtefactStaticMethods, DiscriminatedModel } from '../models';
 import { Entry, walk, Hash } from "../models/file-system";
 import exitHook from "async-exit-hook";
 import { Audio } from "../models/audio";
+import * as nodeUtil from "node:util";
+import { ChangeStreamUpdateDocument } from "mongodb";
 
 export type FileSystemArtefact = Artefact<Partial<DiscriminatedModel<Entry>> & { Hash?: Hash; }>;
-export const FileSystemArtefact = (e: Entry) => ({ [e._T]: e }) as FileSystemArtefact;
+export const FileSystemArtefact = Object.assign(
+    <E extends Entry>(e: E) => ({ [e._T]: e }) as FileSystemArtefact,
+    { Query: { ...Artefact.Query, ...{
+        byPath(this: FileSystemArtefact) { return this.File ? { "File.path": this.File.path } : this.Directory ? { "Directory.path" : this.Directory.path } : this.Unknown ? { "Unknown.path": this.Unknown.path } : {}; },
+    } } }) as ArtefactFn<FileSystemArtefact, [Entry]>;
 
 export const command = 'file';
 export const description = 'File commands';
@@ -26,7 +32,18 @@ export const builder = (yargs: yargs.Argv) => yargs
         async function (argv): Promise<void> {
 
             const storage = new MongoStorage(argv.dbUrl);
-            const store = (await storage.store<FileSystemArtefact>("fileSystemEntries"));//.bulkWriterStore();
+            const store = await storage.store<FileSystemArtefact>("fileSystemEntries", {
+                createIndexes: [{
+                    index: { "File.path": 1 },
+                    options: { unique: true }
+                }, {
+                    index: { "Directory.path": 1 },
+                    options: { unique: true }
+                }, {
+                    index: { "Unknown.path": 1 },
+                    options: { unique: true }
+                }],
+            });//.bulkWriterStore();
 
             exitHook(async (cb) => {
                 console.log("Exiting ...");
@@ -36,22 +53,22 @@ export const builder = (yargs: yargs.Argv) => yargs
                 cb();
             });
 
-            await Task.start([
+            await Task.start(
 
                 async function indexFileSystem(task: Task) {
-                    await Task.repeat({ postDelay: 180000, }, async () => {
+                    await Task.repeat({ postDelay: 180000/*0*/, }, async () => {   // 3/*0*/ minutes
                         for (const path of argv.paths) {
                             for await (const e of walk({ path, progress: task.progress })) {
-                                const result = await store.updateOne({ [`${e._T}.path`]: e.path }, { $set: diffDotNotation({ [`${e._T}`]: e }), }, { upsert: true });
-                                console.log(`result=${updateResultToString(result)} task.progress=${task.progress}`);
+                                const result = await store.updateOrCreate({ [e._T]: e }, { [`${e._T}.path`]: e.path }/* , { $set: diffDotNotation({ [`${e._T}`]: e }), } */, { upsert: true });
+                                console.log(`result=${/* updateResultToString */nodeUtil.inspect(result)} task.progress=${task.progress}`);
                             }
                         }
-                    });   // 30 minutes
+                    });
                 },
 
                 async function hashFiles(task: Task) {
-                    await Task.repeat({ preDelay: 3000, }, async () => {
-                        for await (const _ of store.find({
+                    // await Task.repeat({ preDelay: 3000, }, async () => {     // 3 seconds
+                        for await (const _ of store.watch({//.find({
                             $and: [
                                 { File: { $exists: true } },
                                 { $or: [
@@ -59,31 +76,35 @@ export const builder = (yargs: yargs.Argv) => yargs
                                     { $expr: { $lt: [ "$Hash._ts", "$File.stats.mtime" ] } }
                                 ]}
                             ]
-                        }, { progress: task.progress })) {
-                            const result = await store.updateOne(Query(_, "_id"), { $set: { Hash: await Hash(_.File!.path) } });
-                            console.log(`result=${updateResultToString(result)} task.progress=${task.progress}`);
+                        }, { progress: task.progress, fullDocument: "updateLookup" })) {
+                            if (_.operationType === "update" && _.fullDocument && _.fullDocument.File) {
+                                const result = await store.updateOne(Query(_.fullDocument, "_id"), { $set: { Hash: await Hash(_.fullDocument.File.path) } });
+                                console.log(`result=${/* updateResultToString */nodeUtil.inspect(result)} task.progress=${task.progress}`);
+                            }
                         }
-                    });     // 3 seconds
+                    // }
                 },
 
                 async function analyzeAudioFiles(task: Task) {
-                    await Task.repeat({ preDelay: 3000, }, async () => {
+                    await Task.repeat({ preDelay: 3000, }, async () => {     // 3 seconds
                         for await (const _ of store.find({
                             $and: [
-                                { File: { path: { $in: Audio.fileExtensions } } },
+                                { File: { $exists: true } },
+                                { $or: Audio.fileExtensions.map(ext => ({ "File.path": { $regex: "\^.*\\." + ext, $options: "i" } })) },
                                 { $or: [
                                     { Audio: { $exists: false } },
-                                    { $expr: { $lt: [ "$Audio._ts", "$File.stats.mtime" ] } }
+                                    { "Audio._ts": { $lt: "$File.stats.mtime" } }
                                 ]}
                             ]
                         }, { progress: task.progress })) {
+                            console.log(`_=${nodeUtil.inspect(_)} task.progress=${task.progress}`);
                             const result = await store.updateOne(Query(_, "_id"), { $set: { Audio: await Audio(_.File!.path) } });
                             console.log(`result=${updateResultToString(result)} task.progress=${task.progress}`);
                         }
-                    });     // 3 seconds
+                    });
                 },
             
-            ]);
+            );
 
         }
     ).demandCommand();

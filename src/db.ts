@@ -1,47 +1,12 @@
 import * as nodeUtil from "node:util";
 import { isDate } from "node:util/types";
-import { AnyBulkWriteOperation, BulkWriteOptions, BulkWriteResult, ChangeStream, ChangeStreamOptions, ChangeStreamDocument, ChangeStreamInsertDocument, ChangeStreamUpdateDocument, Collection, CollectionOptions, CountOptions, Db, Document, Filter, FindOneAndUpdateOptions, FindOptions, ModifyResult, MongoClient, MongoClientOptions, MongoError, OrderedBulkOperation, UpdateFilter, UpdateOptions, UpdateResult, WithId } from "mongodb";
+import { AnyBulkWriteOperation, BulkWriteOptions, BulkWriteResult, ChangeStream, ChangeStreamOptions, ChangeStreamDocument, ChangeStreamInsertDocument, ChangeStreamUpdateDocument, Collection, CollectionOptions, CountOptions, Db, Document, Filter, FindOneAndUpdateOptions, FindOptions, ModifyResult, MongoClient, MongoClientOptions, MongoError, OrderedBulkOperation, UpdateFilter, UpdateOptions, UpdateResult, WithId, IndexSpecification, CreateIndexesOptions } from "mongodb";
 import { diff } from "deep-object-diff";
 import { Artefact, Aspect, AspectFn, Constructor, isAspect } from "./models";
 import { AsyncFunction, buildObjectWithKeys, getKeysOfUndefinedValues } from "./utility";
 import { cargo, isAsyncGenerator, pipe } from "./pipeline";
 import { get } from "./prop-path";
 import { Progress } from "./progress";
-
-export function isChangeInsert(value: ChangeStreamDocument): value is ChangeStreamInsertDocument {
-    return value.operationType === "insert";
-}
-export function isChangeUpdate(value: ChangeStreamDocument): value is ChangeStreamUpdateDocument {
-    return value.operationType === "update";
-}
-
-export const Query = <A extends Artefact>(_: A, path: string): Filter<A> => ({ [path]: get(_, path) }) as Filter<A>;
-
-export const updateResultToString = (result: UpdateResult | null | undefined) => result === null ? "(null)" : result === undefined ? "(undef)" :
-    `{ ack.=${result.acknowledged} modifiedCount=${result.modifiedCount} upsertedId=${result.upsertedId} upsertedCount=${result.upsertedCount} matchedCount=${result.matchedCount} }`;
-
-export function diffDotNotation(original: { [K: string]: any; }, updated?: { [K: string]: any; }): ({ [K: string]: any; }) {
-    if (!updated) {
-        updated = original;
-        original = {};
-    }
-    const update = diff(original, updated);
-    const result = appendSubPropNames(update);
-    return result;
-    function appendSubPropNames(source: { [K: string]: any; }, result: ({ [K: string]: any; }) = {}, prefix: string = "") {
-        for (const K in source) {
-            const V = source[K];
-            if (V !== null && V !== undefined && typeof V === "function") {
-                continue;
-            } else if (V !== null && V !== undefined && typeof V === "object" && !isDate(V)) {  //V.prototype !== Date.prototype
-                appendSubPropNames(V, result, prefix + K + ".");
-            } else {
-                result[prefix + K] = V;
-            }
-        }
-        return result;
-    }
-}
 
 export interface Storage {
     isConnected(): boolean;
@@ -53,8 +18,13 @@ export interface Storage {
 export class MongoStorage implements Storage {
 
     private _client: MongoClient | null = null;
+    public get client() { return this._client; }
+    
     private _connection: MongoClient | null = null;
+    public get connection() { return this._connection; }
+
     private _db: Db | null = null;
+    public get db() { return this._db; }
 
     constructor(public readonly url: string, public readonly options?: any) { }
 
@@ -87,21 +57,90 @@ export class MongoStorage implements Storage {
         return this as Storage;
     }
 
-    async store<A extends Artefact>(name: string, options?: CollectionOptions): Promise<Store<A>> {
+    async store<A extends Artefact>(name: string, options?: MongoStoreOptions): Promise<MongoStore<A>> {
         await this.connect();
         process.stdout.write(`Getting store '${name} ${options !== undefined ? ("options=" + JSON.stringify(options)) : ""} ... `);
         const collection = this._db!.collection<A>(name, options);
-        const store: Store<A> = new MongoStore<A>(this as Storage, name, options, collection);
+        const store = new MongoStore<A>(this as Storage, name, collection, options);
         process.stdout.write("OK\n");
         return store;
     }
 }
 
+export function isChangeInsert(value: ChangeStreamDocument): value is ChangeStreamInsertDocument {
+    return value.operationType === "insert";
+}
+export function isChangeUpdate(value: ChangeStreamDocument): value is ChangeStreamUpdateDocument {
+    return value.operationType === "update";
+}
+
+export type MongoStoreOptions = CollectionOptions & {
+    createIndexes?: CreateIndexArgs[];
+};
+export const MongoStoreOptions: {
+    default: MongoStoreOptions;
+} = {
+    default: {
+        createIndexes: [],
+    },
+};
+
+export type CreateIndexArgs = {
+    index: IndexSpecification;
+    options?: CreateIndexesOptions;
+};
+
+export const Query = <A extends Artefact>(_: A, path: string): Filter<A> => ({
+     [path]: get(_, path)
+}) as Filter<A>;
+
+export const updateResultToString = (result: UpdateResult | null | undefined) =>
+    result === null ? "(null)" : result === undefined ? "(undef)" :
+    `{ ack.=${result.acknowledged} modifiedCount=${result.modifiedCount} upsertedId=${result.upsertedId} upsertedCount=${result.upsertedCount} matchedCount=${result.matchedCount} }`;
+
+export type Updates<A extends Artefact> = {
+    update: Partial<A>;
+    undefineds: Partial<Record<keyof A, undefined>>;
+};
+
+export const getUpdates = <A extends Artefact>(original: A, updated?: A) => {
+    if (!updated) {
+        updated = original;
+        original = {} as A;
+    } else if (original._id && updated._id && original._id !== updated._id) {
+        throw new RangeError(`getUpdates(): original._id=${original._id} !== updated._id=${updated._id}`);
+    }
+    const updateDiff = diff(original, updated);
+    const { update, undefineds } = appendSubPropNames(updateDiff);
+    return { update, undefineds } as Updates<A>;
+    function appendSubPropNames(source: { [K: string]: any; }, update: ({ [K: string]: any; }) = {}, undefineds: ({ [K: string]: any; }) = {}, prefix: string = "") {
+        for (const K in source) {
+            if (K === "_id") {
+                continue;
+            }
+            const V = source[K];
+            if (V !== null && V !== undefined && typeof V === "function") {
+                continue;
+            } else if (V !== null && V !== undefined && typeof V === "object" && !isDate(V)) {
+                appendSubPropNames(V, update, undefineds, prefix + K + ".");
+            } else if (V !== undefined) {
+                update[prefix + K] = V;
+            } else {
+                undefineds[prefix + K] = undefined;
+            }
+        }
+        return { update, undefineds };
+    }
+}
+
+export type UpdateOrCreateOptions = {
+    unsetUndefineds?: boolean;
+};
 export type UpdateOrCreateResult<A extends Artefact> = {
     didWrite: boolean;
-    result: UpdateResult<A>;
+    result?: UpdateResult<A>;
     query: Filter<A>;
-    update: Partial<A>;
+    update: UpdateFilter<A>;//Omit<Partial<A>, "_id">;
     _: A;
 };
 
@@ -114,7 +153,7 @@ export type BulkWriterOptions = BulkWriteOptions & {
     maxBatchSize: number;
     timeoutMs: number;
 };
-export var BulkWriterOptions = {
+export const BulkWriterOptions = {
     default: {
         maxBatchSize: 10,
         timeoutMs: 200,
@@ -122,38 +161,52 @@ export var BulkWriterOptions = {
 };
 
 export interface Store<A extends Artefact> {
+    createIndexes(...createIndexes: CreateIndexArgs[]): Promise<string[]>;
     count(query: Filter<A>, options?: CountOptions): Promise<number>;
     find(query: Filter<A>, options?: FindOptions & ProgressOption): AsyncGenerator<WithId<A>>;
     findOne(query: Filter<A>, options?: FindOptions): Promise<WithId<A> | null>;
-    findOneAndUpdate(query: Filter<A>, update: A, options?: FindOneAndUpdateOptions): Promise<WithId<A> | null>;
+    findOneAndUpdate(query: Filter<A>, update: UpdateFilter<A>, options?: FindOneAndUpdateOptions): Promise<WithId<A> | null>;
     updateOne(query: Filter<A>, update: UpdateFilter<A>, options?: UpdateOptions): Promise<UpdateResult<A> | null>;
-    updateOrCreate(artefact: A, query: Filter<A>, options?: UpdateOptions): Promise<UpdateOrCreateResult<A>>;
+    updateOrCreate(artefact: A, query: Filter<A>, options?: UpdateOptions & UpdateOrCreateOptions): Promise<UpdateOrCreateResult<A>>;
     bulkWrite(operations: AnyBulkWriteOperation<A>[], options?: BulkWriteOptions & ProgressOption): Promise<BulkWriteResult>;
     bulkWriterFn(options?: BulkWriterOptions & ProgressOption): BulkWriterFn<A>;
     bulkWriterStore(options?: BulkWriterOptions & ProgressOption): BulkWriterStore<A>;
     watch(pipeline?: Filter<A>/* Document[] */, options?: ChangeStreamOptions & ProgressOption): AsyncGenerator<ChangeStreamDocument<A>>;//: ChangeStream<A, ChangeStreamDocument<A>>;
-}
+};
 
 export class MongoStore<A extends Artefact> implements Store<A> {
 
     constructor(
         public readonly storage: Storage,
         public readonly name: string,
-        public readonly options: any,
-        private _collection: Collection<A>,
-    ) { }
+        public readonly collection: Collection<A>,
+        options: MongoStoreOptions = {}
+    ) {
+        this.options = { ...MongoStoreOptions.default, ...options };
+        if (this.options.createIndexes && this.options.createIndexes.length > 0) {
+            this.createIndexes(...this.options.createIndexes);
+        }
+     }
+
+    public readonly options: MongoStoreOptions;
+
+    async createIndexes(...createIndexes: CreateIndexArgs[]) {
+        return await Promise.all(createIndexes.map(createIndex => {
+            return this.collection.createIndex(createIndex.index, createIndex.options);
+        }));
+    }
 
     async count(query: Filter<A>, options: CountOptions = {}) {
-        return this._collection.countDocuments(query, options);
+        return this.collection.countDocuments(query, options);
     }
 
     async* find(query: Filter<A>, options: FindOptions & ProgressOption = {}) {
         // for await (const item of this._collection.find(query))
         //     yield item;
         if (options.progress) {
-            options.progress.total = await this._collection.countDocuments(query);
+            options.progress.total = await this.collection.countDocuments(query);
         }
-        yield* this._collection.find(query, options).map(r => {
+        yield* this.collection.find(query, options).map(r => {
             if (options.progress) {
                 options.progress.count++;
             }
@@ -162,16 +215,16 @@ export class MongoStore<A extends Artefact> implements Store<A> {
     }
 
     async findOne(query: Filter<A>, options: FindOptions = {}) {
-        return await this._collection.findOne(query, options);
+        return await this.collection.findOne(query, options);
     }
 
     async findOneAndUpdate(query: Filter<A>, update: UpdateFilter<A>, options: FindOneAndUpdateOptions = {}) {
-        return await this._collection.findOneAndUpdate(query, update, options);
+        return await this.collection.findOneAndUpdate(query, update, options);
     }
 
     async updateOne(query: Filter<A>, update: UpdateFilter<A>, options: UpdateOptions = {}) {
         console.debug(`updateOne(): query=${nodeUtil.inspect(query)} update=${nodeUtil.inspect(update)} options=${nodeUtil.inspect(options)}`);
-        return await this._collection.updateOne(query!, {
+        return await this.collection.updateOne(query!, {
             // $set: {
             ...update as any/* TSchema */,
             // _ts: new Date(),
@@ -179,32 +232,41 @@ export class MongoStore<A extends Artefact> implements Store<A> {
         }, options);
     }
 
-    async updateOrCreate(artefact: A, query: Filter<A>, options: UpdateOptions = {}): Promise<UpdateOrCreateResult<A>> {
+    async updateOrCreate(artefact: A, query?: Filter<A>, options: UpdateOptions & UpdateOrCreateOptions = {}): Promise<UpdateOrCreateResult<A>> {
         options = { ...options, upsert: true, ignoreUndefined: true }; //, includeResultMetadata: true, returnDocument: 'after', */ };
-        let dbResult: UpdateResult<A> | undefined = undefined;
-        const dbArtefact = await this._collection.findOne<A>(query, options);
-        const dbId = artefact._id = dbArtefact?._id;
-        const query2 = (!!dbId ? ({ _id: { $eq: dbId } }) : query) as Filter<A>;
-        const { _id, ...dbUpdate } = diffDotNotation(dbArtefact ?? {}, artefact) as Partial<A>;
-        const deleteKeys = getKeysOfUndefinedValues(dbUpdate);
-        if (Object.keys(dbUpdate).length > 0) {
-            dbResult = await this._collection.updateOne(query2, { $set: { ...dbUpdate } as Partial<A>, $unset: buildObjectWithKeys(deleteKeys, "") }, options);
-            if (!dbResult || !dbResult.acknowledged) {
-                throw new MongoError("updateOne not acknowledged for dbArtefact=${dbArtefact} dbUpdate=${dbUpdate}");
+        if (artefact._id) {
+            const keys = Object.keys(artefact);
+            if (keys.length !== 1 || keys[0] !== "_id") {
+                throw new RangeError(`updateOrCreate(): artefact=${nodeUtil.inspect(artefact)} has an _id but query=${nodeUtil.inspect(query)}, when query should be based solely on _id`);
+            }
+        }
+        let result: UpdateResult<A> | undefined = undefined;
+        query ??= Artefact.Query.byId.call(artefact as Artefact.WithId<A>) as Filter<A>;
+        const oldArtefact = await this.collection.findOne<A>(query, options);
+        if (oldArtefact !== null && !artefact._id) {
+            artefact._id = oldArtefact._id;
+        }
+        const updates = getUpdates(oldArtefact ?? {} as A, artefact);
+        let update = { $set: { ...updates.update }, ...(options.unsetUndefineds ? { $unset: updates.undefineds } : {}) } as UpdateFilter<A>;
+        if (Object.keys(updates.update).filter(u => u !== "_id").length > 0) {
+            result = await this.collection.updateOne(
+                oldArtefact !== null ? Artefact.Query.byId.call(oldArtefact as Artefact.WithId<A>) as Filter<A> : query,
+                update,
+                options);
+            if (!result?.acknowledged) {
+                throw new MongoError("updateOne not acknowledged for dbArtefact=${dbArtefact} dbUpdate=${dbUpdate} dbResult=${dbResult}");
             } else {
-                if (!artefact._id && !!dbResult.upsertedId) {
-                    artefact._id = dbResult.upsertedId.toString();
+                if (!artefact._id && !!result.upsertedId) {
+                    artefact._id = result.upsertedId.toString();
                 }
             }
         }
-        const result = Object.assign({ didWrite: !!dbResult, result: dbResult, query, update: dbUpdate, _: artefact });
-        // console.log(`dbArtefact=${nodeUtil.inspect(dbArtefact)} dbId=${dbId} query=${nodeUtil.inspect(query)} query2=${nodeUtil.inspect(query2)} dbUpdate=${nodeUtil.inspect(dbUpdate)} result=${nodeUtil.inspect(result)}`);
-        return result;
+        return { didWrite: !!result, result: result, query, update, _: artefact };
     }
 
     bulkWrite(opsOrSource: AnyBulkWriteOperation<A>[] | AsyncGenerator<AnyBulkWriteOperation<A>>, options: BulkWriteOptions & BulkWriterOptions & ProgressOption = BulkWriterOptions.default): Promise<BulkWriteResult> {
         return Array.isArray(opsOrSource) ?
-            this._collection.bulkWrite(opsOrSource, options) :
+            this.collection.bulkWrite(opsOrSource, options) :
             this.bulkWriterFn(options)(opsOrSource);
     }
 
@@ -213,7 +275,7 @@ export class MongoStore<A extends Artefact> implements Store<A> {
         return async function bulkWrite(source: AsyncGenerator<AnyBulkWriteOperation<A>>) {
             var result: BulkWriteResult = new BulkWriteResult();
             for await (const ops of cargo(options.maxBatchSize, options.timeoutMs, source)) {
-                result = await _this._collection.bulkWrite(ops, options);
+                result = await _this.collection.bulkWrite(ops, options);
             }
             return result;
         }
@@ -221,13 +283,7 @@ export class MongoStore<A extends Artefact> implements Store<A> {
 
     bulkWriterStore(options: BulkWriterOptions & BulkWriteOptions & ProgressOption): BulkWriterStore<A> {
         return ({
-            count: this.count,
-            find: this.find,
-            findOne: this.findOne,
-            findOneAndUpdate: this.findOneAndUpdate,
-            updateOne: this.updateOne,
-            updateOrCreate: this.updateOrCreate,
-            bulkWrite: this.bulkWrite,
+            ...this,
             bulkWriterFn: this.bulkWriterFn.bind(this),
             bulkWriterStore: this.bulkWriterStore.bind(this),
             watch: this.watch.bind(this),
@@ -236,9 +292,9 @@ export class MongoStore<A extends Artefact> implements Store<A> {
 
     async* watch(query: Filter<A>/* Document[] = [] */, options: ChangeStreamOptions & ProgressOption = {})/* : Promise<ChangeStream<A, ChangeStreamDocument<A>>> */ {
         if (options.progress) {
-            options.progress.count = await this._collection.countDocuments(query);
+            options.progress.count = await this.collection.countDocuments(query);
         }
-        /* return */yield* this._collection.watch([{ $match: query }], options);
+        /* return */yield* this.collection.watch([{ $match: query }], options);
     }
 }
 

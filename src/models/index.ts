@@ -1,3 +1,4 @@
+import { Filter } from "mongodb";
 import { get } from "../prop-path";
 
 export type DiscriminateUnion<T, K extends keyof T, V extends T[K]> = Extract<T, Record<K, V>>;
@@ -15,4 +16,28 @@ export const isAspect = <A extends Aspect<any> = Aspect<any>>(aspect: any): aspe
 export type AspectFn<A extends Aspect<any> = Aspect<any>> = (...args: any[]) => A;
 export type Timestamped<T> = { _ts: Date; } & T;
 
+
 export type Artefact<T = {}> = T & { _id?: string; };
+// export type WithId<A extends Artefact = Artefact> = Omit<A, "_id"> & { _id: string; };
+export type ArtefactQueryFn<A extends Artefact = Artefact> = (this: A) => Filter<A>;
+export type ArtefactExtensionQueries<A extends Artefact> = {
+    [K: string]: ArtefactQueryFn<A>;
+};
+export type ArtefactQueries<A extends Artefact = Artefact, Q extends ArtefactExtensionQueries<A> = {}> = {
+    byId: ArtefactQueryFn<Artefact.WithId<A>>;
+} & Q;
+export type ArtefactStaticMethods<A extends Artefact = Artefact, Q extends ArtefactExtensionQueries<A> = {}> = {
+    Query: ArtefactQueries<A, Q>;
+};
+export type ArtefactFn<A extends Artefact = Artefact, TCtorArgs extends any[] = [], Q extends ArtefactExtensionQueries<A> = {}> =
+    ((...args: TCtorArgs) => A) &
+    ArtefactStaticMethods<A, Q>;
+
+export const Artefact: ArtefactStaticMethods = {
+    Query: {
+        byId(this: Artefact.WithId<Artefact>) { return ({ _id: { $eq: this._id } }); },
+    },
+};
+export namespace Artefact {
+    export type WithId<A extends Artefact = Artefact> = Omit<A, "_id"> & { _id: string; };
+};
