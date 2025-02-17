@@ -1,0 +1,7 @@
+net:
+   bindIp: localhost
+   port: 27017
+replication:
+   replSetName: rs0
+security:
+   keyFile: /etc/mongod.key

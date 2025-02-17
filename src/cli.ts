@@ -6,7 +6,7 @@ export const globalOptions = {
     dbUrl: {
         description: "Path to database",
         demandOption: true,
-        default: "mongodb://mongo:mongo@localhost:27017/",
+        default: "mongodb://mongo:mongo@localhost:27017/", // const uri = `mongodb://${process.env.DB_USER}:${process.env.DB_PASSWORD}@mongo-database/${process.env.DB_NAME}?retryWrites=true&writeConcern=majority&authSource=admin`;
         global: true,
     }
 };

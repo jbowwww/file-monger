@@ -3,9 +3,17 @@ services:
   
   mongo:
     image: mongo
+    hostname: localhost
     restart: always
+    user: mongodb
+    command: mongod -f /etc/mongod.conf
     ports:
       - 27017:27017
+    volumes:
+      - ./docker/data/db:/data/db
+      - ./docker/etc-mongod-conf.yaml:/etc/mongod.conf
+      - ./docker/etc-mongod-key:/etc/mongod.key
+      - ./docker/var-log-mongod-mongod-log:/var/log/mongodb/mongod.log
     environment:
       MONGO_INITDB_ROOT_USERNAME: mongo
       MONGO_INITDB_ROOT_PASSWORD: mongo
@@ -15,7 +23,11 @@ services:
     restart: always
     ports:
      - 8081:8081
+    volumes:
+      - ./docker/etc-mongod-key:/etc/mongod.key
     environment:
       ME_CONFIG_MONGODB_ADMINUSERNAME: mongo
       ME_CONFIG_MONGODB_ADMINPASSWORD: mongo
-      ME_CONFIG_MONGODB_URL: mongodb://mongo:mongo@mongo:27017/
+      ME_CONFIG_MONGODB_URL: mongodb://mongo:mongo@localhost:27017/?authSource=admin&replicaSet=rs0
+      ME_CONFIG_MONGODB_ENABLE_ADMIN: "true"
+      # ME_CONFIG_SITE_SSL_KEY_PATH: /etc/mongod.key
