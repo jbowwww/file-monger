@@ -1,7 +1,7 @@
 import yargs from "yargs";
 import { globalOptions } from "../cli";
 import { Task } from "../task";
-import { getUpdates, MongoStorage, Query, updateResultToString } from "../db";
+import { MongoStorage, Query, updateResultToString } from "../db";
 import { Artefact, ArtefactFn, ArtefactStaticMethods, DiscriminatedModel } from '../models';
 import { Entry, walk, Hash } from "../models/file-system";
 import exitHook from "async-exit-hook";
@@ -34,13 +34,7 @@ export const builder = (yargs: yargs.Argv) => yargs
             const storage = new MongoStorage(argv.dbUrl);
             const store = await storage.store<FileSystemArtefact>("fileSystemEntries", {
                 createIndexes: [{
-                    index: { "File.path": 1 },
-                    options: { unique: true }
-                }, {
-                    index: { "Directory.path": 1 },
-                    options: { unique: true }
-                }, {
-                    index: { "Unknown.path": 1 },
+                    index: { "File.path": 1, "Directory.path": 1, "Unknown.path": 1 },
                     options: { unique: true }
                 }],
             });//.bulkWriterStore();
