@@ -3,7 +3,6 @@ services:
   
   mongo:
     image: mongo
-    hostname: localhost
     restart: always
     user: mongodb
     command: mongod -f /etc/mongod.conf
@@ -26,8 +25,4 @@ services:
     volumes:
       - ./docker/etc-mongod-key:/etc/mongod.key
     environment:
-      ME_CONFIG_MONGODB_ADMINUSERNAME: mongo
-      ME_CONFIG_MONGODB_ADMINPASSWORD: mongo
-      ME_CONFIG_MONGODB_URL: mongodb://mongo:mongo@localhost:27017/?authSource=admin&replicaSet=rs0
-      ME_CONFIG_MONGODB_ENABLE_ADMIN: "true"
-      # ME_CONFIG_SITE_SSL_KEY_PATH: /etc/mongod.key
+      ME_CONFIG_MONGODB_URL: mongodb://mongo:mongo@mongo:27017/?authSource=admin&replicaSet=rs0
