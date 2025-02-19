@@ -61,8 +61,8 @@ export const builder = (yargs: yargs.Argv) => yargs
                 },
 
                 async function hashFiles(task: Task) {
-                    // await Task.repeat({ preDelay: 3000, }, async () => {     // 3 seconds
-                        for await (const _ of store.watch({//.find({
+                    await Task.repeat({ preDelay: 3000, }, async () => {     // 3 seconds
+                        for await (const _ of store.find({//.watch({
                             $and: [
                                 { File: { $exists: true } },
                                 { $or: [
@@ -70,13 +70,13 @@ export const builder = (yargs: yargs.Argv) => yargs
                                     { $expr: { $lt: [ "$Hash._ts", "$File.stats.mtime" ] } }
                                 ]}
                             ]
-                        }, { progress: task.progress, fullDocument: "updateLookup" })) {
-                            if (_.operationType === "update" && _.fullDocument && _.fullDocument.File) {
-                                const result = await store.updateOne(Query(_.fullDocument, "_id"), { $set: { Hash: await Hash(_.fullDocument.File.path) } });
+                        }, { progress: task.progress/* , fullDocument: "updateLookup" */ })) {
+                            if (/* _.operationType === "update" && _.fullDocument && */ _/* .fullDocument */.File) {
+                                const result = await store.updateOne(Query(_/* .fullDocument */, "_id"), { $set: { Hash: await Hash(_/* .fullDocument */.File.path) } });
                                 console.log(`result=${/* updateResultToString */nodeUtil.inspect(result)} task.progress=${task.progress}`);
                             }
                         }
-                    // }
+                    });
                 },
 
                 async function analyzeAudioFiles(task: Task) {
