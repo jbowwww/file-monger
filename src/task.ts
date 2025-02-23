@@ -2,14 +2,21 @@ import { Progress } from "./progress";
 
 export type TaskFn<TArgs extends any[] = [], TResult = void> = (task: Task<TArgs, TResult>, ...args: TArgs) => Promise<TResult>;
 
+export type TaskError = Error | string | unknown;
+export type TaskWarning = Error | string | unknown;
+
 export type TaskOptions = Partial<{
     progress?: Progress;
+    errors?: Array<TaskError>;
+    warnings?: Array<TaskWarning>;
 }>;
 export const TaskOptions: {
     default: TaskOptions;
 } = {
     get default() { return ({
         progress: new Progress(),
+        errors: [],
+        warnings: [],
     }); },
 }
 
@@ -34,16 +41,21 @@ export class Task<TArgs extends any[] = [], TResult = void> {
     #result: TResult | null = null;
     
     public readonly name: string;
-    public readonly progress;
+    public readonly progress: Progress;
+    public readonly errors: Array<TaskError>;
+    public readonly warnings: Array<TaskWarning>;
+
     public get hasResult() { return this.#taskPr !== null && this.#result !== null; }
     public get result() { return this.#taskPr; }
     public get complete() { return this.progress.total > 0 && this.progress.count >= this.progress.total; }
     public get hasStarted() { return this.#taskPr !== null; }
     public get hasFinished() { return this.#result !== null; }
 
-    constructor(public readonly taskFn: TaskFn<TArgs, TResult>, public readonly taskOptions: TaskOptions = TaskOptions.default) {
+    constructor(public readonly taskFn: TaskFn<TArgs, TResult>, public readonly options: TaskOptions = TaskOptions.default) {
         this.name = taskFn.name ?? `Task #${++Task.#taskAnonIdNum}`;
-        this.progress = new Progress(this.name);
+        this.progress = options.progress ?? new Progress(this.name);
+        this.errors = options.errors ?? [];
+        this.warnings = options.warnings ?? [];
     }
 
     public start(...args: TArgs) {

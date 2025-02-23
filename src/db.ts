@@ -2,8 +2,8 @@ import * as nodeUtil from "node:util";
 import { isDate } from "node:util/types";
 import { AnyBulkWriteOperation, BulkWriteOptions, BulkWriteResult, ChangeStream, ChangeStreamOptions, ChangeStreamDocument, ChangeStreamInsertDocument, ChangeStreamUpdateDocument, Collection, CollectionOptions, CountOptions, Db, Document, Filter, FindOneAndUpdateOptions, FindOptions, ModifyResult, MongoClient, MongoClientOptions, MongoError, OrderedBulkOperation, UpdateFilter, UpdateOptions, UpdateResult, WithId, IndexSpecification, CreateIndexesOptions } from "mongodb";
 import { diff } from "deep-object-diff";
-import { Artefact, Aspect, AspectFn, Constructor, isAspect } from "./models";
-import { AsyncFunction, buildObjectWithKeys, getKeysOfUndefinedValues } from "./utility";
+import { Artefact, Aspect, AspectFn, Constructor, filterObject, isAspect, mapObject, QueryableArtefact } from "./models";
+import { AsyncFunction, buildObjectWithKeys, getKeysOfUndefinedValues, enumerable } from './utility';
 import { cargo, isAsyncGenerator, pipe } from "./pipeline";
 import { get } from "./prop-path";
 import { Progress } from "./progress";
@@ -98,21 +98,21 @@ export const updateResultToString = (result: UpdateResult | null | undefined) =>
     result === null ? "(null)" : result === undefined ? "(undef)" :
     `{ ack.=${result.acknowledged} modifiedCount=${result.modifiedCount} upsertedId=${result.upsertedId} upsertedCount=${result.upsertedCount} matchedCount=${result.matchedCount} }`;
 
-export type Updates<A extends Artefact> = {
-    update: Partial<A>;
-    undefineds: Partial<Record<keyof A, undefined>>;
+export type Updates<T extends {} = {}> = {
+    update: Partial<T>;
+    undefineds: Partial<Record<keyof T, undefined>>;
 };
 
-export const getUpdates = <A extends Artefact>(original: A, updated?: A) => {
+export const getUpdates = (original: any, updated?: any) => {
     if (!updated) {
         updated = original;
-        original = {} as A;
+        original = {};
     } else if (original._id && updated._id && original._id !== updated._id) {
         throw new RangeError(`getUpdates(): original._id=${original._id} !== updated._id=${updated._id}`);
     }
     const updateDiff = diff(original, updated);
     const { update, undefineds } = appendSubPropNames(updateDiff);
-    return { update, undefineds } as Updates<A>;
+    return { update, undefineds } as Updates;
     function appendSubPropNames(source: { [K: string]: any; }, update: ({ [K: string]: any; }) = {}, undefineds: ({ [K: string]: any; }) = {}, prefix: string = "") {
         for (const K in source) {
             if (K === "_id") {
@@ -131,6 +131,13 @@ export const getUpdates = <A extends Artefact>(original: A, updated?: A) => {
         }
         return { update, undefineds };
     }
+}
+
+function getData<A extends Artefact>(_: A): Partial<A> {
+    const descriptors = Object.getOwnPropertyDescriptors(_);
+    const data = filterObject(descriptors as Record<PropertyKey, PropertyDescriptor>, ([K, V]) => V.value); // should filter out getters (for now - TODO: decorators to opt-in getters)
+    console.log(`getData(): _=${nodeUtil.inspect(_)} descriptors=${nodeUtil.inspect(descriptors)} data=${nodeUtil.inspect(data)}`);
+    return data as Partial<A>;
 }
 
 export type UpdateOrCreateOptions = {
@@ -232,7 +239,7 @@ export class MongoStore<A extends Artefact> implements Store<A> {
         }, options);
     }
 
-    async updateOrCreate(artefact: A, query?: Filter<A>, options: UpdateOptions & UpdateOrCreateOptions = {}): Promise<UpdateOrCreateResult<A>> {
+    async updateOrCreate(artefact: QueryableArtefact<A>, query?: Filter<A>, options: UpdateOptions & UpdateOrCreateOptions = {}): Promise<UpdateOrCreateResult<A>> {
         options = { ...options, upsert: true, ignoreUndefined: true }; //, includeResultMetadata: true, returnDocument: 'after', */ };
         if (artefact._id) {
             const keys = Object.keys(artefact);
@@ -241,18 +248,18 @@ export class MongoStore<A extends Artefact> implements Store<A> {
             }
         }
         let result: UpdateResult<A> | undefined = undefined;
-        query ??= Artefact.Query.byId.call(artefact as Artefact.WithId<A>) as Filter<A>;
-        const oldArtefact = await this.collection.findOne<A>(query, options);
+        query ??= artefact.Query.byId() as Filter<A>;
+        const oldArtefact = await this.collection.findOne<A>(query, options) ;
         if (oldArtefact !== null && !artefact._id) {
             artefact._id = oldArtefact._id;
         }
-        const updates = getUpdates(oldArtefact ?? {} as A, artefact);
+        const updates = getUpdates(oldArtefact ?? {} as A, getData(artefact));
         let update = { $set: { ...updates.update }, ...(options.unsetUndefineds ? { $unset: updates.undefineds } : {}) } as UpdateFilter<A>;
         if (Object.keys(updates.update).filter(u => u !== "_id").length > 0) {
-            result = await this.collection.updateOne(
-                oldArtefact !== null ? Artefact.Query.byId.call(oldArtefact as Artefact.WithId<A>) as Filter<A> : query,
-                update,
-                options);
+            if (oldArtefact !== null) {
+                query = Artefact.Query.byId(oldArtefact) as Filter<A>;
+            }
+            result = await this.collection.updateOne(query, update, options);
             if (!result?.acknowledged) {
                 throw new MongoError("updateOne not acknowledged for dbArtefact=${dbArtefact} dbUpdate=${dbUpdate} dbResult=${dbResult}");
             } else {
@@ -297,6 +304,7 @@ export class MongoStore<A extends Artefact> implements Store<A> {
         /* return */yield* this.collection.watch([{ $match: query }], options);
     }
 }
+
 
 // export type Query<A extends Aspect = Aspect> = ({ [K: string]: (...args: any[]) => ({ [K: string]: Filter<A>; }) });
 // export const Query = Object.assign(
