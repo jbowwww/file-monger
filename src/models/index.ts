@@ -4,15 +4,25 @@ import { Query } from '../db';
 export type KeyValuePair<K extends PropertyKey = PropertyKey, V = unknown> = [K: K, V: V];
 export type FilterFn<K extends PropertyKey = PropertyKey, V = unknown> = (kv: KeyValuePair<K, V>) => boolean;
 export type MapFn<K extends PropertyKey = PropertyKey, V = unknown, VOut = unknown> = (kv: KeyValuePair<K, V>) => KeyValuePair<K, VOut>;
-export const mapObject = <K extends PropertyKey = PropertyKey, V = unknown>(
+export function mapObject<K extends PropertyKey = PropertyKey, V = unknown>(
+    o: Record<K, V>,
+    map: MapFn<K, V>,
+): Record<PropertyKey, unknown>;
+export function mapObject<K extends PropertyKey = PropertyKey, V = unknown>(
+    o: Record<K, V>,
+    filter: FilterFn<K, V> | MapFn<K, V>,
+    map: MapFn<K, V>,
+): Record<PropertyKey, unknown>;
+export function mapObject<K extends PropertyKey = PropertyKey, V = unknown>(
     o: Record<K, V>,
     filterOrMap: FilterFn<K, V> | MapFn<K, V>,
     map?: MapFn<K, V>,
-) =>
-    Object.fromEntries<any>(
+): Record<PropertyKey, unknown> {
+    return Object.fromEntries<any>(
         (Object.entries(o) as KeyValuePair<K, V>[])
             .filter(map ? filterOrMap : () => true)
             .map<any>(map ?? ((v) => v)));
+}
 export const filterObject = <K extends PropertyKey = PropertyKey, V = unknown>(
     o: Record<K, V>,
     filter: FilterFn<K, V>,
@@ -48,18 +58,18 @@ export type ArtefactFn<
     C extends any[] = [],
 > = (...args: C) => A;
 
-export type ArtefactStaticQueryFn<A extends Artefact = Artefact> = (_: QueryableArtefact<A>) => Filter<A>;
-export type ArtefactInstanceQueryFn<A extends Artefact = Artefact> = () => Filter<A>;
-export type ArtefactStaticExtensionQueries<A extends Artefact = Artefact> = {
+export type ArtefactStaticQueryFn<A extends Artefact /* = Artefact */> = (_: A) => Filter<A>;
+export type ArtefactInstanceQueryFn<A extends Artefact/*  = Artefact */> = () => Filter<A>;
+export type ArtefactStaticExtensionQueries<A extends Artefact/*  = Artefact */> = {
     [K: string]: ArtefactStaticQueryFn<A>;
 };
-export type ArtefactInstanceExtensionQueries<A extends Artefact = Artefact> = {
+export type ArtefactInstanceExtensionQueries<A extends Artefact /* = Artefact */> = {
     [K: string]: ArtefactInstanceQueryFn<A>;
 };
-export type ArtefactStaticQueries<A extends Artefact = Artefact, Q extends ArtefactStaticExtensionQueries<A> = {} /* ArtefactStaticExtensionQueries<A> */> = Q & {
+export type ArtefactStaticQueries<A extends Artefact/*  = Artefact */, Q extends ArtefactStaticExtensionQueries<A> = {} /* ArtefactStaticExtensionQueries<A> */> = Q & {
     byId: ArtefactStaticQueryFn<Artefact>;
 };
-export type ArtefactInstanceQueries<A extends Artefact = Artefact, Q extends ArtefactStaticExtensionQueries<A> = ArtefactStaticExtensionQueries<A>> = {
+export type ArtefactInstanceQueries<A extends Artefact /* = Artefact */, Q extends ArtefactStaticExtensionQueries<A> = ArtefactStaticExtensionQueries<A>> = {
     [K in keyof Q]: ArtefactInstanceQueryFn<A>;
 } & {
     byId: ArtefactInstanceQueryFn<A>;
@@ -67,7 +77,7 @@ export type ArtefactInstanceQueries<A extends Artefact = Artefact, Q extends Art
 // export type ArtefactQueriesInstance<A extends Artefact = Artefact, Q extends ArtefactExtensionQueries<A> = {}> = Q & {
 //     byId: ArtefactInstanceQueryFn<A>;
 // };
-export type ArtefactStaticMethods<A extends Artefact = Artefact, Q extends ArtefactStaticExtensionQueries<A> = ArtefactStaticExtensionQueries<A>> = {
+export type ArtefactStaticMethods<A extends Artefact /* = Artefact */, Q extends ArtefactStaticExtensionQueries<A> = ArtefactStaticExtensionQueries<A>> = {
     stream<I>(source: AsyncIterable<I>): AsyncGenerator<QueryableArtefact<A, Q>>;
     Query: ArtefactStaticQueries<A, Q>;
 };
@@ -95,12 +105,9 @@ export const Artefact = Object.assign(<
     };//s as ArtefactStaticQueries<A, Q>;
     const artefactInstanceQueries = (_: QueryableArtefact<A, Q>) => mapObject(artefactStaticQueries, ([K, V]) => ([K, () => V(_)])) as ArtefactInstanceQueries<A, Q>;
     const artefact = Object.assign(
-        (...args: C) => ({
-            ...artefactFn(...args),
-            get Query() {
-                return artefactInstanceQueries(this as QueryableArtefact<A, Q>);
-            }
-        }) as QueryableArtefact<A, Q>,
+        (...args: C) => Object.assign(artefactFn(...args), {
+            get Query() { return artefactInstanceQueries(this as QueryableArtefact<A, Q>); }
+        }) /* as QueryableArtefact<A, Q> */,
         {
             async* stream<I>(this: QueryableArtefactFn<A, C, Q>, source: AsyncIterable<I>, transform?: (...args: [I]) => QueryableArtefact<A, Q>) {
                 for await (const item of source) {
@@ -120,6 +127,6 @@ export const Artefact = Object.assign(<
     get Query() {
         return ({
             byId: (_: Artefact) => ({ "_id": _._id }) as Filter<Artefact>,
-        }) as ArtefactStaticQueries;
+        }) as ArtefactStaticQueries<Artefact>   ;
     }
 });

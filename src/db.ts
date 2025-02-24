@@ -91,7 +91,7 @@ export type CreateIndexArgs = {
 };
 
 export const Query = <A extends Artefact>(_: A, path: string): Filter<A> => ({
-     [path]: get(_, path)
+    [path]: get(_, path)
 }) as Filter<A>;
 
 export const updateResultToString = (result: UpdateResult | null | undefined) =>
@@ -135,7 +135,7 @@ export const getUpdates = (original: any, updated?: any) => {
 
 function getData<A extends Artefact>(_: A): Partial<A> {
     const descriptors = Object.getOwnPropertyDescriptors(_);
-    const data = filterObject(descriptors as Record<PropertyKey, PropertyDescriptor>, ([K, V]) => V.value); // should filter out getters (for now - TODO: decorators to opt-in getters)
+    const data = mapObject(descriptors as Record<PropertyKey, PropertyDescriptor>, ([K, V]) => V.value, ([K, V]) => ([K, V.value])  ); // should filter out getters (for now - TODO: decorators to opt-in getters)
     console.log(`getData(): _=${nodeUtil.inspect(_)} descriptors=${nodeUtil.inspect(descriptors)} data=${nodeUtil.inspect(data)}`);
     return data as Partial<A>;
 }
