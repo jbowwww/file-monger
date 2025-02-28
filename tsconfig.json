@@ -9,8 +9,7 @@
         "rootDir": "src",
         "outDir": "dist/",
         "allowSyntheticDefaultImports": true,
-        "experimentalDecorators": true,
-        "emitDecoratorMetadata": true,
+        "lib": [ "esnext.decorators" ],
     },
     "include": [
         "src/"

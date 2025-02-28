@@ -3,36 +3,57 @@ import { globalOptions } from "../cli";
 import { Task } from "../task";
 import { MongoStorage, Query, updateResultToString } from "../db";
 import { Artefact, ArtefactStaticExtensionQueries, DiscriminatedModel, QueryableArtefact } from '../models';
-import { Entry, walk, Hash, EntryType } from "../models/file-system";
+import { Entry, walk, Hash, EntryType, Unknown, File, Directory } from "../models/file-system";
 import exitHook from "async-exit-hook";
 import { Audio } from "../models/audio";
 import * as nodeUtil from "node:util";
 import { ChangeStreamUpdateDocument, Filter, MongoError } from "mongodb";
 import { ArtefactStaticQueries } from '../models/index';
 
-export type FileSystemArtefact = Artefact<{ _E?: Array<Error | string | object>; Entry: Entry; _T: string; } & Partial<DiscriminatedModel<Entry>> & { Hash?: Hash; } /* & { prototype: {
+// function exclude(target: undefined, context: ClassFieldDecoratorContext<FSA, Entry> & { name: "entry"; private: false; static: false; }): void | ((this: FSA, value: Entry) => Entry) {
+//     context.metadata[context.name] = { exclude: true };
+// }
+
+// export class FSA {
+//     file: File | undefined;
+//     directory?: Directory;
+//     unknown?: Unknown;
+//     @exclude entry: Entry;
+//     static create(entry: Entry) {
+
+//     }
+//     constructor(entry: Entry) {
+//         this.entry = entry;
+//     }
+// };
+
+export type FileSystemArtefact = Artefact<{ Entry: Entry; _T: string; } & Partial<DiscriminatedModel<Entry>> & { Hash?: Hash; } /* & { prototype: {
     byPath(_: FileSystemArtefact): Filter<FileSystemArtefact>;
     byIdOrPath(_: FileSystemArtefact): Filter<FileSystemArtefact>;
-} } */>;
+} }*/ >;
 export const FileSystemArtefact =
-    Artefact <
-        FileSystemArtefact,
+    Artefact<
+    FileSystemArtefact,     //{ Entry: Entry; _T: string; } & Partial<DiscriminatedModel<Entry>> & { Hash?: Hash; },
         [Entry], {
-            byPath(_: FileSystemArtefact): Filter<FileSystemArtefact>;
-            byIdOrPath(_: FileSystemArtefact): Filter<FileSystemArtefact>;
+            
+        }, {
+            byPath: (_: FileSystemArtefact) => Filter<FileSystemArtefact>;
+            byIdOrPath: (_: FileSystemArtefact) => Filter<FileSystemArtefact>
         }
     >(
         <E extends Entry>(e: E) => ({
             get Entry() { return e; },
             get _T() { return e._T; },
             [e._T]: e,
-        }) as FileSystemArtefact, {
+        }), {
+
+        }, {
         byPath(_) {
             return (
                 _.File       ? { "File.path":        { $eq: _.File!.path }      } :
                 _.Directory  ? { "Directory.path" :  { $eq: _.Directory!.path } } :
                 _.Unknown    ? { "Unknown.path":     { $eq: _.Unknown!.path   } } :
-            {}) as Filter<Artefact.WithId<FileSystemArtefact>>;
+            {});
         },
         byIdOrPath(_) {
             return _._id ? Artefact.Query.byId(_) : this.byPath(_);
@@ -77,12 +98,12 @@ export const builder = (yargs: yargs.Argv) => yargs
                         for (const path of argv.paths) {
                             for await (const _ of FileSystemArtefact.stream(walk({ path, progress: task.progress }))) {
                                 try {
-                                    console.log(`_=${nodeUtil.inspect(_)} _.Query=${Object.entries(_.Query).map(([K, V]) => ""+ K + ":" + nodeUtil.inspect(V)+V.toString()).join("\n")}`);
+                                    console.log(`_=${nodeUtil.inspect(_)} _.Query=${Object.entries(FileSystemArtefact.Query).map(([K, V]) => ""+ K + ":" + nodeUtil.inspect(V)+V.toString()).join("\n")}`);
                                     const result = await store.updateOrCreate(_, FileSystemArtefact.Query.byPath(_));
                                     console.log(`result=${/* updateResultToString */nodeUtil.inspect(result)} task.progress=${task.progress}`);
                                 } catch (e) {
-                                    const error = new Error(_.Entry?.path, { cause: e });
-                                    console.error(error);
+                                    const error = new Error(_.Entry?.path);//, { cause: e });
+                                    console.error(`indexFileSystem: Error: _.Entry.path=${_.Entry?.path}: ${e}`);
                                     if (!(e instanceof MongoError)) {
                                         const result = await store.updateOne(FileSystemArtefact.Query.byIdOrPath(_), { $set: { [_._T!]: _[_._T as keyof FileSystemArtefact] }, $push: { _E: error } });
                                         task.warnings.push(error);
@@ -99,7 +120,7 @@ export const builder = (yargs: yargs.Argv) => yargs
 
                 async function hashFiles(task: Task) {
                     await Task.repeat({ preDelay: 3000, }, async () => {     // 3 seconds
-                        for await (const _ of FileSystemArtefact.stream(store.find({//.watch({
+                        for await (const _ of /* FileSystemArtefact.stream */(store.find({//.watch({
                             $and: [
                                 { File: { $exists: true } },
                                 { $or: [
@@ -115,7 +136,8 @@ export const builder = (yargs: yargs.Argv) => yargs
                                     console.log(`result=${/* updateResultToString */nodeUtil.inspect(result)} task.progress=${task.progress}`);
                                 }
                             } catch (e) {
-                                const error = new Error(`_._id=${_._id} _.Entry.path=${_.Entry?.path}`, { cause: e });
+                                const error = new Error(`_._id=${_._id} _.Entry.path=${_.Entry?.path}`);//, { cause: e });
+                                console.error(`hashFiles: Error: _._id=${_._id} _.Entry?.path=${_.Entry?.path}: ${e}`);
                                 if (!(e instanceof MongoError)) {
                                     const result = await store.updateOne(FileSystemArtefact.Query.byIdOrPath(_), { $set: { [EntryType.File as keyof FileSystemArtefact]: _.File }, $push: { _E: error } });
                                     task.warnings.push(error);
@@ -142,9 +164,23 @@ export const builder = (yargs: yargs.Argv) => yargs
                                 ]}
                             ]
                         }, { progress: task.progress })) {
-                            console.log(`_=${nodeUtil.inspect(_)} task.progress=${task.progress}`);
-                            const result = await store.updateOne(FileSystemArtefact.Query.byId(_), { $set: { Audio: await Audio(_.File!.path) } });
-                            console.log(`result=${updateResultToString(result)} task.progress=${task.progress}`);
+                            try {
+                                console.log(`_=${nodeUtil.inspect(_)} task.progress=${task.progress}`);
+                                const result = await store.updateOne(FileSystemArtefact.Query.byId(_), { $set: { Audio: await Audio(_.File!.path) } });
+                                console.log(`result=${updateResultToString(result)} task.progress=${task.progress}`);
+                            } catch (e) {
+                                const error = new Error(`_._id=${_._id} _.Entry.path=${_.Entry?.path} ${e}`);//, { cause: e });
+                                console.error(`hashFiles: Error: _._id=${_._id} _.Entry?.path=${_.Entry?.path}: ${e}`);
+                                if (!(e instanceof MongoError)) {
+                                    const result = await store.updateOne(FileSystemArtefact.Query.byIdOrPath(_), { $set: { [EntryType.File as keyof FileSystemArtefact]: _.File }, $push: { _E: error } });
+                                    task.warnings.push(error);
+                                    console.warn(error);
+                                } else {
+                                    task.errors.push(error);
+                                    console.error(error);
+                                }
+                                throw error;
+                            }
                         }
                     });
                 },
