@@ -48,12 +48,21 @@ export type AspectFn<A extends Aspect<any> = Aspect<any>> = (...args: any[]) => 
 export type Timestamped<T> = { _ts: Date; } & T;
 
 export abstract class Artefact {
+    declare prototype: Artefact & { constructor: typeof Artefact; };
+
     _id?: string;
     _E?: Array<unknown>;
+
+    constructor(data?: Partial<Artefact>) {
+        this._id = data?._id;
+        this._E = data?._E;
+        // this.Query = mapObject(Artefact.Query, ([K, V]) => ([K, V(this)])) as ArtefactInstanceQueries<Artefact, {}>;
+    }
+
     static Query: ArtefactStaticQueries<Artefact> = {
         byId: <A extends Artefact>(_: Artefact) => ({ "_id": _._id }) as Filter<A>,
     }
-    Query: ArtefactInstanceQueries<Artefact, {}> = mapObject(Artefact.Query, ([K, V]) => ([K, V(this)])) as ArtefactInstanceQueries<Artefact, {}>;
+    get Query(): ArtefactInstanceQueries<Artefact, {}> { return mapObject(this.prototype.constructor.Query, ([K, V]) => ([K, V(this)])) as ArtefactInstanceQueries<Artefact, {}>; }
 
     static async* stream<I, A extends Artefact>(this: Constructor<A>, source: AsyncIterable<I>, transform?: (...args: [I]) => A) {
         for await (const item of source) {
@@ -71,8 +80,6 @@ export type QueryableArtefact<
 > = A & {
     Query: ArtefactInstanceQueries<A, Q>;
 };
-// export namespace Artefact {
-// }
 
 export type ArtefactFn<
     A extends Artefact/*  = Artefact */,

@@ -253,7 +253,7 @@ export class MongoStore<A extends Artefact> implements Store<A> {
         if (oldArtefact !== null && !artefact._id) {
             artefact._id = oldArtefact._id;
         }
-        const updates = getUpdates(oldArtefact ?? {} as A, getData(artefact));
+        const updates = getUpdates(oldArtefact ?? {} as A, /* getData */(artefact));
         let update = { $set: { ...updates.update }, ...(options.unsetUndefineds ? { $unset: updates.undefineds } : {}) } as UpdateFilter<A>;
         if (Object.keys(updates.update).filter(u => u !== "_id").length > 0) {
             if (oldArtefact !== null) {
