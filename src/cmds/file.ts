@@ -44,13 +44,16 @@ export class FileSystemArtefact extends Artefact {
     }
     
     static {
-        this.Query.byPath = (_) => (
-            _.File       ? { "File.path":        { $eq: _.File!.path }      } :
-            _.Directory  ? { "Directory.path" :  { $eq: _.Directory!.path } } :
-            _.Unknown    ? { "Unknown.path":     { $eq: _.Unknown!.path   } } :
-            {}
-        );
-        this.Query.byIdOrPath = (_) => _._id ? this.Query.byId(_) : this.Query.byPath(_);
+        this.Query = {
+            ...Artefact.Query,
+            byPath: (_) => (
+                _.File       ? { "File.path":        { $eq: _.File!.path }      } :
+                _.Directory  ? { "Directory.path" :  { $eq: _.Directory!.path } } :
+                _.Unknown    ? { "Unknown.path":     { $eq: _.Unknown!.path   } } :
+                {}
+            ),
+            byIdOrPath: (_) => _._id ? this.Query.byId(_) : this.Query.byPath(_),
+        };
     }
 }
 
@@ -114,7 +117,7 @@ export const builder = (yargs: yargs.Argv) => yargs
 
                 async function hashFiles(task: Task) {
                     await Task.repeat({ preDelay: 3000, }, async () => {     // 3 seconds
-                        for await (const _ of /* FileSystemArtefact.stream */(store.find({//.watch({
+                        for await (const _ of FileSystemArtefact.stream(store.find({//.watch({
                             $and: [
                                 { File: { $exists: true } },
                                 { $or: [
@@ -148,7 +151,7 @@ export const builder = (yargs: yargs.Argv) => yargs
 
                 async function analyzeAudioFiles(task: Task) {
                     await Task.repeat({ preDelay: 3000, }, async () => {     // 3 seconds
-                        for await (const _ of store.find({
+                        for await (const _ of FileSystemArtefact.stream(store.find({
                             $and: [
                                 { File: { $exists: true } },
                                 { $or: Audio.fileExtensions.map(ext => ({ "File.path": { $regex: "\^.*\\." + ext, $options: "i" } })) },
@@ -157,7 +160,7 @@ export const builder = (yargs: yargs.Argv) => yargs
                                     { "Audio._ts": { $lt: "$File.stats.mtime" } }
                                 ]}
                             ]
-                        }, { progress: task.progress })) {
+                        }, { progress: task.progress }))) {
                             try {
                                 console.log(`_=${nodeUtil.inspect(_)} task.progress=${task.progress}`);
                                 const result = await store.updateOne(FileSystemArtefact.Query.byId(_), { $set: { Audio: await Audio(_.File!.path) } });
