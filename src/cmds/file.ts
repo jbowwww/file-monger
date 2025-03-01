@@ -2,63 +2,57 @@ import yargs from "yargs";
 import { globalOptions } from "../cli";
 import { Task } from "../task";
 import { MongoStorage, Query, updateResultToString } from "../db";
-import { Artefact, ArtefactStaticExtensionQueries, DiscriminatedModel, QueryableArtefact } from '../models';
-import { Entry, walk, Hash, EntryType, Unknown, File, Directory } from "../models/file-system";
+import { Artefact, ArtefactStaticExtensionQueries, DiscriminatedModel, isAspect, QueryableArtefact } from '../models';
+import { Entry, walk, Hash, EntryType, Unknown, File, Directory } from '../models/file-system';
 import exitHook from "async-exit-hook";
 import { Audio } from "../models/audio";
 import * as nodeUtil from "node:util";
 import { ChangeStreamUpdateDocument, Filter, MongoError } from "mongodb";
 import { ArtefactStaticQueries } from '../models/index';
 
-// function exclude(target: undefined, context: ClassFieldDecoratorContext<FSA, Entry> & { name: "entry"; private: false; static: false; }): void | ((this: FSA, value: Entry) => Entry) {
+// function exclude<A extends Artefact, V>(
+//     target: any,
+//     context: /* ClassFieldDecoratorContext */ClassGetterDecoratorContext<A, V> & { name: string; private: false; static: false; }): void | ((/* this: FileSystemArtefact, value: V */) => V
+// ) {
 //     context.metadata[context.name] = { exclude: true };
 // }
 
-// export class FSA {
-//     file: File | undefined;
-//     directory?: Directory;
-//     unknown?: Unknown;
-//     @exclude entry: Entry;
-//     static create(entry: Entry) {
+export class FileSystemArtefact extends Artefact {
+    // @exclude
+    get Entry(): Entry { return (this.File ?? this.Directory ?? this.Unknown) as Entry; };
+    File?: File;
+    Directory?: Directory;
+    Unknown?: Unknown;
+    Hash?: Hash;
 
-//     }
-//     constructor(entry: Entry) {
-//         this.entry = entry;
-//     }
-// };
+    static Query: ArtefactStaticQueries<Artefact> & ArtefactStaticExtensionQueries<FileSystemArtefact>;
 
-export type FileSystemArtefact = Artefact<{ Entry: Entry; _T: string; } & Partial<DiscriminatedModel<Entry>> & { Hash?: Hash; } /* & { prototype: {
-    byPath(_: FileSystemArtefact): Filter<FileSystemArtefact>;
-    byIdOrPath(_: FileSystemArtefact): Filter<FileSystemArtefact>;
-} }*/ >;
-export const FileSystemArtefact =
-    Artefact<
-    FileSystemArtefact,     //{ Entry: Entry; _T: string; } & Partial<DiscriminatedModel<Entry>> & { Hash?: Hash; },
-        [Entry], {
-            
-        }, {
-            byPath: (_: FileSystemArtefact) => Filter<FileSystemArtefact>;
-            byIdOrPath: (_: FileSystemArtefact) => Filter<FileSystemArtefact>
+    constructor(data: Partial<FileSystemArtefact> | Entry) {
+        super();
+        if (isAspect<Entry>(data)) {
+            switch (data._T) {
+                case EntryType.File: this[EntryType.File] = data; break;
+                case EntryType.Directory: this[EntryType.Directory] = data; break;
+                case EntryType.Unknown: this[EntryType.Unknown] = data; break;
+                default: throw new TypeError(`FileSystemArtefact.ctor(): Unknown data._T, data=${nodeUtil.inspect(data)}`); break;                
+            }
+        } else {
+            this.File = data.File;
+            this.Directory = data.Directory;
+            this.Unknown = data.Unknown;
         }
-    >(
-        <E extends Entry>(e: E) => ({
-            get Entry() { return e; },
-            get _T() { return e._T; },
-            [e._T]: e,
-        }), {
-
-        }, {
-        byPath(_) {
-            return (
-                _.File       ? { "File.path":        { $eq: _.File!.path }      } :
-                _.Directory  ? { "Directory.path" :  { $eq: _.Directory!.path } } :
-                _.Unknown    ? { "Unknown.path":     { $eq: _.Unknown!.path   } } :
-            {});
-        },
-        byIdOrPath(_) {
-            return _._id ? Artefact.Query.byId(_) : this.byPath(_);
-        }
-    });// as ArtefactFn<FileSystemArtefact, [Entry], >;
+    }
+    
+    static {
+        this.Query.byPath = (_) => (
+            _.File       ? { "File.path":        { $eq: _.File!.path }      } :
+            _.Directory  ? { "Directory.path" :  { $eq: _.Directory!.path } } :
+            _.Unknown    ? { "Unknown.path":     { $eq: _.Unknown!.path   } } :
+            {}
+        );
+        this.Query.byIdOrPath = (_) => _._id ? this.Query.byId(_) : this.Query.byPath(_);
+    }
+}
 
 export const command = 'file';
 export const description = 'File commands';
@@ -105,7 +99,7 @@ export const builder = (yargs: yargs.Argv) => yargs
                                     const error = new Error(_.Entry?.path);//, { cause: e });
                                     console.error(`indexFileSystem: Error: _.Entry.path=${_.Entry?.path}: ${e}`);
                                     if (!(e instanceof MongoError)) {
-                                        const result = await store.updateOne(FileSystemArtefact.Query.byIdOrPath(_), { $set: { [_._T!]: _[_._T as keyof FileSystemArtefact] }, $push: { _E: error } });
+                                        const result = await store.updateOne(FileSystemArtefact.Query.byIdOrPath(_), { $set: { [_.Entry._T!]: _[_.Entry._T] }, $push: { _E: error } });
                                         task.warnings.push(error);
                                     } else {
                                         task.errors.push(error);

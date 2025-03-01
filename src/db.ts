@@ -239,7 +239,7 @@ export class MongoStore<A extends Artefact> implements Store<A> {
         }, options);
     }
 
-    async updateOrCreate(artefact: QueryableArtefact<A>, query?: Filter<A>, options: UpdateOptions & UpdateOrCreateOptions = {}): Promise<UpdateOrCreateResult<A>> {
+    async updateOrCreate(artefact:/*  QueryableArtefact< */A/* > */, query?: Filter<A>, options: UpdateOptions & UpdateOrCreateOptions = {}): Promise<UpdateOrCreateResult<A>> {
         options = { ...options, upsert: true, ignoreUndefined: true }; //, includeResultMetadata: true, returnDocument: 'after', */ };
         if (artefact._id) {
             const keys = Object.keys(artefact);
