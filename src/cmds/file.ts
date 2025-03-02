@@ -1,13 +1,13 @@
 import yargs from "yargs";
 import { globalOptions } from "../cli";
 import { Task } from "../task";
-import { MongoStorage, Query, Store, updateResultToString } from "../db";
-import { Artefact, ArtefactInstanceQueries, ArtefactStaticExtensionQueries, DiscriminatedModel, isAspect, QueryableArtefact } from '../models';
+import { MongoStorage, Store } from "../db";
+import { Artefact, ArtefactStaticExtensionQueries, isAspect } from '../models';
 import { Entry, walk, Hash, EntryType, Unknown, File, Directory } from '../models/file-system';
 import exitHook from "async-exit-hook";
 import { Audio } from "../models/audio";
 import * as nodeUtil from "node:util";
-import { ChangeStreamUpdateDocument, Filter, MongoError } from "mongodb";
+import { MongoError } from "mongodb";
 import { ArtefactStaticQueries } from '../models/index';
 
 // function exclude<A extends Artefact, V>(
@@ -95,7 +95,7 @@ export const builder = (yargs: yargs.Argv) => yargs
                             for await (const _ of FileSystemArtefact.stream(walk({ path, progress: task.progress }))) {
                                 try {
                                     const result = await store.updateOrCreate(_, FileSystemArtefact.Query.byPath(_));
-                                    console.log(`${task.name}: result=${/* updateResultToString */nodeUtil.inspect(result, false, 2)}\n${task.name}: task.progress=${task.progress}`);
+                                    console.log(`${task.name}: result=${/* updateResultToString */nodeUtil.inspect(result, false, 3)}\n${task.name}: task.progress=${task.progress}`);
                                 } catch (e: any) {
                                     handleError(e, task, _, store);
                                 }
@@ -119,7 +119,7 @@ export const builder = (yargs: yargs.Argv) => yargs
                                 console.log(`${task.name}: _=${nodeUtil.inspect(_, false, 1)}`);
                                 if (_.File) {
                                     const result = await store.updateOne(FileSystemArtefact.Query.byId(_), { $set: { Hash: await Hash(_.File.path) } });
-                                    console.log(`${task.name}: result=${/* updateResultToString */nodeUtil.inspect(result, false, 2)}\n${task.name}: task.progress=${task.progress}`);
+                                    console.log(`${task.name}: result=${/* updateResultToString */nodeUtil.inspect(result, false, 3)}\n${task.name}: task.progress=${task.progress}`);
                                 }
                             } catch (e: any) {
                                 handleError(e, task, _, store);
@@ -143,7 +143,7 @@ export const builder = (yargs: yargs.Argv) => yargs
                             try {
                                 console.log(`${task.name}: _=${nodeUtil.inspect(_, false, 1)}`);
                                 const result = await store.updateOne(FileSystemArtefact.Query.byId(_), { $set: { Audio: await Audio(_.File!.path) } });
-                                console.log(`${task.name}: result=${/* updateResultToString */nodeUtil.inspect(result, false, 1)}\n${task.name}: task.progress=${task.progress}`);
+                                console.log(`${task.name}: result=${/* updateResultToString */nodeUtil.inspect(result, false, 3)}\n${task.name}: task.progress=${task.progress}`);
                             } catch (e: any) {
                                 handleError(e, task, _, store);
                             }
