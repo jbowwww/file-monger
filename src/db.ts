@@ -1,10 +1,10 @@
 import * as nodeUtil from "node:util";
 import { isDate } from "node:util/types";
-import { AnyBulkWriteOperation, BulkWriteOptions, BulkWriteResult, ChangeStream, ChangeStreamOptions, ChangeStreamDocument, ChangeStreamInsertDocument, ChangeStreamUpdateDocument, Collection, CollectionOptions, CountOptions, Db, Document, Filter, FindOneAndUpdateOptions, FindOptions, ModifyResult, MongoClient, MongoClientOptions, MongoError, OrderedBulkOperation, UpdateFilter, UpdateOptions, UpdateResult, WithId, IndexSpecification, CreateIndexesOptions } from "mongodb";
+import { AnyBulkWriteOperation, BulkWriteOptions, BulkWriteResult, ChangeStreamOptions, ChangeStreamDocument, ChangeStreamInsertDocument, ChangeStreamUpdateDocument, Collection, CollectionOptions, CountOptions, Db, Document, Filter, FindOneAndUpdateOptions, FindOptions, MongoClient, MongoError, UpdateFilter, UpdateOptions, UpdateResult, WithId, IndexSpecification, CreateIndexesOptions, ObjectId } from "mongodb";
 import { diff } from "deep-object-diff";
-import { Artefact, Aspect, AspectFn, Constructor, filterObject, isAspect, mapObject, QueryableArtefact } from "./models";
-import { AsyncFunction, buildObjectWithKeys, getKeysOfUndefinedValues, enumerable } from './utility';
-import { cargo, isAsyncGenerator, pipe } from "./pipeline";
+import { Artefact, mapObject } from "./models";
+import { AsyncFunction } from './utility';
+import { cargo } from "./pipeline";
 import { get } from "./prop-path";
 import { Progress } from "./progress";
 
@@ -61,7 +61,7 @@ export class MongoStorage implements Storage {
         await this.connect();
         process.stdout.write(`Getting store '${name} ${options !== undefined ? ("options=" + JSON.stringify(options)) : ""} ... `);
         const collection = this._db!.collection<A>(name, options);
-        const store = new MongoStore<A>(this as Storage, name, collection, options);
+        const store = new MongoStore<A>(this, name, collection, options);
         process.stdout.write("OK\n");
         return store;
     }
@@ -135,8 +135,7 @@ export const getUpdates = (original: any, updated?: any) => {
 
 function getData<A extends Artefact>(_: A): Partial<A> {
     const descriptors = Object.getOwnPropertyDescriptors(_);
-    const data = mapObject(descriptors as Record<PropertyKey, PropertyDescriptor>, ([K, V]) => V.value, ([K, V]) => ([K, V.value])  ); // should filter out getters (for now - TODO: decorators to opt-in getters)
-    console.log(`getData(): _=${nodeUtil.inspect(_)} descriptors=${nodeUtil.inspect(descriptors)} data=${nodeUtil.inspect(data)}`);
+    const data = mapObject(descriptors as Record<PropertyKey, PropertyDescriptor>, ([K, V]) => V.value, ([K, V]) => ([K as string, V.value])  ); // should filter out getters (for now - TODO: decorators to opt-in getters)
     return data as Partial<A>;
 }
 
@@ -184,7 +183,7 @@ export interface Store<A extends Artefact> {
 export class MongoStore<A extends Artefact> implements Store<A> {
 
     constructor(
-        public readonly storage: Storage,
+        public readonly storage: MongoStorage,
         public readonly name: string,
         public readonly collection: Collection<A>,
         options: MongoStoreOptions = {}
@@ -240,7 +239,7 @@ export class MongoStore<A extends Artefact> implements Store<A> {
     }
 
     async updateOrCreate(artefact:/*  QueryableArtefact< */A/* > */, query?: Filter<A>, options: UpdateOptions & UpdateOrCreateOptions = {}): Promise<UpdateOrCreateResult<A>> {
-        options = { ...options, upsert: true, ignoreUndefined: true }; //, includeResultMetadata: true, returnDocument: 'after', */ };
+        options = { ...options, upsert: true }; //, ignoreUndefined: true, includeResultMetadata: true, returnDocument: 'after', */ };
         if (artefact._id) {
             const keys = Object.keys(artefact);
             if (keys.length !== 1 || keys[0] !== "_id") {
@@ -253,7 +252,7 @@ export class MongoStore<A extends Artefact> implements Store<A> {
         if (oldArtefact !== null && !artefact._id) {
             artefact._id = oldArtefact._id;
         }
-        const updates = getUpdates(oldArtefact ?? {} as A, /* getData */(artefact));
+        const updates = getUpdates(oldArtefact ?? {} as A, getData(artefact));
         let update = { $set: { ...updates.update }, ...(options.unsetUndefineds ? { $unset: updates.undefineds } : {}) } as UpdateFilter<A>;
         if (Object.keys(updates.update).filter(u => u !== "_id").length > 0) {
             if (oldArtefact !== null) {
@@ -304,18 +303,3 @@ export class MongoStore<A extends Artefact> implements Store<A> {
         /* return */yield* this.collection.watch([{ $match: query }], options);
     }
 }
-
-
-// export type Query<A extends Aspect = Aspect> = ({ [K: string]: (...args: any[]) => ({ [K: string]: Filter<A>; }) });
-// export const Query = Object.assign(
-//     <A extends Aspect>(aspectOrAspectFn: A | AspectFn<A>, path?: string): Query<A> => {
-//         const propertyDottedName = (isAspect(aspectOrAspectFn) ? aspectOrAspectFn._T : aspectOrAspectFn.name).toString() + (path ? "." + path : "");
-//         return ({
-//             exists: (exists: boolean = true) => ({ [propertyDottedName]: { $exists: exists } }),
-//             equals: (value?: any) => ({ [propertyDottedName]: { $eq: value ?? isAspect(aspectOrAspectFn) ? get(aspectOrAspectFn, path!) : value } }),   // not sure this one's right
-//         });
-//     },
-//     {
-//         and: (...conditions: (Filter<Document>)[]) => ({ $and: conditions }),
-//         or: (...conditions: (Filter<Document>)[]) => ({ $or: conditions }),
-//     });

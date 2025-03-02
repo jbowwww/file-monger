@@ -48,7 +48,7 @@ export abstract class Artefact {
             ([K, V]) => ([K, () => ([K, V(this)])]));
     }
 
-    static Query: ArtefactStaticQueries<Artefact> = {
+    static Query: ArtefactStaticQueries<Artefact, {}> = {
         byId: <A extends Artefact>(_: Artefact) => ({ "_id": _._id }) as Filter<A>,
     }
 
@@ -82,7 +82,7 @@ export type ArtefactStaticExtensionQueries<A extends Artefact> = {
 export type ArtefactInstanceExtensionQueries<A extends Artefact> = {
     [K: string]: ArtefactInstanceQueryFn<A>;
 };
-export type ArtefactStaticQueries<A extends Artefact = Artefact, Q extends ArtefactStaticExtensionQueries<A> = {}> = Q & {
+export type ArtefactStaticQueries<A extends Artefact, Q extends ArtefactStaticExtensionQueries<A>> = Q & {
     byId: ArtefactStaticQueryFn<A>;
 };
 export type ArtefactInstanceQueries<A extends Artefact, Q extends ArtefactStaticExtensionQueries<A>> = {

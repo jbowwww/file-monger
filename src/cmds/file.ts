@@ -7,7 +7,7 @@ import { Entry, walk, Hash, EntryType, Unknown, File, Directory } from '../model
 import exitHook from "async-exit-hook";
 import { Audio } from "../models/audio";
 import * as nodeUtil from "node:util";
-import { MongoError } from "mongodb";
+import { Filter, MongoError } from "mongodb";
 import { ArtefactStaticQueries } from '../models/index';
 
 // function exclude<A extends Artefact, V>(
@@ -44,15 +44,15 @@ export class FileSystemArtefact extends Artefact {
     
     // Queries defined in this static member also get copied to the instance prototype, currying the parameter with this
     // So if your instance variable is _, queries will be available like e.g. _.Query.byPath() and it will use the path value of this instance
-    static Query: ArtefactStaticQueries<Artefact> & ArtefactStaticExtensionQueries<FileSystemArtefact> = {
+    static Query = {
         ...Artefact.Query,
-        byPath: (_) => (
+        byPath: (_: FileSystemArtefact) => (
             _.File       ? { "File.path":        { $eq: _.File!.path }      } :
             _.Directory  ? { "Directory.path" :  { $eq: _.Directory!.path } } :
             _.Unknown    ? { "Unknown.path":     { $eq: _.Unknown!.path   } } :
             {}
-        ),
-        byIdOrPath: (_) => _._id ? this.Query.byId(_) : this.Query.byPath(_),
+        ) as Filter<FileSystemArtefact>,
+        byIdOrPath: (_: FileSystemArtefact) => _._id ? this.Query.byId(_) : this.Query.byPath(_) as Filter<FileSystemArtefact>,
     };
 }
 
