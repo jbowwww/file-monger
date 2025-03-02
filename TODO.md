@@ -7,12 +7,15 @@
 - [X] Decide whether you w want to diff each _ Artefact before update(), or do you just want to $set specific properties?
   - This might lend itself better to slicing the Artefact computations into tasks by avoiding a need to findOne() first
 - [ ] Modify db methods to use Artefact.toData()
-  - [ ] toData() should remove undefined's and null's
+  - [ ] toData() should remove undefined's and null's - does it already? i think so
   - [ ] maybe include optional parameter original?: A , if supplied, calculates a diff and only updates with that
   - [ ] Review use of $set and otherr update operators
     - [ ] Should toData() include them or leave to the DB fn's ?
-- [ ] Try watch() again - looks like can't use for await, need to use cursor.next() (and hasNext())
+- [ ] Implement Disks, Partitions and populate
+  - [ ] Should be referenced by all FS entries, and be part of the index (partition UUID ? )
+  - [ ] FS entry paths should be relative to their partition? to neutralise effects of possibly changing mount points of same disk?
 - [ ] Modules can define queries for use in main program, possibly actions (task inner fn's) too
+- [ ] Try watch() again - looks like can't use for await, need to use cursor.next() (and hasNext())
 - [ ] Possibly consider (again) defining schema with object literal with values that are Ctor&ltAspect&gt, AspectFn<>, or primitive
   - [ ] When reading from DB, methods will have to traverse the object and call schema's fn's for each property with the values from DB
     - [ ] Artefact.stream() might be a good place for this
