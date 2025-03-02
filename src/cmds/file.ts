@@ -1,7 +1,7 @@
 import yargs from "yargs";
 import { globalOptions } from "../cli";
 import { Task } from "../task";
-import { MongoStorage, Query, updateResultToString } from "../db";
+import { MongoStorage, Query, Store, updateResultToString } from "../db";
 import { Artefact, ArtefactInstanceQueries, ArtefactStaticExtensionQueries, DiscriminatedModel, isAspect, QueryableArtefact } from '../models';
 import { Entry, walk, Hash, EntryType, Unknown, File, Directory } from '../models/file-system';
 import exitHook from "async-exit-hook";
@@ -42,20 +42,18 @@ export class FileSystemArtefact extends Artefact {
         }
     }
     
-    static Query: ArtefactStaticQueries<Artefact> & ArtefactStaticExtensionQueries<FileSystemArtefact>;
-    static {
-        this.Query = {
-            ...Artefact.Query,
-            byPath: (_) => (
-                _.File       ? { "File.path":        { $eq: _.File!.path }      } :
-                _.Directory  ? { "Directory.path" :  { $eq: _.Directory!.path } } :
-                _.Unknown    ? { "Unknown.path":     { $eq: _.Unknown!.path   } } :
-                {}
-            ),
-            byIdOrPath: (_) => _._id ? this.Query.byId(_) : this.Query.byPath(_),
-        };
-    }
-    // Query: ArtefactInstanceQueries<FileSystemArtefact, typeof this.prototype.constructor.Query>;
+    // Queries defined in this static member also get copied to the instance prototype, currying the parameter with this
+    // So if your instance variable is _, queries will be available like e.g. _.Query.byPath() and it will use the path value of this instance
+    static Query: ArtefactStaticQueries<Artefact> & ArtefactStaticExtensionQueries<FileSystemArtefact> = {
+        ...Artefact.Query,
+        byPath: (_) => (
+            _.File       ? { "File.path":        { $eq: _.File!.path }      } :
+            _.Directory  ? { "Directory.path" :  { $eq: _.Directory!.path } } :
+            _.Unknown    ? { "Unknown.path":     { $eq: _.Unknown!.path   } } :
+            {}
+        ),
+        byIdOrPath: (_) => _._id ? this.Query.byId(_) : this.Query.byPath(_),
+    };
 }
 
 export const command = 'file';
@@ -96,21 +94,10 @@ export const builder = (yargs: yargs.Argv) => yargs
                         for (const path of argv.paths) {
                             for await (const _ of FileSystemArtefact.stream(walk({ path, progress: task.progress }))) {
                                 try {
-                                    console.log(`${task.name}: _=${nodeUtil.inspect(_)}`);
                                     const result = await store.updateOrCreate(_, FileSystemArtefact.Query.byPath(_));
-                                    console.log(`${task.name}: result=${/* updateResultToString */nodeUtil.inspect(result, false, 1)}\n${task.name}: task.progress=${task.progress}`);
+                                    console.log(`${task.name}: result=${/* updateResultToString */nodeUtil.inspect(result, false, 2)}\n${task.name}: task.progress=${task.progress}`);
                                 } catch (e: any) {
-                                    const error = Object.assign(new Error(`${task.name}: _=${nodeUtil.inspect(_, false, 1)}\n${e.stack}`), { /* cause: e, stack: e.stack */ });
-                                    if (!(e instanceof MongoError)) {
-                                        const result = await store.updateOne(FileSystemArtefact.Query.byIdOrPath(_), { $set: { [_.Entry._T!]: _[_.Entry._T] }, $push: { _E: error } });
-                                        task.warnings.push(error);
-                                        console.warn(error);
-                                    } else {
-                                        task.errors.push(error);
-                                        console.error(error);
-                                        throw error;
-                                    }
-                                    continue;
+                                    handleError(e, task, _, store);
                                 }
                             }
                         }
@@ -129,23 +116,13 @@ export const builder = (yargs: yargs.Argv) => yargs
                             ]
                         }, { progress: task.progress }))) {
                             try {
-                                console.log(`${task.name}: _=${nodeUtil.inspect(_)}`);
+                                console.log(`${task.name}: _=${nodeUtil.inspect(_, false, 1)}`);
                                 if (_.File) {
                                     const result = await store.updateOne(FileSystemArtefact.Query.byId(_), { $set: { Hash: await Hash(_.File.path) } });
-                                    console.log(`${task.name}: result=${/* updateResultToString */nodeUtil.inspect(result, false, 1)}\n${task.name}: task.progress=${task.progress}`);
+                                    console.log(`${task.name}: result=${/* updateResultToString */nodeUtil.inspect(result, false, 2)}\n${task.name}: task.progress=${task.progress}`);
                                 }
                             } catch (e: any) {
-                                const error = Object.assign(new Error(`${task.name}: _=${nodeUtil.inspect(_, false, 1)}\n${e.stack}`), { /* cause: e, stack: e.stack */ });
-                                if (!(e instanceof MongoError)) {
-                                    const result = await store.updateOne(FileSystemArtefact.Query.byIdOrPath(_), { $set: { File: _.File }, $push: { _E: error } });
-                                    task.warnings.push(error);
-                                    console.warn(error);
-                                } else {
-                                    task.errors.push(error);
-                                    console.error(error);
-                                    throw error;
-                                }
-                                continue;
+                                handleError(e, task, _, store);
                             }
                         }
                     });
@@ -164,21 +141,11 @@ export const builder = (yargs: yargs.Argv) => yargs
                             ]
                         }, { progress: task.progress }))) {
                             try {
-                                console.log(`${task.name}: _=${nodeUtil.inspect(_)} task.progress=${task.progress}`);
+                                console.log(`${task.name}: _=${nodeUtil.inspect(_, false, 1)}`);
                                 const result = await store.updateOne(FileSystemArtefact.Query.byId(_), { $set: { Audio: await Audio(_.File!.path) } });
                                 console.log(`${task.name}: result=${/* updateResultToString */nodeUtil.inspect(result, false, 1)}\n${task.name}: task.progress=${task.progress}`);
                             } catch (e: any) {
-                                const error = Object.assign(new Error(`${task.name}: _=${nodeUtil.inspect(_, false, 1)}\n${e.stack}`), { /* cause: e, stack: e.stack */ });
-                                if (!(e instanceof MongoError)) {
-                                    const result = await store.updateOne(FileSystemArtefact.Query.byIdOrPath(_), { $set: { File: _.File }, $push: { _E: error } });
-                                    task.warnings.push(error);
-                                    console.warn(error);
-                                } else {
-                                    task.errors.push(error);
-                                    console.error(error);
-                                    throw error;
-                                }
-                                continue;
+                                handleError(e, task, _, store);
                             }
                         }
                     });
@@ -188,3 +155,16 @@ export const builder = (yargs: yargs.Argv) => yargs
 
         }
     ).demandCommand();
+
+async function handleError(e: any, task: Task, _: FileSystemArtefact, store: Store<FileSystemArtefact>) {
+    const error = Object.assign(new Error(`${task.name}: _=${nodeUtil.inspect(_, false, 1)}\n${e.stack}`), { /* cause: e, stack: e.stack */ });
+    if (!(e instanceof MongoError)) {
+        const result = await store.updateOne(FileSystemArtefact.Query.byIdOrPath(_), { $set: { File: _.File }, $push: { _E: error } });
+        task.warnings.push(error);
+        console.warn(error);
+    } else {
+        task.errors.push(error);
+        console.error(error);
+        throw error;
+    }
+}
