@@ -32,7 +32,7 @@ export class MongoStorage implements Storage {
         return this._client !== null;
     }
 
-    async connect(): Promise<Storage> {
+    async connect(): Promise<MongoStorage> {
         if (this._client === null) {
             process.stdout.write(`Initialising DB connection to ${this.url} ${this.options !== undefined ? ("options=" + JSON.stringify(this.options)) : ""} ... `);
             this._client = new MongoClient(this.url, this.options);
@@ -40,10 +40,10 @@ export class MongoStorage implements Storage {
             this._db = this._connection.db();
             process.stdout.write("OK\n");
         }
-        return this as Storage;
+        return this;
     }
 
-    async close(): Promise<Storage> {
+    async close(): Promise<MongoStorage> {
         if (!!this._connection) {
             process.stdout.write(`close(): Closing DB connection to ${this.url} ... `);
             await this._connection.close();
@@ -54,7 +54,7 @@ export class MongoStorage implements Storage {
         } else {
             console.log(`close(): No DB connection to close`);
         }
-        return this as Storage;
+        return this;
     }
 
     async store<A extends Artefact>(name: string, options?: MongoStoreOptions): Promise<MongoStore<A>> {
@@ -142,14 +142,15 @@ function getData<A extends Artefact>(_: A): Partial<A> {
 export type UpdateOrCreateOptions = {
     unsetUndefineds?: boolean;
 };
-export type UpdateOrCreateResult<A extends Artefact> = {
+export type UpdateOneResult<A extends Artefact> = {
     didWrite: boolean;
     result?: UpdateResult<A>;
     query: Filter<A>;
-    update: UpdateFilter<A>;//Omit<Partial<A>, "_id">;
+    update: UpdateFilter<A>;
+};
+export type UpdateOrCreateResult<A extends Artefact> = UpdateOneResult<A> & {
     _: A;
 };
-
 export type ProgressOption = { progress?: Progress; };
 
 export type BulkWriterStore<A extends Artefact> = Store<A>;
@@ -172,7 +173,7 @@ export interface Store<A extends Artefact> {
     find(query: Filter<A>, options?: FindOptions & ProgressOption): AsyncGenerator<WithId<A>>;
     findOne(query: Filter<A>, options?: FindOptions): Promise<WithId<A> | null>;
     findOneAndUpdate(query: Filter<A>, update: UpdateFilter<A>, options?: FindOneAndUpdateOptions): Promise<WithId<A> | null>;
-    updateOne(query: Filter<A>, update: UpdateFilter<A>, options?: UpdateOptions): Promise<UpdateResult<A> | null>;
+    updateOne(query: Filter<A>, update: UpdateFilter<A>, options?: UpdateOptions): Promise<UpdateOneResult<A> | null>;
     updateOrCreate(artefact: A, query: Filter<A>, options?: UpdateOptions & UpdateOrCreateOptions): Promise<UpdateOrCreateResult<A>>;
     bulkWrite(operations: AnyBulkWriteOperation<A>[], options?: BulkWriteOptions & ProgressOption): Promise<BulkWriteResult>;
     bulkWriterFn(options?: BulkWriterOptions & ProgressOption): BulkWriterFn<A>;
@@ -228,14 +229,14 @@ export class MongoStore<A extends Artefact> implements Store<A> {
         return await this.collection.findOneAndUpdate(query, update, options);
     }
 
-    async updateOne(query: Filter<A>, update: UpdateFilter<A>, options: UpdateOptions = {}) {
-        console.debug(`updateOne(): query=${nodeUtil.inspect(query)} update=${nodeUtil.inspect(update)} options=${nodeUtil.inspect(options)}`);
-        return await this.collection.updateOne(query!, {
+    async updateOne(query: Filter<A>, update: UpdateFilter<A>, options: UpdateOptions = {}): Promise<UpdateOneResult<A>> {
+        const result = await this.collection.updateOne(query!, {
             // $set: {
             ...update as any/* TSchema */,
             // _ts: new Date(),
             // }
         }, options);
+        return { didWrite: !!result, result: result, query, update };
     }
 
     async updateOrCreate(artefact:/*  QueryableArtefact< */A/* > */, query?: Filter<A>, options: UpdateOptions & UpdateOrCreateOptions = {}): Promise<UpdateOrCreateResult<A>> {
