@@ -5,3 +5,4 @@ lib
 docker/data/db
 var-log-mongod-mongod-log
 etc-mongod-key
+.directory

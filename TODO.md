@@ -2,12 +2,22 @@
 
 ## Main tasks
 
-- [X] Somehow prevent indexFileSystem task from clearing the Hash values on _ when it's undefined
-  - [ ] Any logic here around invalidating the Hash when File.stats.mtime changes (or sinilar) ? Or just in the hashFiles task?
+- ~~Somehow prevent indexFileSystem task from clearing the Hash values on _ when it's undefined~~
+  - ~~**Any logic here around invalidating the Hash when File.stats.mtime changes (or sinilar) ? Or just in the hashFiles task?**~~
+    - [ ] Since historical hash values of files , and most likely other things, are potentially useful information (in the case of hash values - detecting reverted, duplicated, obsolete, etc file copies) - Am considering:
+      - [ ] modifying the main schema to store Entry-derived objects uniquely identified by path AND a DateTime.
+      - [ ] Could be better having only most current documents for each path in one collection (ie as it is now), and another collectiion for historical documents
+    - [ ] While doing the above, think I may also try a slightly different schema structure, where path and stats properties are directly members of FileSystemArtefact, and a discriminator property to (has been called _T so far)
+      - [ ] This may mean endingup with a base abstract FileSystemArtefact, and FileArtefact, DirectoryArtefact, UnknownArtefact classes
+        - [ ] Will still need a discriminator to use when retrieving from DB.
+        - [ ] Should still be a class ? Best argument for using class IMHO is it allows virtual properties in the form of getter properties.
+          - [ ] Currently toData only persists properties that are fields, or have both getters and setters
+            - [ ] Should not normally need to, but if explicit control is needed, should be able to override toData() and return an object literal
+          - [ ] Also convenient place to put (keep - already there) Queries
 - [X] Decide whether you w want to diff each _ Artefact before update(), or do you just want to $set specific properties?
   - This might lend itself better to slicing the Artefact computations into tasks by avoiding a need to findOne() first
-- [ ] Modify db methods to use Artefact.toData()
-  - [ ] toData() should remove undefined's and null's - does it already? i think so
+- [X] Modify db methods to use Artefact.toData()
+  - [X] toData() should remove undefined's and null's - does it already? i think so
   - [ ] maybe include optional parameter original?: A , if supplied, calculates a diff and only updates with that
   - [ ] Review use of $set and otherr update operators
     - [ ] Should toData() include them or leave to the DB fn's ?
@@ -29,6 +39,7 @@
   - [ ] Have a task.repeat instance method (reset to what?)
   - [ ] add a progress prefix string option to TaskOptions so can just supply that instead of a whole progress instance
 - [ ] Should Progress class implement an interface with the essential members, so users may implement their own ?
-- [ ] Implement a generic Options type / class to make things like TaskOpti
-- [ ] Implement an UpdateOneResult type similar to UpdateOrCreateResultons as easy, simple and terse as possible
+- [ ] Implement a generic Options type / class to make things like TaskOptions as easy, simple and terse as possible
   - [ ] include defaults in a const object and the type / shape of the options
+- [X] Implement an UpdateOneResult type similar to UpdateOrCreateResult
+- [ ] Spin out prop-path.ts to a module?
