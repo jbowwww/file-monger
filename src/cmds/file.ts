@@ -116,10 +116,9 @@ export const builder = (yargs: yargs.Argv) => yargs
                             ]
                         }, { progress: task.progress }))) {
                             try {
-                                console.log(`${task.name}:`);
                                 if (_.File) {
                                     const result = await store.updateOne(FileSystemArtefact.Query.byId(_), { $set: { Hash: await Hash(_.File.path) } });
-                                    console.log(`${task.name}: result=${/* updateResultToString */nodeUtil.inspect(result, false, 3)}\n _=${nodeUtil.inspect(_, false, 1)}\n${task.name}: task.progress=${task.progress}`);
+                                    console.log(`${task.name}: result=${/* updateResultToString */nodeUtil.inspect(result, false, 3)}\n{task.name}: _=${nodeUtil.inspect(_, false, 1)}\n${task.name}: task.progress=${task.progress}`);
                                 }
                             } catch (e: any) {
                                 handleError(e, task, _, store);
@@ -142,7 +141,7 @@ export const builder = (yargs: yargs.Argv) => yargs
                         }, { progress: task.progress }))) {
                             try {
                                 const result = await store.updateOne(FileSystemArtefact.Query.byId(_), { $set: { Audio: await Audio(_.File!.path) } });
-                                console.log(`${task.name}: result=${/* updateResultToString */nodeUtil.inspect(result, false, 3)}\n _=${nodeUtil.inspect(_, false, 1)}\n${task.name}: task.progress=${task.progress}\n`);
+                                console.log(`${task.name}: result=${/* updateResultToString */nodeUtil.inspect(result, false, 3)}\n{task.name}: _=${nodeUtil.inspect(_, false, 1)}\n${task.name}: task.progress=${task.progress}\n`);
                             } catch (e: any) {
                                 handleError(e, task, _, store);
                             }
@@ -156,14 +155,14 @@ export const builder = (yargs: yargs.Argv) => yargs
     ).demandCommand();
 
 async function handleError(e: any, task: Task, _: FileSystemArtefact, store: Store<FileSystemArtefact>) {
-    const error = Object.assign(new Error(`${task.name}: _=${nodeUtil.inspect(_, false, 1)}\n${e.stack}`), { /* cause: e, stack: e.stack */ });
+    // const error = Object.assign(e, { task: task });//new Error(`${task.name}: Error!\n_=${nodeUtil.inspect(_, false, 1)}\nError={e/* .stack */}`), { /* cause: e, stack: e.stack */ });
     if (!(e instanceof MongoError)) {
-        const result = await store.updateOne(FileSystemArtefact.Query.byIdOrPath(_), { $set: { File: _.File }, $push: { _E: e.message } });
-        task.warnings.push(error);
-        console.warn(error);
+        const result = await store.updateOne(FileSystemArtefact.Query.byIdOrPath(_), { $push: { _E: { _, e, } } });
+        task.warnings.push(e);
+        console.warn(`${task.name}: Warn! _=${nodeUtil.inspect(_, false, 3)} Error=${e}`);
     } else {
-        task.errors.push(error);
-        console.error(error);
-        throw error;
+        task.errors.push(e);
+        console.error(`${task.name}: Error! _=${nodeUtil.inspect(_, false, 3)} Error=${e}`);
+        throw e;
     }
 }
