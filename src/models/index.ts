@@ -1,6 +1,6 @@
 import { Filter } from "mongodb";
 import * as nodeUtil from 'node:util';
-import { diff } from "deep-object-diff";
+import { get } from "../prop-path";
 
 export type KeyValuePair<K extends PropertyKey = PropertyKey, V = unknown> = [K: K, V: V];
 export type FilterFn<T extends {}> = (kv: KeyValuePair<keyof T, T[keyof T]>) => boolean;
@@ -19,6 +19,32 @@ export function filterObject<T extends {}>(o: T, filter: FilterFn<T>): Partial<T
 export type DiscriminateUnion<T, K extends keyof T, V extends T[K]> = Extract<T, Record<K, V>>;
 export type DiscriminatedModel<T extends Record<K, T[K]>, K extends PropertyKey = "_T"> = { [V in T[K]]: DiscriminateUnion<T, K, V> };
 
+export type Choose<
+  T extends Record<string | number, any>,
+  K extends string | number
+> = K extends `${infer U}.${infer Rest}` ? Choose<T[U], Rest> : T[K];
+// export type Choose<
+//   T extends Record<string | number, any>,
+//   K extends DeepProps<T>
+// > = K extends `${infer U}.${infer Rest}` ? Choose<T[U], Rest> : T[K];
+
+export type Join<K extends string | number, P extends string | number> = `${K}.${P}`
+export type DeepProps<
+  T extends Record<string | number, any>,
+  K extends Exclude<keyof T, symbol> = Exclude<keyof T, symbol>,
+  U extends string | number = ''
+> = T[K] extends Record<string | number, unknown>
+  ?
+      | (U extends '' ? K : U)
+      | DeepProps<
+          T[K],
+          Exclude<keyof T[K], symbol>,
+          U extends ''
+            ? Join<K, Exclude<keyof T[K], symbol>>
+            : U | Join<U, Exclude<keyof T[K], symbol>>
+        >
+  : U
+
 export type Constructor<T> = { new(...args: any[]): T; prototype: T; };
 export type AbstractConstructor<T> = abstract new (...args: any[]) => T;
 // export const isConstructor(ctor: any): ctor is Constructor => (Function.isPrototypeOf(ctor)))
@@ -31,8 +57,13 @@ export const isAspect = <A extends Aspect<any> = Aspect<any>>(aspect: any): aspe
 export type AspectFn<A extends Aspect<any> = Aspect<any>> = (...args: any[]) => A;
 export type Timestamped<T> = { _ts: Date; } & T;
 
+export type ArtefactToDataOptions = {
+
+};
+
 export abstract class Artefact {
     declare prototype: Artefact & { constructor: typeof Artefact; };
+    static isArtefact = (o: any): o is Artefact => typeof o === "object" && o.prototype === Artefact.prototype;
 
     _id?: string;
     _E?: Array<unknown>;
@@ -42,15 +73,29 @@ export abstract class Artefact {
         this._E = data?._E;
     }
 
+    toData(options?: ArtefactToDataOptions) {
+        return filterObject(this, ([K, V]) => {
+            const d = Object.getOwnPropertyDescriptor(this, K);
+            return (!!d?.value || (d?.get && d?.set && !!d?.get())) ?? false;
+        });
+    }
+
+    [nodeUtil.inspect.custom](depth: number, inspectOptions: nodeUtil.InspectOptions, inspect: typeof nodeUtil.inspect) {
+        return inspect(this.toData(), inspectOptions);
+    }
+
     get Query(): ArtefactInstanceQueries<Artefact, {}> {
         return mapObject(
             this.prototype.constructor.Query,
             ([K, V]) => ([K, () => ([K, V(this)])]));
     }
 
-    static Query: ArtefactStaticQueries<Artefact, {}> = {
-        byId: <A extends Artefact>(_: Artefact) => ({ "_id": _._id }) as Filter<A>,
-    }
+    static Query: ArtefactStaticQueries<Artefact, {}> = Object.assign(
+        <A extends Artefact>(propPath: DeepProps<A>, value: A | Choose<A, DeepProps<A>>) => {
+            return ({ [propPath]: this.isArtefact(value) ? get(value, propPath) : value, });
+        }, {
+            byId: <A extends Artefact>(_: A) => ({ "_id": _._id }) as Filter<A>,
+        });
 
     static async* stream<I, A extends Artefact>(this: Constructor<A>, source: AsyncIterable<I>, transform?: (...args: [I]) => A) {
         for await (const item of source) {
@@ -58,6 +103,7 @@ export abstract class Artefact {
         }
     }
 }
+
 export declare namespace Artefact {
     export type WithId<A extends Artefact> = Omit<A, "_id"> & { _id: string; };
 };
