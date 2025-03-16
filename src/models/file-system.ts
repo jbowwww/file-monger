@@ -4,22 +4,24 @@ import * as nodeCrypto from "node:crypto";
 import { Aspect, DiscriminatedModel, Timestamped } from ".";
 import { Progress } from "../progress";
 
-export const enum EntryType {
-    File = "File",
-    Directory = "Directory",
-    Unknown = "Unknown",
+export const EntryTypeNames = {
+    File: "File" as const,
+    Directory: "Directory" as const,
+    Unknown: "Unknown" as const,
 };
-export type EntryBase<_T extends EntryType> = Aspect<_T, Timestamped<{
+//  as const
+export type EntryTypeName = typeof EntryTypeNames[keyof typeof EntryTypeNames];
+export type EntryBase<_T extends EntryTypeName> = Aspect<_T, /* Timestamped< */{
     path: string;
     stats: nodeFs.Stats;
-}>>;
+}>/* > */;
 
-export type File = EntryBase<EntryType.File>;
-export const File = ({ path, stats }: ({ path: string, stats: nodeFs.Stats })) => ({ _T: EntryType.File, _ts: new Date(), path, stats });
-export type Directory = EntryBase<EntryType.Directory>;
-export const Directory = ({ path, stats }: ({ path: string, stats: nodeFs.Stats })) => ({ _T: EntryType.Directory, _ts: new Date(), path, stats });
-export type Unknown = EntryBase<EntryType.Unknown>;
-export const Unknown = ({ path, stats }: ({ path: string, stats: nodeFs.Stats })) => ({ _T: EntryType.Unknown, _ts: new Date(), path, stats });
+export type File = EntryBase<typeof EntryTypeNames.File>;
+export const File = ({ path, stats }: ({ path: string, stats: nodeFs.Stats })) => ({ _T: EntryTypeNames.File , path, stats });
+export type Directory = EntryBase<typeof EntryTypeNames.Directory>;
+export const Directory = ({ path, stats }: ({ path: string, stats: nodeFs.Stats })) => ({ _T: EntryTypeNames.Directory, path, stats });
+export type Unknown = EntryBase<typeof EntryTypeNames.Unknown>;
+export const Unknown = ({ path, stats }: ({ path: string, stats: nodeFs.Stats })) => ({ _T: EntryTypeNames.Unknown, path, stats });
 
 export type Entry = File | Directory | Unknown;
 export const Entry = async ({ path }: { path: string }): Promise<Entry> => {
@@ -28,10 +30,10 @@ export const Entry = async ({ path }: { path: string }): Promise<Entry> => {
 };
 export type NamespacedEntry = DiscriminatedModel<Entry, "_T">;
 
-export const isEntry = (e: any, _T: EntryType): e is EntryBase<typeof _T> => !!e && e._T === _T && typeof e.path === 'string' && typeof e.stats === 'object';
-export const isFile = (f: any): f is File => isEntry(f, EntryType.File);
-export const isDirectory = (d: any): d is Directory => isEntry(d, EntryType.Directory);
-export const isUnknown = (u: any): u is Unknown => isEntry(u, EntryType.Unknown);
+export const isEntry = (e: any, _T: EntryTypeName): e is EntryBase<typeof _T> => !!e && e._T === _T && typeof e.path === 'string' && typeof e.stats === 'object';
+export const isFile = (f: any): f is File => isEntry(f, EntryTypeNames.File);
+export const isDirectory = (d: any): d is Directory => isEntry(d, EntryTypeNames.Directory);
+export const isUnknown = (u: any): u is Unknown => isEntry(u, EntryTypeNames.Unknown);
 
 export type WalkCallbackFn = (entry: Entry, depth: number) => { emit: boolean, recurse?: boolean };
 export const walk = async function *walk({

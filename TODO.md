@@ -14,13 +14,15 @@
           - [ ] Currently toData only persists properties that are fields, or have both getters and setters
             - [ ] Should not normally need to, but if explicit control is needed, should be able to override toData() and return an object literal
           - [ ] Also convenient place to put (keep - already there) Queries
+
 - [X] Decide whether you w want to diff each _ Artefact before update(), or do you just want to $set specific properties?
   - This might lend itself better to slicing the Artefact computations into tasks by avoiding a need to findOne() first
 - [X] Modify db methods to use Artefact.toData()
   - [X] toData() should remove undefined's and null's - does it already? i think so
-  - [ ] maybe include optional parameter original?: A , if supplied, calculates a diff and only updates with that
-  - [ ] Review use of $set and otherr update operators
-    - [ ] Should toData() include them or leave to the DB fn's ?
+  - ~~ maybe include optional parameter original?: A , if supplied, calculates a diff and only updates with that~~
+  - ~~ Review use of $set and otherr update operators~~
+    - ~~ Should toData() include them or leave to the DB fn's ?~~
+- [ ] Start using``debug`` library and replace all console.[log|debug|error|warn|*] calls
 - [ ] Implement Disks, Partitions and populate
   - [ ] Should be referenced by all FS entries, and be part of the index (partition UUID ? )
   - [ ] FS entry paths should be relative to their partition? to neutralise effects of possibly changing mount points of same disk?

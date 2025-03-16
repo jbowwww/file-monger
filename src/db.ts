@@ -2,7 +2,7 @@ import * as nodeUtil from "node:util";
 import { isDate } from "node:util/types";
 import { AnyBulkWriteOperation, BulkWriteOptions, BulkWriteResult, ChangeStreamOptions, ChangeStreamDocument, ChangeStreamInsertDocument, ChangeStreamUpdateDocument, Collection, CollectionOptions, CountOptions, Db, Document, Filter, FindOneAndUpdateOptions, FindOptions, MongoClient, MongoError, UpdateFilter, UpdateOptions, UpdateResult, WithId, IndexSpecification, CreateIndexesOptions, ObjectId } from "mongodb";
 import { diff } from "deep-object-diff";
-import { Artefact, mapObject } from "./models";
+import { Artefact, ArtefactToDataOption, mapObject } from "./models";
 import { AsyncFunction } from './utility';
 import { cargo } from "./pipeline";
 import { get } from "./prop-path";
@@ -103,40 +103,43 @@ export type Updates<T extends {} = {}> = {
     undefineds: Partial<Record<keyof T, undefined>>;
 };
 
+export const flattenPropertyNames = (
+    source: { [K: string]: any; },
+    update: ({ [K: string]: any; }) = {},
+    undefineds: ({ [K: string]: any; }) = {},
+    prefix: string = "",
+) => {
+    for (const K in source) {
+        if (K === "_id") {
+            continue;
+        }
+        const V = source[K];
+        if (V !== null && V !== undefined && typeof V === "function") {
+            continue;
+        } else if (V !== null && V !== undefined && typeof V === "object" && !isDate(V)) {
+            flattenPropertyNames(V, update, undefineds, prefix + K + ".");
+        } else if (V !== undefined) {
+            update[prefix + K] = V;
+        } else {
+            undefineds[prefix + K] = undefined;
+        }
+    }
+    return { update, undefineds };
+};
+
 export const getUpdates = (original: any, updated?: any) => {
     if (!updated) {
         updated = original;
         original = {};
-    } else if (original._id && updated._id && original._id !== updated._id) {
-        throw new RangeError(`getUpdates(): original._id=${original._id} !== updated._id=${updated._id}`);
+    } else {
+        original ??= {};
+        if (original._id && updated._id && original._id !== updated._id) {
+            throw new RangeError(`getUpdates(): original._id=${original._id} !== updated._id=${updated._id}`);
+        }
     }
     const updateDiff = diff(original, updated);
-    const { update, undefineds } = appendSubPropNames(updateDiff);
+    const { update, undefineds } = flattenPropertyNames(updateDiff);
     return { update, undefineds } as Updates;
-    function appendSubPropNames(source: { [K: string]: any; }, update: ({ [K: string]: any; }) = {}, undefineds: ({ [K: string]: any; }) = {}, prefix: string = "") {
-        for (const K in source) {
-            if (K === "_id") {
-                continue;
-            }
-            const V = source[K];
-            if (V !== null && V !== undefined && typeof V === "function") {
-                continue;
-            } else if (V !== null && V !== undefined && typeof V === "object" && !isDate(V)) {
-                appendSubPropNames(V, update, undefineds, prefix + K + ".");
-            } else if (V !== undefined) {
-                update[prefix + K] = V;
-            } else {
-                undefineds[prefix + K] = undefined;
-            }
-        }
-        return { update, undefineds };
-    }
-}
-
-function getData<A extends Artefact>(_: A): Partial<A> {
-    const descriptors = Object.getOwnPropertyDescriptors(_);
-    const data = mapObject(descriptors as Record<PropertyKey, PropertyDescriptor>, ([K, V]) => V.value, ([K, V]) => ([K as string, V.value])  ); // should filter out getters (for now - TODO: decorators to opt-in getters)
-    return data as Partial<A>;
 }
 
 export type UpdateOrCreateOptions = {
@@ -146,7 +149,7 @@ export type UpdateOneResult<A extends Artefact> = {
     didWrite: boolean;
     result?: UpdateResult<A>;
     query: Filter<A>;
-    update: UpdateFilter<A>;
+    updates: UpdateFilter<A>;
 };
 export type UpdateOrCreateResult<A extends Artefact> = UpdateOneResult<A> & {
     _: A;
@@ -228,14 +231,9 @@ export class MongoStore<A extends Artefact> implements Store<A> {
         return await this.collection.findOneAndUpdate(query, update, options);
     }
 
-    async updateOne(query: Filter<A>, update: UpdateFilter<A>, options: UpdateOptions = {}): Promise<UpdateOneResult<A>> {
-        const result = await this.collection.updateOne(query!, {
-            // $set: {
-            ...update as any/* TSchema */,
-            // _ts: new Date(),
-            // }
-        }, options);
-        return { didWrite: !!result, result: result, query, update };
+    async updateOne(query: Filter<A>, updates: UpdateFilter<A>, options: UpdateOptions = {}): Promise<UpdateOneResult<A>> {
+        const result = await this.collection.updateOne(query!, updates, options);
+        return { didWrite: !!result, result: result, query, updates };
     }
 
     async updateOrCreate(artefact:/*  QueryableArtefact< */A/* > */, query?: Filter<A>, options: UpdateOptions & UpdateOrCreateOptions = {}): Promise<UpdateOrCreateResult<A>> {
@@ -252,13 +250,13 @@ export class MongoStore<A extends Artefact> implements Store<A> {
         if (oldArtefact !== null && !artefact._id) {
             artefact._id = oldArtefact._id;
         }
-        const updates = getUpdates(oldArtefact ?? {} as A, /* getData( */artefact.toData());
-        let update = { $set: { ...updates.update }, ...(options.unsetUndefineds ? { $unset: updates.undefineds } : {}) } as UpdateFilter<A>;
-        if (Object.keys(updates.update).filter(u => u !== "_id").length > 0) {
+        const updates = ({ $set: getUpdates(oldArtefact, artefact.toData()).update }) as UpdateFilter<A>;
+        // let update = { /* $set: { */ ...updates/* .update */ /* } *//* , ...(options.unsetUndefineds ? { $unset: updates.undefineds } : {}) */ } as UpdateFilter<A>;
+        if (Object.keys(updates/* .update */).filter(u => u !== "_id").length > 0) {
             if (oldArtefact !== null) {
                 query = Artefact.Query.byId(oldArtefact) as Filter<A>;
             }
-            result = await this.collection.updateOne(query, update, options);
+            result = await this.collection.updateOne(query, updates, options);
             if (!result?.acknowledged) {
                 throw new MongoError("updateOne not acknowledged for dbArtefact=${dbArtefact} dbUpdate=${dbUpdate} dbResult=${dbResult}");
             } else {
@@ -267,7 +265,7 @@ export class MongoStore<A extends Artefact> implements Store<A> {
                 }
             }
         }
-        return { didWrite: !!result, result: result, query, update, _: artefact };
+        return { didWrite: !!result, result: result, query, updates, _: artefact };
     }
 
     bulkWrite(opsOrSource: AnyBulkWriteOperation<A>[] | AsyncGenerator<AnyBulkWriteOperation<A>>, options: BulkWriteOptions & BulkWriterOptions & ProgressOption = BulkWriterOptions.default): Promise<BulkWriteResult> {
