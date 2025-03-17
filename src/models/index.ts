@@ -1,9 +1,12 @@
 import { Filter } from "mongodb";
-import * as nodeUtil from 'node:util';
-import { get } from "../prop-path";
+import * as nodePath from "node:path";
+import * as nodeUtil from "node:util";
 import { isDate, isProxy } from "node:util/types";
-import { getUpdates } from "../db";
-import { diff } from "deep-object-diff";
+import { get } from "../prop-path";
+
+import debug from "debug";
+const log = debug(nodePath.basename(module.filename));
+const logProxy = log.extend("Proxy");
 
 export type PartiallyRequired<T extends {}, R extends keyof T> = Required<Pick<T, R>> & Partial<Omit<T, R>>;
 
@@ -53,6 +56,8 @@ export type DeepProps<
 export type Constructor<T> = { new(...args: any[]): T; prototype: T; };
 export type AbstractConstructor<T> = abstract new (...args: any[]) => T;
 // export const isConstructor(ctor: any): ctor is Constructor => (Function.isPrototypeOf(ctor)))
+
+export type AsyncFunction<TArgs extends any[] = [], TReturn extends any = void> = (...args: TArgs) => Promise<TReturn>;
 
 export type Id<T> = { [K in keyof T]: T[K] };
 export type Converter<T, K extends string, V> = T extends any ? { [P in keyof Id<Record<K, V> & T>]: Id<Record<K, V> & T>[P] } : never;
@@ -129,7 +134,7 @@ export abstract class Artefact {
     [K: string]: any;
 
     constructor(data?: Partial<Artefact>, enableTimestamps: boolean = true) {
-        console.debug(`new Artefact(): data=${nodeUtil.inspect(data)} updateTimestamps=${enableTimestamps}`);
+        log("new Artefact(): data=%O enableTimestamps=%b", data, enableTimestamps);
         this._id = data?._id;
         this._ts = data?._ts ?? new Timestamps();
         this._E = data?._E;
@@ -169,18 +174,18 @@ export abstract class Artefact {
             ...(typeof optionsOrModifiedOption === "object" ? { ToData: optionsOrModifiedOption.ToData } : {}),
         };
         // } else {
-        //     // if (options !== undefined) throw new TypeError(`Artefact.toData(): ArtefactToDataOptions should be the first and only parameter, or the second parameter preceeded by an Artefact instance`);
+        //     // if (options !== undefined) throw new TypeError("Artefact.toData(): ArtefactToDataOptions should be the first and only parameter, or the second parameter preceeded by an Artefact instance");
         //     options = { ...ArtefactToDataOptions.default, ...originalOrOptions, ToData: ArtefactToDataOption.Diff, };
         // }
         // return filterObject(this, ([K, V]) => {
         // const d = Object.getOwnPropertyDescriptor(this, K);
-        // console.debug(`K = ${K as string}, d = ${nodeUtil.inspect(d)}`);
+        // console.debug("K = ${K as string}, d = ${nodeUtil.inspect(d)}");
         const descriptors = Object.getOwnPropertyDescriptors(this);
         const values = /* filterObject( */mapObject(
             descriptors as Record<string | number, PropertyDescriptor>,
             ([K, V]) => K !== "_id" && K !== "_ts" && K !== "_E" && V.value || (V.get && V.set),
             ([K, V]) => ([K, V.value ?? V.get?.()]));//, ([K, V]) => V);
-        // console.debug(`#modifiedPaths=${nodeUtil.inspect(this._modifiedPaths.values())}`);  //descripttors = ${nodeUtil.inspect(descriptors, { getters: true})}\n
+        // console.debug("#modifiedPaths=${nodeUtil.inspect(this._modifiedPaths.values())}");  //descripttors = ${nodeUtil.inspect(descriptors, { getters: true})}\n
         return values;//filterObject(values, ([K, V]) => this._modifiedPaths.has(K as string));
     }; // should filter out getters (for now - TODO: decorators to opt-in getters)
             // //(!!d?.value || (d?.get && d?.set && !!d?.get())) ?? false;
@@ -204,7 +209,6 @@ export abstract class Artefact {
         });
 
     static async* stream<I, A extends Artefact>(this: Constructor<A>, source: AsyncIterable<I>, transform?: (...args: [I]) => A) {
-        console.debug(`stream<A=${this.name}>`);
         for await (const item of source) {
             yield transform?.(...[item]) ?? new this(item, true);
         }
@@ -230,10 +234,10 @@ export const ChangeTrackingProxy = <A extends Artefact>(
     if (!rootTarget) { //Artefact.isArtefact(_)) {
         rootTarget ??= target;
     }
-    console.debug(`ArtefactProxy(): target=${nodeUtil.inspect(target)} prefix=${prefix}, rootTarget===target=${rootTarget===target} targets.has(target)=${targets.has(target)}`);
+    logProxy("ArtefactProxy(): target=${%O} prefix=%s, rootTarget===target=%b targets.has(target)=%b", target, prefix, rootTarget===target, targets.has(target));
         return targets.has(target) ? targets.get(target) : targets.set(target, new Proxy(target as {}, {
         set(target: { [K: string]: any; }/* A | Choose<A, DeepProps<A>> */, K: string, newValue: any, receiver: A) {
-            console.debug(`ArtefactProxy().set: target=${nodeUtil.inspect(target)} K=${K}, rootTarget===target=${rootTarget===target}`);
+            logProxy("ArtefactProxy().set: target=%O K=%s, rootTarget===target=%b", target, K, rootTarget === target);
             let modified = false;
             const oldValue = Reflect.get(target, K, target);//_[K /* as keyof (A | Choose<A, DeepProps<A>>) *//*  as keyof A */];
             if (oldValue !== newValue) {
@@ -257,7 +261,7 @@ export const ChangeTrackingProxy = <A extends Artefact>(
                 // rootTarget?.markChecked(prefix + K);
                 return true;//false;
             }
-            throw new Error(`Should not reach here! ${__filename}: ArtefactProxy:195`);
+            throw new Error("Should not reach here! ${__filename}: ArtefactProxy:195");
         },
         get(target: { [K: string]: any; }, K: string, receiver: A) {
             if (K === "updateTimestamps") {

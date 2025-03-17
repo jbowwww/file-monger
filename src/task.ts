@@ -1,4 +1,8 @@
+import * as nodePath from "node:path";
 import { Progress } from "./progress";
+
+import debug from "debug";
+const log = debug(nodePath.basename(module.filename));
 
 export type TaskFn<TArgs extends any[] = [], TResult = void> = (task: Task<TArgs, TResult>, ...args: TArgs) => Promise<TResult>;
 

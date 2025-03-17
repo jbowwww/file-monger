@@ -4,6 +4,9 @@ import * as nodeCrypto from "node:crypto";
 import { Aspect, DiscriminatedModel, Timestamped } from ".";
 import { Progress } from "../progress";
 
+import debug from "debug";
+const log = debug(nodePath.basename(module.filename));
+
 export const EntryTypeNames = {
     File: "File" as const,
     Directory: "Directory" as const,
@@ -69,13 +72,13 @@ export const walk = async function *walk({
                 }
             } catch (err) {
                 if (emitError) {
-                    console.error(err);
+                    log(err);
                 }
             }
         }
     } catch (err) {
         if (emitError) {
-            console.error(err);
+            log(err);
         }
     }
 };

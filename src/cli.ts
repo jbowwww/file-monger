@@ -1,6 +1,11 @@
 #!/usr/bin/env node
+import * as nodePath from "node:path";
 import yargs from "yargs/yargs";
 import { hideBin } from "yargs/helpers";
+
+import debug from "debug";
+debug.formatters.b = (v: boolean) => !!v ? "true" : "false";
+const log = debug(nodePath.basename(module.filename));
 
 export const globalOptions = {
     dbUrl: {
@@ -14,7 +19,7 @@ export const globalOptions = {
 var argv = yargs(hideBin(process.argv))
     .scriptName("cli")
     .option(globalOptions)
-    .middleware(async argv => { console.log(`cli middleware argv=${JSON.stringify(argv)}`); })
+    .middleware(async argv => { log("cli middleware argv=%O", argv); })
     .commandDir("cmds")
     .demandCommand()
     .help("help", "Help", true)

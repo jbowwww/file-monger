@@ -1,12 +1,15 @@
-import * as nodeUtil from "node:util";
 import { isDate } from "node:util/types";
-import { AnyBulkWriteOperation, BulkWriteOptions, BulkWriteResult, ChangeStreamOptions, ChangeStreamDocument, ChangeStreamInsertDocument, ChangeStreamUpdateDocument, Collection, CollectionOptions, CountOptions, Db, Document, Filter, FindOneAndUpdateOptions, FindOptions, MongoClient, MongoError, UpdateFilter, UpdateOptions, UpdateResult, WithId, IndexSpecification, CreateIndexesOptions, ObjectId } from "mongodb";
+import * as nodePath from "node:path";
+import { AnyBulkWriteOperation, BulkWriteOptions, BulkWriteResult, ChangeStreamOptions, ChangeStreamDocument, ChangeStreamInsertDocument, ChangeStreamUpdateDocument, Collection, CollectionOptions, CountOptions, Db, Filter, FindOneAndUpdateOptions, FindOptions, MongoClient, MongoError, UpdateFilter, UpdateOptions, UpdateResult, WithId, IndexSpecification, CreateIndexesOptions } from "mongodb";
 import { diff } from "deep-object-diff";
-import { Artefact, ArtefactToDataOption, mapObject } from "./models";
-import { AsyncFunction } from './utility';
+import { Artefact } from "./models";
+import { AsyncFunction } from "./models/";
 import { cargo } from "./pipeline";
 import { get } from "./prop-path";
 import { Progress } from "./progress";
+
+import debug from "debug";
+const log = debug(nodePath.basename(module.filename));
 
 export interface Storage {
     isConnected(): boolean;
@@ -34,35 +37,35 @@ export class MongoStorage implements Storage {
 
     async connect(): Promise<MongoStorage> {
         if (this._client === null) {
-            process.stdout.write(`Initialising DB connection to ${this.url} ${this.options !== undefined ? ("options=" + JSON.stringify(this.options)) : ""} ... `);
+            log("Initialising DB connection to %s options=%O ... ", this.url, this.options);
             this._client = new MongoClient(this.url, this.options);
             this._connection = await this._client.connect();
             this._db = this._connection.db();
-            process.stdout.write("OK\n");
+            log("OK");
         }
         return this;
     }
 
     async close(): Promise<MongoStorage> {
         if (!!this._connection) {
-            process.stdout.write(`close(): Closing DB connection to ${this.url} ... `);
+            log("close(): Closing DB connection to %s ... ", this.url);
             await this._connection.close();
             this._client = null;
             this._connection = null;
             this._db = null;
-            process.stdout.write("OK\n");
+            log("OK");
         } else {
-            console.log(`close(): No DB connection to close`);
+            log("close(): No DB connection to close");
         }
         return this;
     }
 
     async store<A extends Artefact>(name: string, options?: MongoStoreOptions): Promise<MongoStore<A>> {
         await this.connect();
-        process.stdout.write(`Getting store '${name} ${options !== undefined ? ("options=" + JSON.stringify(options)) : ""} ... `);
+        log("Getting store '%s' options=%O ... ", name, options);
         const collection = this._db!.collection<A>(name, options);
         const store = new MongoStore<A>(this, name, collection, options);
-        process.stdout.write("OK\n");
+        log("OK");
         return store;
     }
 }
@@ -96,7 +99,7 @@ export const Query = <A extends Artefact>(_: A, path: string): Filter<A> => ({
 
 export const updateResultToString = (result: UpdateResult | null | undefined) =>
     result === null ? "(null)" : result === undefined ? "(undef)" :
-    `{ ack.=${result.acknowledged} modifiedCount=${result.modifiedCount} upsertedId=${result.upsertedId} upsertedCount=${result.upsertedCount} matchedCount=${result.matchedCount} }`;
+    "{ ack.=${result.acknowledged} modifiedCount=${result.modifiedCount} upsertedId=${result.upsertedId} upsertedCount=${result.upsertedCount} matchedCount=${result.matchedCount} }";
 
 export type Updates<T extends {} = {}> = {
     update: Partial<T>;
@@ -134,7 +137,7 @@ export const getUpdates = (original: any, updated?: any) => {
     } else {
         original ??= {};
         if (original._id && updated._id && original._id !== updated._id) {
-            throw new RangeError(`getUpdates(): original._id=${original._id} !== updated._id=${updated._id}`);
+            throw new RangeError("getUpdates(): original._id=${original._id} !== updated._id=${updated._id}");
         }
     }
     const updateDiff = diff(original, updated);
@@ -237,11 +240,11 @@ export class MongoStore<A extends Artefact> implements Store<A> {
     }
 
     async updateOrCreate(artefact:/*  QueryableArtefact< */A/* > */, query?: Filter<A>, options: UpdateOptions & UpdateOrCreateOptions = {}): Promise<UpdateOrCreateResult<A>> {
-        options = { ...options, upsert: true }; //, ignoreUndefined: true, includeResultMetadata: true, returnDocument: 'after', */ };
+        options = { ...options, upsert: true }; //, ignoreUndefined: true, includeResultMetadata: true, returnDocument: "after", */ };
         if (artefact._id) {
             const keys = Object.keys(artefact);
             if (keys.length !== 1 || keys[0] !== "_id") {
-                throw new RangeError(`updateOrCreate(): artefact=${nodeUtil.inspect(artefact)} has an _id but query=${nodeUtil.inspect(query)}, when query should be based solely on _id`);
+                throw new RangeError("updateOrCreate(): artefact=${nodeUtil.inspect(artefact)} has an _id but query=${nodeUtil.inspect(query)}, when query should be based solely on _id");
             }
         }
         let result: UpdateResult<A> | undefined = undefined;

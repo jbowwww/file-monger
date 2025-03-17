@@ -1,5 +1,9 @@
-import * as mm /* { parseFile, IAudioMetadata } */ from 'music-metadata';
-import { Aspect, Timestamped } from '.';
+import * as nodePath from "node:path";
+import * as mm /* { parseFile, IAudioMetadata } */ from "music-metadata";
+import { Aspect, Timestamped } from ".";
+
+import debug from "debug";
+const log = debug(nodePath.basename(module.filename));
 
 export const enum AudioType { Audio = "Audio" };
 export type Audio = Aspect<AudioType.Audio, /* Timestamped< */mm.IAudioMetadata>/* > */;

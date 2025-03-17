@@ -2,20 +2,15 @@ import yargs from "yargs";
 import { globalOptions } from "../cli";
 import { Task } from "../task";
 import { MongoStorage, Store } from "../db";
-import { Artefact, ArtefactStaticExtensionQueries, isAspect } from '../models';
-import { Entry, walk, Hash, Unknown, File, Directory, EntryTypeName, EntryTypeNames } from '../models/file-system';
+import { Artefact, isAspect } from "../models";
+import { Entry, walk, Hash, Unknown, File, Directory } from "../models/file-system";
 import exitHook from "async-exit-hook";
 import { Audio } from "../models/audio";
-import * as nodeUtil from "node:util";
+import * as nodePath from "node:path";
 import { Filter, MongoError } from "mongodb";
-import { ArtefactStaticQueries } from '../models/index';
 
-// function exclude<A extends Artefact, V>(
-//     target: any,
-//     context: /* ClassFieldDecoratorContext */ClassGetterDecoratorContext<A, V> & { name: string; private: false; static: false; }): void | ((/* this: FileSystemArtefact, value: V */) => V
-// ) {
-//     context.metadata[context.name] = { exclude: true };
-// }
+import debug from "debug";
+const log = debug(nodePath.basename(module.filename));
 
 export class FileSystemArtefact extends Artefact {
     // @exclude
@@ -27,14 +22,14 @@ export class FileSystemArtefact extends Artefact {
     constructor(data: Partial<FileSystemArtefact> | Entry) {
         if (isAspect<Entry>(data)) {
             super();
-            console.debug(`FileSystemArtefact.ctor(): isAspect(data)=true: data=${nodeUtil.inspect(data)} this=${nodeUtil.inspect(this)}`);
+            log("FileSystemArtefact.ctor(): isAspect(data)=true: data=%O this=%O", data, this);
             this[data._T as string] = data;
         } else {
             super({ _id: data._id, _E: data._E });
             this.File = data.File;
             this.Directory = data.Directory;
             this.Unknown = data.Unknown;
-            console.debug(`FileSystemArtefact.ctor(): isAspect(data)=false: data=${nodeUtil.inspect(data)} this=${nodeUtil.inspect(this)}`);
+            log("FileSystemArtefact.ctor(): isAspect(data)=false: data=%O this=%O", data, this);
         }
     }
     
@@ -76,7 +71,7 @@ export const builder = (yargs: yargs.Argv) => yargs
             });//.bulkWriterStore();
 
             exitHook(async (cb) => {
-                console.log("Exiting ...");
+                log("Exiting ...");
                 if (!!storage && storage.isConnected()) {
                     await storage.close();
                 }
@@ -91,7 +86,7 @@ export const builder = (yargs: yargs.Argv) => yargs
                             for await (const _ of FileSystemArtefact.stream(walk({ path, progress: task.progress }))) {
                                 try {
                                     const result = await store.updateOrCreate(_, FileSystemArtefact.Query.byPath(_));
-                                    console.log(`${task.name}: result=${/* updateResultToString */nodeUtil.inspect(result, false, 3)}\n${task.name}: task.progress=${task.progress}`);
+                                    log("%s: result=%O\n%s: task.progress=%s", task.name, result, task.name, task.progress);
                                 } catch (e: any) {
                                     handleError(e, task, _, store);
                                 }
@@ -114,7 +109,7 @@ export const builder = (yargs: yargs.Argv) => yargs
                             try {
                                 if (_.File) {
                                     const result = await store.updateOne(FileSystemArtefact.Query.byId(_), { $set: { Hash: await Hash(_.File.path) } });
-                                    console.log(`${task.name}: result=${/* updateResultToString */nodeUtil.inspect(result, false, 3)}\n${task.name}: _=${nodeUtil.inspect(_, false, 1)}\n${task.name}: task.progress=${task.progress}`);
+                                    log("%s: result=%O\n%s: _=%O task.progress=%s", task.name, result, _, task.name, task.progress);
                                 }
                             } catch (e: any) {
                                 handleError(e, task, _, store);
@@ -137,7 +132,7 @@ export const builder = (yargs: yargs.Argv) => yargs
                         }, { progress: task.progress }))) {
                             try {
                                 const result = await store.updateOne(FileSystemArtefact.Query.byId(_), { $set: { Audio: await Audio(_.File!.path) } });
-                                console.log(`${task.name}: result=${/* updateResultToString */nodeUtil.inspect(result, false, 3)}\n${task.name}: _=${nodeUtil.inspect(_, false, 1)}\n${task.name}: task.progress=${task.progress}\n`);
+                                log("%s: result=%O\n%s: _=%O task.progress=%s", task.name, result, _, task.name, task.progress);
                             } catch (e: any) {
                                 handleError(e, task, _, store);
                             }
@@ -151,14 +146,14 @@ export const builder = (yargs: yargs.Argv) => yargs
     ).demandCommand();
 
 async function handleError(e: Error, task: Task, _: FileSystemArtefact, store: Store<FileSystemArtefact>) {
-    // const error = Object.assign(e, { task: task });//new Error(`${task.name}: Error!\n_=${nodeUtil.inspect(_, false, 1)}\nError={e/* .stack */}`), { /* cause: e, stack: e.stack */ });
+    // const error = Object.assign(e, { task: task });//new Error("${task.name}: Error!\n_=${nodeUtil.inspect(_, false, 1)}\nError={e/* .stack */}"), { /* cause: e, stack: e.stack */ });
     if (!(e instanceof MongoError)) {
         const result = await store.updateOne(FileSystemArtefact.Query.byIdOrPath(_), { $set: { _E: [e] } });
         task.warnings.push(e);
-        console.warn(`${task.name}: Warn! _=${nodeUtil.inspect(_, false, 3)} Error=${e.stack}`);
+        log("${task.name}: Warn! _=%O Error=%s", _, e.stack);
     } else {
         task.errors.push(e);
-        console.error(`${task.name}: Error! _=${nodeUtil.inspect(_, false, 3)} Error=${e.stack}`);
+        log("${task.name}: Error! _=%O Error=%s", _, e.stack);
         throw e;
     }
 }
