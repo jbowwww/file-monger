@@ -4,25 +4,7 @@
 
 - ~~Somehow prevent indexFileSystem task from clearing the Hash values on _ when it's undefined~~
   - ~~**Any logic here around invalidating the Hash when File.stats.mtime changes (or sinilar) ? Or just in the hashFiles task?**~~
-    - [ ] Since historical hash values of files , and most likely other things, are potentially useful information (in the case of hash values - detecting reverted, duplicated, obsolete, etc file copies) - Am considering:
-      - [ ] modifying the main schema to store Entry-derived objects uniquely identified by path AND a DateTime.
-      - [ ] Could be better having only most current documents for each path in one collection (ie as it is now), and another collectiion for historical documents
-    - [ ] While doing the above, think I may also try a slightly different schema structure, where path and stats properties are directly members of FileSystemArtefact, and a discriminator property to (has been called _T so far)
-      - [ ] This may mean endingup with a base abstract FileSystemArtefact, and FileArtefact, DirectoryArtefact, UnknownArtefact classes
-        - [ ] Will still need a discriminator to use when retrieving from DB.
-        - [ ] Should still be a class ? Best argument for using class IMHO is it allows virtual properties in the form of getter properties.
-          - [ ] Currently toData only persists properties that are fields, or have both getters and setters
-            - [ ] Should not normally need to, but if explicit control is needed, should be able to override toData() and return an object literal
-          - [ ] Also convenient place to put (keep - already there) Queries
-
-- [X] Decide whether you w want to diff each _ Artefact before update(), or do you just want to $set specific properties?
-  - This might lend itself better to slicing the Artefact computations into tasks by avoiding a need to findOne() first
-- [X] Modify db methods to use Artefact.toData()
-  - [X] toData() should remove undefined's and null's - does it already? i think so
-  - ~~ maybe include optional parameter original?: A , if supplied, calculates a diff and only updates with that~~
-  - ~~ Review use of $set and otherr update operators~~
-    - ~~ Should toData() include them or leave to the DB fn's ?~~
-- [ ] Start using``debug`` library and replace all console.[log|debug|error|warn|*] calls
+- [ ] Start using ``debug`` library and replace all console.[log|debug|error|warn|*] calls
 - [ ] Implement Disks, Partitions and populate
   - [ ] Should be referenced by all FS entries, and be part of the index (partition UUID ? )
   - [ ] FS entry paths should be relative to their partition? to neutralise effects of possibly changing mount points of same disk?
@@ -33,6 +15,23 @@
     - [ ] Artefact.stream() might be a good place for this
   - [ ] Would allow for multiple instances of the same Aspect(s) and more freedom overall (??)
   - [ ] Queries and actions defined in modules (see above) would then need to receive property path parameters to any arguments
+- [ ] Since historical hash values of files , and most likely other things, are potentially useful information (in the case of hash values - detecting reverted, duplicated, obsolete, etc file copies) - Am considering:
+  - [ ] modifying the main schema to store Entry-derived objects uniquely identified by path AND a DateTime.
+  - [ ] Could be better having only most current documents for each path in one collection (ie as it is now), and another collectiion for historical documents
+- [X] Decide whether you w want to diff each _ Artefact before update(), or do you just want to $set specific properties?
+  - This might lend itself better to slicing the Artefact computations into tasks by avoiding a need to findOne() first
+- [X] Modify db methods to use Artefact.toData()
+  - [X] toData() should remove undefined's and null's - does it already? i think so
+  - ~~ maybe include optional parameter original?: A , if supplied, calculates a diff and only updates with that~~
+  - ~~ Review use of $set and otherr update operators~~
+    - ~~ Should toData() include them or leave to the DB fn's ?~~
+    - ~~While doing the above, think I may also try a slightly different schema structure, where path and stats properties are directly members of FileSystemArtefact, and a discriminator property to (has been called _T so far)~~
+      - ~~This may mean endingup with a base abstract FileSystemArtefact, and FileArtefact, DirectoryArtefact, UnknownArtefact classes~~
+        - ~~Will still need a discriminator to use when retrieving from DB.~~
+        - ~~Should still be a class ? Best argument for using class IMHO is it allows virtual properties in the form of getter properties.~~
+          - ~~Currently toData only persists properties that are fields, or have both getters and setters~~
+            - ~~Should not normally need to, but if explicit control is needed, should be able to override toData() and return an object literal~~
+          - ~~Also convenient place to put (keep - already there) Queries~~
 
 ## Minor stuff
 
