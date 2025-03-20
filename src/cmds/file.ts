@@ -2,8 +2,8 @@ import yargs from "yargs";
 import { globalOptions } from "../cli";
 import { Task } from "../task";
 import { MongoStorage, Store } from "../db";
-import { Artefact, isAspect } from "../models";
-import { Entry, walk, Hash, Unknown, File, Directory } from "../models/file-system";
+import { Artefact, ArtefactStaticQueries, isAspect } from "../models";
+import { Entry, walk, Hash, Unknown, File, Directory, getPartitions, Partition } from "../models/file-system";
 import exitHook from "async-exit-hook";
 import { Audio } from "../models/audio";
 import * as nodePath from "node:path";
@@ -13,23 +13,26 @@ import debug from "debug";
 const log = debug(nodePath.basename(module.filename));
 
 export class FileSystemArtefact extends Artefact {
-    // @exclude
+    get Entry(): Entry { return this.File ?? this.Directory ?? this.Unknown!; }
     File?: File;
     Directory?: Directory;
     Unknown?: Unknown;
     Hash?: Hash;
 
+    Drive?: Partition;
+    
     constructor(data: Partial<FileSystemArtefact> | Entry) {
         if (isAspect<Entry>(data)) {
             super();
             log("FileSystemArtefact.ctor(): isAspect(data)=true: data=%O this=%O", data, this);
             this[data._T as string] = data;
         } else {
-            super({ _id: data._id, _E: data._E });
-            this.File = data.File;
-            this.Directory = data.Directory;
-            this.Unknown = data.Unknown;
-            log("FileSystemArtefact.ctor(): isAspect(data)=false: data=%O this=%O", data, this);
+            const _data = data as Partial<FileSystemArtefact>;
+            super({ _id: _data._id, _e: _data._e });
+            this.File = _data.File;
+            this.Directory = _data.Directory;
+            this.Unknown = _data.Unknown;
+            log("FileSystemArtefact.ctor(): isAspect(data)=false: _data=%O this=%O", _data, this);
         }
     }
     
@@ -37,12 +40,13 @@ export class FileSystemArtefact extends Artefact {
     // So if your instance variable is _, queries will be available like e.g. _.Query.byPath() and it will use the path value of this instance
     static Query = {
         ...Artefact.Query,
-        byPath: (_: FileSystemArtefact) => (
-            _.File       ? { "File.path":        { $eq: _.File!.path }      } :
-            _.Directory  ? { "Directory.path" :  { $eq: _.Directory!.path } } :
-            _.Unknown    ? { "Unknown.path":     { $eq: _.Unknown!.path   } } :
-            {}
-        ) as Filter<FileSystemArtefact>,
+        byUnique: (_: Artefact) => this.Query.byIdOrPath(_ as FileSystemArtefact) as Filter<Artefact>,
+        byPath: (_: FileSystemArtefact) => ({ [_.Entry._T + ".path"]: { $eq: _.Entry.path } }) as Filter<FileSystemArtefact>,
+            // _.File       ? { "File.path":        { $eq: _.File!.path }      } :
+            // _.Directory  ? { "Directory.path" :  { $eq: _.Directory!.path } } :
+            // _.Unknown    ? { "Unknown.path":     { $eq: _.Unknown!.path   } } :
+            // {}
+        // ) as Filter<FileSystemArtefact>,
         byIdOrPath: (_: FileSystemArtefact) => _._id ? this.Query.byId(_) : this.Query.byPath(_) as Filter<FileSystemArtefact>,
     };
 }
@@ -79,6 +83,17 @@ export const builder = (yargs: yargs.Argv) => yargs
             });
 
             await Task.start(
+
+                async function enumerateSystemDrives() {
+                    await Task.repeat({ postDelay: 5000 }, async() => {           // 5s
+                        const drives = await getPartitions();
+                        const ops = drives.map(d => ({ "updateOne": {
+                            filter: { "Drive.uuid": { $eq: d.uuid } },
+                            update: { $set: { "Drive": d } },
+                            upsert: true,
+                        } }))
+                    });
+                },
 
                 async function indexFileSystem(task: Task) {
                     await Task.repeat({ postDelay: 180000/*0*/, }, async () => {   // 3/*0*/ minutes
@@ -148,7 +163,7 @@ export const builder = (yargs: yargs.Argv) => yargs
 async function handleError(e: Error, task: Task, _: FileSystemArtefact, store: Store<FileSystemArtefact>) {
     // const error = Object.assign(e, { task: task });//new Error("${task.name}: Error!\n_=${nodeUtil.inspect(_, false, 1)}\nError={e/* .stack */}"), { /* cause: e, stack: e.stack */ });
     if (!(e instanceof MongoError)) {
-        const result = await store.updateOne(FileSystemArtefact.Query.byIdOrPath(_), { $set: { _E: [e] } });
+        const result = await store.updateOne(FileSystemArtefact.Query.byIdOrPath(_), { $set: { _e: [e] } });
         task.warnings.push(e);
         log("${task.name}: Warn! _=%O Error=%s", _, e.stack);
     } else {

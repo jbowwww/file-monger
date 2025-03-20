@@ -57,13 +57,83 @@ export type Constructor<T> = { new(...args: any[]): T; prototype: T; };
 export type AbstractConstructor<T> = abstract new (...args: any[]) => T;
 // export const isConstructor(ctor: any): ctor is Constructor => (Function.isPrototypeOf(ctor)))
 
+export const isObject = (o: any): o is Object => o !== null && typeof o === "object";
+export const isFunction = (fn: any): fn is Function => typeof fn === "function";
+
 export type AsyncFunction<TArgs extends any[] = [], TReturn extends any = void> = (...args: TArgs) => Promise<TReturn>;
+
+export type ThrottleOptions = {
+    expiryAgeMs: number;
+};
+export const ThrottleOptions: {
+    default: ThrottleOptions;
+} = {
+    default: {
+        expiryAgeMs: 0,     // never expires, so always returns cached value after initial call, aka memoize()
+    },
+};
+
+export const throttle = <TReturn extends any>(
+    fnOrOptions: AsyncFunction<[], TReturn> | ThrottleOptions,
+    optionsOrFn?: AsyncFunction<[], TReturn> | ThrottleOptions,
+) => {
+    let fn: AsyncFunction<[], TReturn>;
+    let options: ThrottleOptions;
+    if (!optionsOrFn) {
+        if (!fnOrOptions || !isFunction(fnOrOptions)) {
+            throw new TypeError("throttle(): First parameter should be a function, or a ThrottleOptions object followed by the function");
+        }
+    } else if (isFunction(fnOrOptions)) {
+        fn = fnOrOptions;
+        options = { ...ThrottleOptions.default, ...optionsOrFn };
+    } else if (isObject(fnOrOptions)) {
+        if (!isFunction(optionsOrFn)) {
+            throw new TypeError("throttle(): First parameter should be a function, or a ThrottleOptions object followed by the function");
+        }
+        fn = optionsOrFn;
+        options = { ...ThrottleOptions.default, ...fnOrOptions };
+    }
+
+    let isCached: boolean = false;
+    let pendingPr: Promise<TReturn>;
+    let cached: TReturn | null;
+    return (): TReturn | Promise<TReturn> => {
+        if (!isCached) {
+            isCached = true;
+            pendingPr = fn().then(r => {
+                log("throttle(): Function '%s' returned value %O", fn.name ?? "(anon)", r);
+                return cached = r;
+            });
+            setTimeout(() => {
+                isCached = false;
+            }, options.expiryAgeMs);
+            log("throttle(): Function '%s' called", fn.name ?? "(anon)");
+        }
+        if (cached === null) {
+            log("throttle(): Returning newly executing promise...");
+            return pendingPr;
+        } else {
+            log("throttle(): Returned cached=%O", cached);
+            return cached;
+        }
+        return cached ?? pendingPr;
+    };
+};
+export const memoize = throttle;
 
 export type Id<T> = { [K in keyof T]: T[K] };
 export type Converter<T, K extends string, V> = T extends any ? { [P in keyof Id<Record<K, V> & T>]: Id<Record<K, V> & T>[P] } : never;
 
-export type Aspect<_T extends string | Symbol, T extends {} = {}> = { _T: _T } & T;
-export const isAspect = <A extends Aspect<any> = Aspect<any>>(aspect: any): aspect is A => !!aspect && typeof aspect === "object" && typeof aspect._T === "string";
+export type Aspect<_T extends string | Symbol, T extends {} = {}> = { _T: string; } & T;
+export const isAspect = <
+    A extends Aspect<any> = Aspect<any>,
+    /* T = A extends Aspect<infer _T> ? _T : never */
+>(aspectTypeOrAspect: any/* AspectFn<A> | string | A */, aspect?: any): aspect is A =>
+    (aspect && typeof aspect === "object" && typeof aspect._T === "string" &&
+        ((isFunction(aspectTypeOrAspect) && aspect._T === aspectTypeOrAspect.name) ||
+        (typeof aspectTypeOrAspect === "string" && aspect._T === aspectTypeOrAspect))) ||
+    (!aspect && !!aspectTypeOrAspect && typeof aspectTypeOrAspect === "object" && typeof aspectTypeOrAspect._T === "string");
+
 export type AspectFn<A extends Aspect<any> = Aspect<any>> = (...args: any[]) => A;
 export type Timestamped<T> = { _ts: Date; } & T;
 
@@ -126,18 +196,20 @@ export abstract class Artefact {
             o.prototype === Artefact.prototype);
 
     _id?: string;
+    _v: number;
     _ts!: Timestamps;
-    _E?: Error[];//Array<Error>;
-
-    #modifiedPaths: Set<string> = new Set();
+    _e?: Error[];
 
     [K: string]: any;
+
+    #modifiedPaths: Set<string> = new Set();
 
     constructor(data?: Partial<Artefact>, enableTimestamps: boolean = true) {
         log("new Artefact(): data=%O enableTimestamps=%b", data, enableTimestamps);
         this._id = data?._id;
+        this._v = data?._v ?? 1;
         this._ts = data?._ts ?? new Timestamps();
-        this._E = data?._E;
+        this._e = data?._e;
         const notifyChangeCallback = (propPath: string, oldValue: any, newValue: any, isModified: boolean) => {
             // const valueDiff = diff(oldValue, newValue);
             // const isModified = Object.keys(valueDiff).length > 0;
@@ -205,6 +277,7 @@ export abstract class Artefact {
         <A extends Artefact>(propPath: DeepProps<A>, value: A | Choose<A, DeepProps<A>>) => {
             return ({ [propPath]: this.isArtefact(value) ? get(value, propPath) : value, });
         }, {
+            byUnique: <A extends Artefact>(_: A) => ({ "_id": _._id }) as Filter<A>,
             byId: <A extends Artefact>(_: A) => ({ "_id": _._id }) as Filter<A>,
         });
 
@@ -301,11 +374,13 @@ export type ArtefactInstanceExtensionQueries<A extends Artefact> = {
     [K: string]: ArtefactInstanceQueryFn<A>;
 };
 export type ArtefactStaticQueries<A extends Artefact, Q extends ArtefactStaticExtensionQueries<A>> = Q & {
+    byUnique: ArtefactStaticQueryFn<A>;     // derived classes can redefine this to return one of several possible queries that uniquely identify the Artefact (e.g. _id ?? path ?? ...)
     byId: ArtefactStaticQueryFn<A>;
 };
 export type ArtefactInstanceQueries<A extends Artefact, Q extends ArtefactStaticExtensionQueries<A>> = {
     [K in keyof Q]: ArtefactInstanceQueryFn<A>;
 } & {
+    byUnique: ArtefactInstanceQueryFn<A>;     // derived classes can redefine this to return one of several possible queries that uniquely identify the Artefact (e.g. _id ?? path ?? ...)
     byId: ArtefactInstanceQueryFn<A>;
 };
 

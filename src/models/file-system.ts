@@ -1,11 +1,36 @@
 import * as nodeFs from "node:fs";
 import * as nodePath from "node:path";
 import * as nodeCrypto from "node:crypto";
-import { Aspect, DiscriminatedModel, Timestamped } from ".";
+import { Aspect, DiscriminatedModel, throttle, Timestamped } from ".";
 import { Progress } from "../progress";
+import si from "systeminformation";
 
 import debug from "debug";
 const log = debug(nodePath.basename(module.filename));
+
+export type Partition = Aspect<"Partition", si.Systeminformation.BlockDevicesData>;
+export const getPartitions = throttle(
+    { expiryAgeMs: 5000 },
+    async (): Promise<Partition[]> =>
+        si.blockDevices().then(
+            partitions => partitions
+                .map(p => ({ _T: "Partition", ...p }))
+                .sort((p1, p2) => p2.mount.length - p1.mount.length))     // sort descending by mountpoint path length
+        .then(partitions => {
+            log("getPartitions(): partitions=%O", partitions);
+            return partitions;
+    })
+);
+
+export type GetPartitionForPathOptions = {
+    path: string;
+    partitions?: Iterable<Partition>;
+};
+export const getPartitionForPath = async (pathOrOptions: string | GetPartitionForPathOptions) => {
+    const options: GetPartitionForPathOptions = typeof pathOrOptions === "string" ? { path: pathOrOptions } : pathOrOptions;
+    options.partitions ??= await getPartitions();
+    return Array.from(options.partitions).filter(p => options.path.startsWith(p.mount)).at(0);
+};
 
 export const EntryTypeNames = {
     File: "File" as const,
@@ -17,19 +42,21 @@ export type EntryTypeName = typeof EntryTypeNames[keyof typeof EntryTypeNames];
 export type EntryBase<_T extends EntryTypeName> = Aspect<_T, /* Timestamped< */{
     path: string;
     stats: nodeFs.Stats;
+    partition?: si.Systeminformation.BlockDevicesData;
 }>/* > */;
 
 export type File = EntryBase<typeof EntryTypeNames.File>;
-export const File = ({ path, stats }: ({ path: string, stats: nodeFs.Stats })) => ({ _T: EntryTypeNames.File , path, stats });
+export const File = ({ path, stats, partition }: Omit<File, "_T">): File => ({ _T: EntryTypeNames.File , path, stats, partition });
 export type Directory = EntryBase<typeof EntryTypeNames.Directory>;
-export const Directory = ({ path, stats }: ({ path: string, stats: nodeFs.Stats })) => ({ _T: EntryTypeNames.Directory, path, stats });
+export const Directory = ({ path, stats, partition }: Omit<Directory, "_T">): Directory => ({ _T: EntryTypeNames.Directory, path, stats, partition });
 export type Unknown = EntryBase<typeof EntryTypeNames.Unknown>;
-export const Unknown = ({ path, stats }: ({ path: string, stats: nodeFs.Stats })) => ({ _T: EntryTypeNames.Unknown, path, stats });
+export const Unknown = ({ path, stats, partition }: Omit<Unknown, "_T">): Unknown => ({ _T: EntryTypeNames.Unknown, path, stats, partition });
 
 export type Entry = File | Directory | Unknown;
-export const Entry = async ({ path }: { path: string }): Promise<Entry> => {
+export const Entry = async ({ path, partition, partitions }: { path: string, partition?: Partition, partitions?: Iterable<Partition>}): Promise<Entry> => {
     const stats = await nodeFs.promises.stat(path!);
-    return stats.isFile() ? File({ path, stats }) : stats.isDirectory() ? Directory({ path, stats }) : Unknown({ path, stats });
+    partition ??= (await getPartitionForPath({ partitions, path }));
+    return stats.isFile() ? File({ path, stats, partition }) : stats.isDirectory() ? Directory({ path, stats, partition }) : Unknown({ path, stats, partition });
 };
 export type NamespacedEntry = DiscriminatedModel<Entry, "_T">;
 
@@ -55,7 +82,8 @@ export const walk = async function *walk({
     progress?: Progress,
 }): AsyncGenerator<Entry> {
     try {
-        const entry = await Entry({ path });
+        const partition = await getPartitionForPath({ path });
+        const entry = await Entry({ path, partition }); // TODO: eventually find a way to avoid finding the containing drive for every path - find a way to know when the path crosses under any of the stored mountpoints
         const { emit, recurse } = callback(entry, depth);
         if (progress) progress.count++;
         if (emit) {
