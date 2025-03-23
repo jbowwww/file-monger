@@ -1,14 +1,15 @@
 import { isDate } from "node:util/types";
 import * as nodePath from "node:path";
-import { AnyBulkWriteOperation, BulkWriteOptions, BulkWriteResult, ChangeStreamOptions, ChangeStreamDocument, ChangeStreamInsertDocument, ChangeStreamUpdateDocument, Collection, CollectionOptions, CountOptions, Db, Filter, FindOneAndUpdateOptions, FindOptions, MongoClient, MongoError, UpdateFilter, UpdateOptions, UpdateResult, WithId, IndexSpecification, CreateIndexesOptions } from "mongodb";
+import { AnyBulkWriteOperation, BulkWriteOptions, BulkWriteResult, ChangeStreamOptions, ChangeStreamDocument, ChangeStreamInsertDocument, ChangeStreamUpdateDocument, Collection, CollectionOptions, CountOptions, Db, Filter, FindOneAndUpdateOptions, FindOptions, MongoClient, MongoError, UpdateFilter, UpdateOptions, UpdateResult, WithId, IndexSpecification, CreateIndexesOptions, Condition, Document } from "mongodb";
 import { diff } from "deep-object-diff";
-import { Artefact } from "./models";
-import { AsyncFunction } from "./models/";
+import { Artefact } from "./models/artefact";
+import { AsyncFunction, Choose } from "./models/";
 import { cargo } from "./pipeline";
 import { get } from "./prop-path";
 import { Progress } from "./progress";
 
 import debug from "debug";
+import { DeepProps } from "./models/index";
 const log = debug(nodePath.basename(module.filename));
 
 export interface Storage {
@@ -60,11 +61,11 @@ export class MongoStorage implements Storage {
         return this;
     }
 
-    async store<A extends Artefact>(name: string, options?: MongoStoreOptions): Promise<MongoStore<A>> {
+    async store<T extends {}>(name: string, options?: MongoStoreOptions): Promise<MongoStore<T>> {
         await this.connect();
         log("Getting store '%s' options=%O ... ", name, options);
-        const collection = this._db!.collection<A>(name, options);
-        const store = new MongoStore<A>(this, name, collection, options);
+        const collection = this._db!.collection<Artefact<T>>(name, options);
+        const store = new MongoStore<T>(this, name, collection, options);
         log("OK");
         return store;
     }
@@ -93,9 +94,7 @@ export type CreateIndexArgs = {
     options?: CreateIndexesOptions;
 };
 
-export const Query = <A extends Artefact>(_: A, path: string): Filter<A> => ({
-    [path]: get(_, path)
-}) as Filter<A>;
+export const Query = <T extends Record<string, any>, P extends string | number = DeepProps<T>>(path: P, value: Condition<Choose<Artefact<T>, P>>): Filter<Artefact<T>> => ({ [path]: value, }) as Filter<Artefact<T>>;
 
 export const updateResultToString = (result: UpdateResult | null | undefined) =>
     result === null ? "(null)" : result === undefined ? "(undef)" :
@@ -148,19 +147,19 @@ export const getUpdates = (original: any, updated?: any) => {
 export type UpdateOrCreateOptions = {
     unsetUndefineds?: boolean;
 };
-export type UpdateOneResult<A extends Artefact> = {
+export type UpdateOneResult<T extends {}> = {
     didWrite: boolean;
-    result?: UpdateResult<A>;
-    query: Filter<A>;
-    updates: UpdateFilter<A>;
+    result?: UpdateResult<Artefact<T>>;
+    query: Filter<Artefact<T>>;
+    updates: UpdateFilter<Artefact<T>>;
 };
-export type UpdateOrCreateResult<A extends Artefact> = UpdateOneResult<A> & {
-    _: A;
+export type UpdateOrCreateResult<T extends {}> = UpdateOneResult<T> & {
+    _: Partial<Artefact<T>>;
 };
 export type ProgressOption = { progress?: Progress; };
 
-export type BulkWriterStore<A extends Artefact> = Store<A>;
-export type BulkWriterFn<A extends Artefact> = AsyncFunction<[AsyncGenerator<AnyBulkWriteOperation<A>>], BulkWriteResult>;
+export type BulkWriterStore<T extends {}> = Store<T>;
+export type BulkWriterFn<T extends {}> = AsyncFunction<[AsyncGenerator<AnyBulkWriteOperation<T>>], BulkWriteResult>;
 
 export type BulkWriterOptions = BulkWriteOptions & {
     maxBatchSize: number;
@@ -173,25 +172,25 @@ export const BulkWriterOptions = {
     } as BulkWriterOptions,
 };
 
-export interface Store<A extends Artefact> {
+export interface Store<T extends {}> {
     createIndexes(...createIndexes: CreateIndexArgs[]): Promise<string[]>;
-    count(query: Filter<A>, options?: CountOptions): Promise<number>;
-    find(query: Filter<A>, options?: FindOptions & ProgressOption): AsyncGenerator<WithId<A>>;
-    findOne(query: Filter<A>, options?: FindOptions): Promise<WithId<A> | null>;
-    findOneAndUpdate(query: Filter<A>, update: UpdateFilter<A>, options?: FindOneAndUpdateOptions): Promise<WithId<A> | null>;
-    updateOne(query: Filter<A>, update: UpdateFilter<A>, options?: UpdateOptions): Promise<UpdateOneResult<A> | null>;
-    updateOrCreate(artefact: A, query: Filter<A>, options?: UpdateOptions & UpdateOrCreateOptions): Promise<UpdateOrCreateResult<A>>;
-    bulkWrite(operations: AnyBulkWriteOperation<A>[], options?: BulkWriteOptions & ProgressOption): Promise<BulkWriteResult>;
-    bulkWriterFn(options?: BulkWriterOptions & ProgressOption): BulkWriterFn<A>;
-    bulkWriterStore(options?: BulkWriterOptions & ProgressOption): BulkWriterStore<A>;
-    watch(pipeline?: Filter<A>/* Document[] */, options?: ChangeStreamOptions & ProgressOption): AsyncGenerator<ChangeStreamDocument<A>>;//: ChangeStream<A, ChangeStreamDocument<A>>;
+    count(query: Filter<Artefact<T>>, options?: CountOptions): Promise<number>;
+    find(query: Filter<Artefact<T>>, options?: FindOptions & ProgressOption): AsyncGenerator<WithId<Artefact<T>>>;
+    findOne(query: Filter<Artefact<T>>, options?: FindOptions): Promise<WithId<Artefact<T>> | null>;
+    findOneAndUpdate(query: Filter<Artefact<T>>, update: UpdateFilter<Artefact<T>>, options?: FindOneAndUpdateOptions): Promise<WithId<Artefact<T>> | null>;
+    updateOne(query: Filter<Artefact<T>>, update: UpdateFilter<Artefact<T>>, options?: UpdateOptions): Promise<UpdateOneResult<T> | null>;
+    updateOrCreate(artefact: T, query: Filter<Artefact<T>>, options?: UpdateOptions & UpdateOrCreateOptions): Promise<UpdateOrCreateResult<T>>;
+    bulkWrite(operations: AnyBulkWriteOperation<Artefact<T>>[], options?: BulkWriteOptions & ProgressOption): Promise<BulkWriteResult>;
+    bulkWriterFn(options?: BulkWriterOptions & ProgressOption): BulkWriterFn<Artefact<T>>;
+    bulkWriterStore(options?: BulkWriterOptions & ProgressOption): BulkWriterStore<T>;
+    watch(pipeline?: Filter<Artefact<T>>/* Document[] */, options?: ChangeStreamOptions & ProgressOption): AsyncGenerator<ChangeStreamDocument<Artefact<T>>>;//: ChangeStream<A, ChangeStreamDocument<A>>;
 };
 
-export class MongoStore<A extends Artefact> implements Store<A> {
+export class MongoStore<T extends {}> implements Store<T> {
     constructor(
         public readonly storage: MongoStorage,
         public readonly name: string,
-        public readonly collection: Collection<A>,
+        public readonly collection: Collection<Artefact<T>>,
         options: MongoStoreOptions = {}
     ) {
         this.options = { ...MongoStoreOptions.default, ...options };
@@ -208,11 +207,11 @@ export class MongoStore<A extends Artefact> implements Store<A> {
         }));
     }
 
-    async count(query: Filter<A>, options: CountOptions = {}) {
+    async count(query: Filter<Artefact<T>>, options: CountOptions = {}) {
         return this.collection.countDocuments(query, options);
     }
 
-    async* find(query: Filter<A>, options: FindOptions & ProgressOption = {}) {
+    async* find(query: Filter<Artefact<T>>, options: FindOptions & ProgressOption = {}) {
         // for await (const item of this._collection.find(query))
         //     yield item;
         if (options.progress) {
@@ -226,60 +225,57 @@ export class MongoStore<A extends Artefact> implements Store<A> {
         });
     }
 
-    async findOne(query: Filter<A>, options: FindOptions = {}) {
+    async findOne(query: Filter<Artefact<T>>, options: FindOptions = {}) {
         return await this.collection.findOne(query, options);
     }
 
-    async findOneAndUpdate(query: Filter<A>, update: UpdateFilter<A>, options: FindOneAndUpdateOptions = {}) {
+    async findOneAndUpdate(query: Filter<Artefact<T>>, update: UpdateFilter<Artefact<T>>, options: FindOneAndUpdateOptions = {}) {
         return await this.collection.findOneAndUpdate(query, update, options);
     }
 
-    async updateOne(query: Filter<A>, updates: UpdateFilter<A>, options: UpdateOptions = {}): Promise<UpdateOneResult<A>> {
+    async updateOne(query: Filter<Artefact<T>>, updates: UpdateFilter<Artefact<T>>, options: UpdateOptions = {}): Promise<UpdateOneResult<T>> {
         const result = await this.collection.updateOne(query!, updates, options);
         return { didWrite: !!result, result: result, query, updates };
     }
 
-    async updateOrCreate(artefact:/*  QueryableArtefact< */A/* > */, query?: Filter<A>, options: UpdateOptions & UpdateOrCreateOptions = {}): Promise<UpdateOrCreateResult<A>> {
+    async updateOrCreate(artefact: Partial<Artefact<T>>, query?: Filter<Artefact<T>>, options: UpdateOptions & UpdateOrCreateOptions = {}): Promise<UpdateOrCreateResult<T>> {
         options = { ...options, upsert: true }; //, ignoreUndefined: true, includeResultMetadata: true, returnDocument: "after", */ };
-        if (artefact._id) {
-            const keys = Object.keys(artefact);
-            if (keys.length !== 1 || keys[0] !== "_id") {
-                throw new RangeError("updateOrCreate(): artefact=${nodeUtil.inspect(artefact)} has an _id but query=${nodeUtil.inspect(query)}, when query should be based solely on _id");
-            }
+        if (!("_id" in artefact) && !query) {
+            throw new RangeError("updateOrCreate(): artefact=${nodeUtil.inspect(artefact)} does not have an _id and query is not specified either");
         }
-        let result: UpdateResult<A> | undefined = undefined;
-        query ??= artefact.Query.byId() as Filter<A>;
-        const oldArtefact = await this.collection.findOne<A>(query, options) ;
+        query ??= ({ _id: artefact._id, });
+        let result: UpdateResult<T> | undefined = undefined;
+        const oldArtefact = await this.collection.findOne<Artefact<T>>(query, options);
         if (oldArtefact !== null && !artefact._id) {
-            artefact._id = oldArtefact._id;
+            artefact._id = oldArtefact._id as Artefact<T>["_id"];
         }
-        const updates = ({ $set: getUpdates(oldArtefact, artefact.toData()).update }) as UpdateFilter<A>;
+        const updates = ({ $set: getUpdates(oldArtefact, artefact/* .toData() */).update }) as UpdateFilter<Artefact<T>>;
         // let update = { /* $set: { */ ...updates/* .update */ /* } *//* , ...(options.unsetUndefineds ? { $unset: updates.undefineds } : {}) */ } as UpdateFilter<A>;
         if (Object.keys(updates/* .update */).filter(u => u !== "_id").length > 0) {
             if (oldArtefact !== null) {
-                query = Artefact.Query.byId(oldArtefact) as Filter<A>;
+                query = ({ _id: oldArtefact._id, }) as Filter<Artefact<T>>;
             }
             result = await this.collection.updateOne(query, updates, options);
             if (!result?.acknowledged) {
                 throw new MongoError("updateOne not acknowledged for dbArtefact=${dbArtefact} dbUpdate=${dbUpdate} dbResult=${dbResult}");
             } else {
                 if (!artefact._id && !!result.upsertedId) {
-                    artefact._id = result.upsertedId.toString();
+                    artefact._id = result.upsertedId.toString() as Artefact<T>["_id"];
                 }
             }
         }
         return { didWrite: !!result, result: result, query, updates, _: artefact };
     }
 
-    bulkWrite(opsOrSource: AnyBulkWriteOperation<A>[] | AsyncGenerator<AnyBulkWriteOperation<A>>, options: BulkWriteOptions & BulkWriterOptions & ProgressOption = BulkWriterOptions.default): Promise<BulkWriteResult> {
+    bulkWrite(opsOrSource: AnyBulkWriteOperation<Artefact<T>>[] | AsyncGenerator<AnyBulkWriteOperation<Artefact<T>>>, options: BulkWriteOptions & BulkWriterOptions & ProgressOption = BulkWriterOptions.default): Promise<BulkWriteResult> {
         return Array.isArray(opsOrSource) ?
             this.collection.bulkWrite(opsOrSource, options) :
             this.bulkWriterFn(options)(opsOrSource);
     }
 
-    bulkWriterFn(options: BulkWriterOptions & BulkWriteOptions & ProgressOption = BulkWriterOptions.default): BulkWriterFn<A> {
+    bulkWriterFn(options: BulkWriterOptions & BulkWriteOptions & ProgressOption = BulkWriterOptions.default): BulkWriterFn<Artefact<T>> {
         const _this = this;
-        return async function bulkWrite(source: AsyncGenerator<AnyBulkWriteOperation<A>>) {
+        return async function bulkWrite(source: AsyncGenerator<AnyBulkWriteOperation<Artefact<T>>>) {
             var result: BulkWriteResult = new BulkWriteResult();
             for await (const ops of cargo(options.maxBatchSize, options.timeoutMs, source)) {
                 result = await _this.collection.bulkWrite(ops, options);
@@ -288,7 +284,7 @@ export class MongoStore<A extends Artefact> implements Store<A> {
         }
     };
 
-    bulkWriterStore(options: BulkWriterOptions & BulkWriteOptions & ProgressOption): BulkWriterStore<A> {
+    bulkWriterStore(options: BulkWriterOptions & BulkWriteOptions & ProgressOption): BulkWriterStore<T> {
         return ({
             ...this,
             bulkWriterFn: this.bulkWriterFn.bind(this),
@@ -297,7 +293,7 @@ export class MongoStore<A extends Artefact> implements Store<A> {
         });
     }
 
-    async* watch(query: Filter<A>/* Document[] = [] */, options: ChangeStreamOptions & ProgressOption = {})/* : Promise<ChangeStream<A, ChangeStreamDocument<A>>> */ {
+    async* watch(query: Filter<Artefact<T>>/* Document[] = [] */, options: ChangeStreamOptions & ProgressOption = {})/* : Promise<ChangeStream<A, ChangeStreamDocument<A>>> */ {
         if (options.progress) {
             options.progress.count = await this.collection.countDocuments(query);
         }

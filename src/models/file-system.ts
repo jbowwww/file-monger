@@ -14,7 +14,7 @@ export const getPartitions = throttle(
     async (): Promise<Partition[]> =>
         si.blockDevices().then(
             partitions => partitions
-                .map(p => ({ _T: "Partition", ...p }))
+                .map(p => ({ _T: "Partition" as const, ...p }))
                 .sort((p1, p2) => p2.mount.length - p1.mount.length))     // sort descending by mountpoint path length
         .then(partitions => {
             log("getPartitions(): partitions=%O", partitions);
