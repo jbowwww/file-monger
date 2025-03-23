@@ -101,6 +101,7 @@ export const builder = (yargs: yargs.Argv) => yargs
                             for await (const fsEntry of walk({ path, progress: task.progress })) {
                                 const _ = { [fsEntry._T]: fsEntry, };
                                 try {
+                                    log("%s: _=%O", task.name, _);
                                     const result = await store.updateOrCreate(_, { [`${fsEntry._T}.path`]: fsEntry.path });// Query<FileSystemArtefactSchema>(`${fsEntry._T}.path`, fsEntry.path);
                                     log("%s: result=%O\n%s: task.progress=%s", task.name, result, task.name, task.progress);
                                 } catch (e: any) {
@@ -123,9 +124,10 @@ export const builder = (yargs: yargs.Argv) => yargs
                             ]
                         }, { progress: task.progress }))) {
                             try {
+                                log("%s: _=%O", task.name, _);
                                 if (_.File) {
                                     const result = await store.updateOne({ _id: _._id }, { $set: { Hash: await Hash(_.File.path) } });
-                                    log("%s: result=%O\n%s: _=%O task.progress=%s", task.name, result, _, task.name, task.progress);
+                                    log("%s: result=%O\n%s: task.progress=%s", task.name, result, task.name, task.progress);
                                 }
                             } catch (e: any) {
                                 handleError(e, task, _, store);
@@ -147,8 +149,9 @@ export const builder = (yargs: yargs.Argv) => yargs
                             ]
                         }, { progress: task.progress }))) {
                             try {
+                                log("%s: _=%O", task.name, _);
                                 const result = await store.updateOne({ _id: _._id }, { $set: { Audio: await Audio(_.File!.path) } });
-                                log("%s: result=%O\n%s: _=%O task.progress=%s", task.name, result, _, task.name, task.progress);
+                                log("%s: result=%O\n%s: task.progress=%s", task.name, result, task.name, task.progress);
                             } catch (e: any) {
                                 handleError(e, task, _, store);
                             }

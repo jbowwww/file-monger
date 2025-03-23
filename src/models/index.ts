@@ -96,10 +96,11 @@ export const throttle = <TReturn extends any>(
 
     let isCached: boolean = false;
     let pendingPr: Promise<TReturn>;
-    let cached: TReturn | null;
+    let cached: TReturn | null = null;
     return (): TReturn | Promise<TReturn> => {
         if (!isCached) {
             isCached = true;
+            cached = null;
             pendingPr = fn().then(r => {
                 log("throttle(): Function '%s' returned value %O", fn.name ?? "(anon)", r);
                 return cached = r;
@@ -116,7 +117,6 @@ export const throttle = <TReturn extends any>(
             log("throttle(): Returned cached=%O", cached);
             return cached;
         }
-        return cached ?? pendingPr;
     };
 };
 export const memoize = throttle;

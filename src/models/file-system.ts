@@ -72,6 +72,7 @@ export const walk = async function *walk({
     callback = (e, d) => ({ emit: true, recurse: !maxDepth || d <= maxDepth }),
     emitError = true,
     depth = 0,
+    partitions,
     progress,
 }: {
     path: string,
@@ -79,11 +80,13 @@ export const walk = async function *walk({
     callback?: WalkCallbackFn,
     emitError?: boolean,
     depth?: number,
+    partitions?: Iterable<Partition>,
     progress?: Progress,
 }): AsyncGenerator<Entry> {
     try {
-        const partition = await getPartitionForPath({ path });
-        const entry = await Entry({ path, partition }); // TODO: eventually find a way to avoid finding the containing drive for every path - find a way to know when the path crosses under any of the stored mountpoints
+        partitions ??= await getPartitions();
+        const partition = await getPartitionForPath({ path, partitions });
+        const entry = await Entry({ path, partition, partitions }); // TODO: eventually find a way to avoid finding the containing drive for every path - find a way to know when the path crosses under any of the stored mountpoints
         const { emit, recurse } = callback(entry, depth);
         if (progress) progress.count++;
         if (emit) {
@@ -95,7 +98,7 @@ export const walk = async function *walk({
                 if (progress) progress.total += entries.length;
                 for await (const dirEntry of entries) {
                     if (![".", ".."].includes(dirEntry)) {
-                        yield* walk({ path: nodePath.join(path, dirEntry), maxDepth, callback, emitError, depth: depth + 1, progress });
+                        yield* walk({ path: nodePath.join(path, dirEntry), maxDepth, callback, emitError, depth: depth + 1, partitions, progress });
                     }
                 }
             } catch (err) {
