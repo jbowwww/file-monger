@@ -84,16 +84,17 @@ export const builder = (yargs: yargs.Argv) => yargs
 
             await Task.start(
 
-                // async function enumerateSystemDrives(task: Task) {
-                //     await Task.repeat({ postDelay: 5000 }, async() => {           // 5s
-                //         const drives = await getPartitions();
-                //         const ops = drives.map(d => ({ "updateOne": {
-                //             filter: { "Drive.uuid": { $eq: d.uuid } },
-                //             update: { $set: { "Drive": d } },
-                //             upsert: true,
-                //         } }))
-                //     });
-                // },
+                async function enumerateSystemDrives(task: Task) {
+                    await Task.repeat({ postDelay: 5000 }, async() => {           // 5s
+                        const drives = await getPartitions();
+                        const ops = drives.map(d => ({ "updateOne": {
+                            filter: { "Drive.uuid": { $eq: d.uuid } },
+                            update: { $set: { "Drive": d } },
+                            upsert: true,
+                        } }));
+                        store.bulkWrite(ops);
+                    });
+                },
 
                 async function indexFileSystem(task: Task) {
                     await Task.repeat({ postDelay: 180000/*0*/, }, async () => {   // 3/*0*/ minutes
