@@ -18,7 +18,7 @@ export type FileSystemSchema = /* Artefact< */{
     Directory?: Directory;
     Unknown?: Unknown;
     Hash?: Hash;
-    Drive?: Partition;
+    Partition?: Partition;
 }/* > */;
 export type FileSystemArtefactSchema = Artefact<FileSystemSchema>;
 //     constructor(data: Partial<FileSystemArtefactSchema> | Entry) {
@@ -69,8 +69,8 @@ export const builder = (yargs: yargs.Argv) => yargs
             const storage = new MongoStorage(argv.dbUrl);
             const store = await storage.store<FileSystemSchema>("fileSystemEntries", {
                 createIndexes: [{
-                    index: { "File.path": 1, "Directory.path": 1, "Unknown.path": 1 },
-                    options: { unique: true }
+                    index: { "File.path": 1, "Directory.path": 1, "Unknown.path": 1, "Partition.uuid": 1, "Partition.model": 1, "Partition.serial": 1, },
+                    options: { unique: true, },
                 }],
             });//.bulkWriterStore();
 
@@ -86,10 +86,10 @@ export const builder = (yargs: yargs.Argv) => yargs
 
                 async function enumerateSystemDrives(task: Task) {
                     await Task.repeat({ postDelay: 5000 }, async() => {           // 5s
-                        const drives = await getPartitions();
-                        const ops = drives.map(d => ({ "updateOne": {
-                            filter: { "Drive.uuid": { $eq: d.uuid } },
-                            update: { $set: { "Drive": d } },
+                        const partitions = await getPartitions();
+                        const ops = partitions.map(p => ({ "updateOne": {
+                            filter: { "Partition.uuid": { $eq: p.uuid } },
+                            update: { $set: { "Partition": p } },
                             upsert: true,
                         } }));
                         store.bulkWrite(ops);

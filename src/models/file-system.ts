@@ -10,16 +10,17 @@ const log = debug(nodePath.basename(module.filename));
 
 export type Partition = Aspect<"Partition", si.Systeminformation.BlockDevicesData>;
 export const getPartitions = throttle(
-    { expiryAgeMs: 5000 },
-    async (): Promise<Partition[]> =>
-        si.blockDevices().then(
+    { expiryAgeMs: 15000 },
+    async function getPartitions(): Promise<Partition[]> {
+        return si.blockDevices().then(
             partitions => partitions
                 .map(p => ({ _T: "Partition" as const, ...p }))
                 .sort((p1, p2) => p2.mount.length - p1.mount.length))     // sort descending by mountpoint path length
         .then(partitions => {
             log("getPartitions(): partitions=%O", partitions);
             return partitions;
-    })
+        });
+    }
 );
 
 export type GetPartitionForPathOptions = {
