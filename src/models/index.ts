@@ -62,12 +62,49 @@ export const isFunction = (fn: any): fn is Function => typeof fn === "function";
 
 export type AsyncFunction<TArgs extends any[] = [], TReturn extends any = void> = (...args: TArgs) => Promise<TReturn>;
 
+export type TypeGuard<T> = (value: any) => value is T;
+
+const getUnorderedParameters = <P1, P2>(
+    p1: P1 | P2, typeGuard1: TypeGuard<P1>,
+    p2: P2 | P1 | undefined, typeGuard2: TypeGuard<P2>
+): [P1, P2] => {
+    let r1: P1, r2: P2;
+    if (!p2) {
+        if (!p1 || !typeGuard1(p1)) {
+            throw new TypeError("getUnorderedParameters(): First parameter should be a P1, or a P2 object followed by a P1");
+        }
+    } else if (typeGuard1(p1)) {
+        r1 = p1;
+        r2 = p2 as P2;
+    } else if (typeGuard2(p1)) {
+        if (!typeGuard1(p2)) {
+            throw new TypeError("getUnorderedParameters(): First parameter should be a P1, or a P2 object followed by a P1");
+        }
+        r1 = p2;
+        r2 = p1;
+    }
+    return [r1!, r2!];
+};
+
+const getUnorderedParameterAndOption = <P1, P2>(
+    p1: P1 | Partial<P2>, typeGuard1: (value: any) => boolean,
+    p2: Partial<P2> | P1 | undefined, typeGuard2: (value: any) => boolean,
+    defaultOptions?: P2
+): [P1, P2] => {
+    let [r1, r2] = getUnorderedParameters(p1 as P1 | P2, typeGuard1 as TypeGuard<P1>, p2 as P2 | P1 | undefined, typeGuard2 as TypeGuard<P2>);
+    if (defaultOptions) {
+        r2 = { ...defaultOptions, ...r2 };
+    }
+    return [r1, r2];
+};
+
+export type OptionsDefaultContainer<T extends {}> = { default: T; };
+export const mergeOptions = <T extends {}>(defaultOptionsContainer: OptionsDefaultContainer<T>, options?: T) => ({ ...defaultOptionsContainer.default, ...options });
+
 export type ThrottleOptions = {
     expiryAgeMs: number;
 };
-export const ThrottleOptions: {
-    default: ThrottleOptions;
-} = {
+export const ThrottleOptions: OptionsDefaultContainer<ThrottleOptions> = {
     default: {
         expiryAgeMs: 0,     // never expires, so always returns cached value after initial call, aka memoize()
     },
@@ -77,23 +114,9 @@ export const throttle = <TReturn extends any>(
     fnOrOptions: AsyncFunction<[], TReturn> | ThrottleOptions,
     optionsOrFn?: AsyncFunction<[], TReturn> | ThrottleOptions,
 ) => {
-    let fn: AsyncFunction<[], TReturn>;
-    let options: ThrottleOptions;
-    if (!optionsOrFn) {
-        if (!fnOrOptions || !isFunction(fnOrOptions)) {
-            throw new TypeError("throttle(): First parameter should be a function, or a ThrottleOptions object followed by the function");
-        }
-    } else if (isFunction(fnOrOptions)) {
-        fn = fnOrOptions;
-        options = { ...ThrottleOptions.default, ...optionsOrFn };
-    } else if (isObject(fnOrOptions)) {
-        if (!isFunction(optionsOrFn)) {
-            throw new TypeError("throttle(): First parameter should be a function, or a ThrottleOptions object followed by the function");
-        }
-        fn = optionsOrFn;
-        options = { ...ThrottleOptions.default, ...fnOrOptions };
-    }
-
+    const [fn, options] = getUnorderedParameterAndOption<AsyncFunction<[], TReturn>, ThrottleOptions>(
+        fnOrOptions, isFunction as TypeGuard<AsyncFunction<[], TReturn>>,
+        optionsOrFn, isObject as TypeGuard<ThrottleOptions>);
     let isCached: boolean = false;
     let pendingPr: Promise<TReturn>;
     let cached: TReturn | null = null;
@@ -119,7 +142,12 @@ export const throttle = <TReturn extends any>(
         }
     };
 };
-export const memoize = throttle;
+
+export type MemoizeOptions = Omit<ThrottleOptions, "expiryAgeMs">;
+export const memoize = <TReturn extends any>(
+    fnOrOptions: AsyncFunction<[], TReturn> | MemoizeOptions,
+    optionsOrFn?: AsyncFunction<[], TReturn> | MemoizeOptions,
+) => throttle(fnOrOptions as AsyncFunction<[], TReturn> | ThrottleOptions, { ...optionsOrFn, expiryAgeMs: 0, });
 
 export type Id<T> = { [K in keyof T]: T[K] };
 export type Converter<T, K extends string, V> = T extends any ? { [P in keyof Id<Record<K, V> & T>]: Id<Record<K, V> & T>[P] } : never;
