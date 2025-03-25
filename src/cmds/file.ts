@@ -2,11 +2,11 @@ import yargs from "yargs";
 import { globalOptions } from "../cli";
 import { Task } from "../task";
 import { MongoStorage, Store } from "../db";
-import { walk, Hash, Unknown, File, Directory, getPartitions, Partition } from "../models/file-system";
+import { walk, Hash, Unknown, File, Directory, getPartitions, Partition, getDisks, Disk } from "../models/file-system";
 import exitHook from "async-exit-hook";
 import { Audio } from "../models/audio";
 import * as nodePath from "node:path";
-import { MongoError } from "mongodb";
+import { AnyBulkWriteOperation, MongoError } from "mongodb";
 
 import debug from "debug";
 import { Artefact } from "../models/artefact";
@@ -69,7 +69,7 @@ export const builder = (yargs: yargs.Argv) => yargs
             const storage = new MongoStorage(argv.dbUrl);
             const store = await storage.store<FileSystemSchema>("fileSystemEntries", {
                 createIndexes: [{
-                    index: { "File.path": 1, "Directory.path": 1, "Unknown.path": 1, "Partition.uuid": 1, "Partition.model": 1, "Partition.serial": 1, },
+                    index: { "File.path": 1, "Directory.path": 1, "Unknown.path": 1, "Partition.uuid": 1, "Disk.model": 1, "Disk.serial": 1, },
                     options: { unique: true, },
                 }],
             });//.bulkWriterStore();
@@ -84,14 +84,21 @@ export const builder = (yargs: yargs.Argv) => yargs
 
             await Task.start(
 
-                async function enumerateSystemDrives(task: Task) {
+                async function enumerateBlockDevices(task: Task) {
                     await Task.repeat({ postDelay: 5000 }, async() => {           // 5s
+                        const disks = await getDisks();
                         const partitions = await getPartitions();
-                        const ops = partitions.map(p => ({ "updateOne": {
+                        const ops: AnyBulkWriteOperation<Artefact<FileSystemArtefactSchema>>[] = [];
+                        ops.push(...disks.map(d => ({ "updateOne": {
+                            filter: { $and: [ { "Disk.model": { $eq: d.model } }, { "Disk.serial": { $eq: d.serial } }, ], },
+                            update: { $set: { "Disk": d } },
+                            upsert: true,
+                        } })));
+                        ops.push(...partitions.map(p => ({ "updateOne": {
                             filter: { "Partition.uuid": { $eq: p.uuid } },
                             update: { $set: { "Partition": p } },
                             upsert: true,
-                        } }));
+                        } })));
                         store.bulkWrite(ops);
                     });
                 },

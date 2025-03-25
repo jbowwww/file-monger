@@ -1,27 +1,39 @@
 import * as nodeFs from "node:fs";
 import * as nodePath from "node:path";
 import * as nodeCrypto from "node:crypto";
-import { Aspect, DiscriminatedModel, throttle, Timestamped } from ".";
+import { Aspect, DiscriminatedModel, throttle as cache, Timestamped } from ".";
 import { Progress } from "../progress";
 import si from "systeminformation";
 
 import debug from "debug";
 const log = debug(nodePath.basename(module.filename));
 
-export type Partition = Aspect<"Partition", si.Systeminformation.BlockDevicesData>;
-export const getPartitions = throttle(
-    { expiryAgeMs: 15000 },
-    async function getPartitions(): Promise<Partition[]> {
-        return si.blockDevices().then(
-            partitions => partitions
-                .map(p => ({ _T: "Partition" as const, ...p }))
-                .sort((p1, p2) => p2.mount.length - p1.mount.length))     // sort descending by mountpoint path length
-        .then(partitions => {
-            log("getPartitions(): partitions=%O", partitions);
-            return partitions;
-        });
+export type Test<T> = (value: T) => boolean;
+export const switchStream = <I extends {}>(iterable: Iterable<I>, ...tests: Test<I>[]): Array<Iterable<I>> => {
+    const returns: I[][] = tests.map(test => []);
+    for (const input of iterable) {
+        returns[tests.findIndex(test => test(input))].push(input);
     }
-);
+    return returns;
+};
+
+export const FileSystemBlockDevicesExpiryAgeMs = 15000;
+export const blockDevices: si.Systeminformation.BlockDevicesData[] = [];
+export const getBlockDevices = cache({
+    expiryAgeMs: FileSystemBlockDevicesExpiryAgeMs,
+}, async function getBlockDevices() {
+    return await si.blockDevices();
+});
+export type Disk = Aspect<"Disk", Omit<si.Systeminformation.BlockDevicesData, "uuid">>;
+export const getDisks = async (): Promise<Disk[]> =>
+    getBlockDevices().then(blockDevices => blockDevices
+        .filter(bd => bd.type === "disk")
+        .map(bd => ({ _T: "Disk", ...bd })));
+export type Partition = Aspect<"Partition", Omit<si.Systeminformation.BlockDevicesData, "model" | "serial">>;
+export const getPartitions = async(): Promise<Partition[]> =>
+    getBlockDevices().then(blockDevices => blockDevices
+        .filter(bd => bd.type === "part")
+        .map(bd => ({ _T: "Partition", ...bd })));
 
 export type GetPartitionForPathOptions = {
     path: string;
@@ -43,7 +55,7 @@ export type EntryTypeName = typeof EntryTypeNames[keyof typeof EntryTypeNames];
 export type EntryBase<_T extends EntryTypeName> = Aspect<_T, /* Timestamped< */{
     path: string;
     stats: nodeFs.Stats;
-    partition?: si.Systeminformation.BlockDevicesData;
+    partition?: Partition;
 }>/* > */;
 
 export type File = EntryBase<typeof EntryTypeNames.File>;

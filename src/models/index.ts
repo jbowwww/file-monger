@@ -120,7 +120,7 @@ export const throttle = <TReturn extends any>(
     let isCached: boolean = false;
     let pendingPr: Promise<TReturn>;
     let cached: TReturn | null = null;
-    return (): TReturn | Promise<TReturn> => {
+    return (): Promise<TReturn> => {
         if (!isCached) {
             isCached = true;
             cached = null;
@@ -138,7 +138,7 @@ export const throttle = <TReturn extends any>(
             return pendingPr;
         } else {
             log("throttle(): Returned cached=%O", cached);
-            return cached;
+            return Promise.resolve(cached);
         }
     };
 };
