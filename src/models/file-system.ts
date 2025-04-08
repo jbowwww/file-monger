@@ -1,7 +1,7 @@
 import * as nodeFs from "node:fs";
 import * as nodePath from "node:path";
 import * as nodeCrypto from "node:crypto";
-import { Aspect, DiscriminatedModel, throttle as cache, Timestamped } from ".";
+import { Aspect, Constructor, DiscriminatedModel, PartiallyRequired, throttle as cache } from ".";
 import { Progress } from "../progress";
 import si from "systeminformation";
 
@@ -24,26 +24,76 @@ export const getBlockDevices = cache({
 }, async function getBlockDevices() {
     return await si.blockDevices();
 });
-export type Disk = Aspect<"Disk", Omit<si.Systeminformation.BlockDevicesData, "uuid">>;
-export const getDisks = async (): Promise<Disk[]> =>
-    getBlockDevices().then(blockDevices => blockDevices
-        .filter(bd => bd.type === "disk")
-        .map(bd => ({ _T: "Disk", ...bd })));
-export type Partition = Aspect<"Partition", Omit<si.Systeminformation.BlockDevicesData, "model" | "serial">>;
-export const getPartitions = async(): Promise<Partition[]> =>
-    getBlockDevices().then(blockDevices => blockDevices
-        .filter(bd => bd.type === "part")
-        .map(bd => ({ _T: "Partition", ...bd })));
+
+export class BlockDevice extends Aspect {
+    name: string;
+    identifier: string;
+    type: string;
+    fsType: string;
+    mount: string;
+    size: number;
+    physical: string;
+    label: string;
+    removable: boolean;
+    protocol: string;
+    group?: string;
+    device?: string;
+
+    constructor(blockDevice: BlockDevice) {
+        super();
+        this.name = blockDevice.name;
+        this.identifier = blockDevice.identifier;
+        this.type = blockDevice.type;
+        this.fsType = blockDevice.fsType;
+        this.mount = blockDevice.mount;
+        this.size = blockDevice.size;
+        this.physical = blockDevice.physical;
+        this.label = blockDevice.label;
+        this.removable = blockDevice.removable;
+        this.protocol = blockDevice.protocol;
+        this.group = blockDevice.group;
+        this.device = blockDevice.device;
+    }
+}
+
+export class Disk extends BlockDevice {
+    model: string;
+    serial: string;
+    constructor(disk: Disk) {
+        super(disk);
+        this.model = disk.model;
+        this.serial = disk.serial;
+    }
+    static async getDisks(): Promise<Disk[]> {
+        return getBlockDevices().then(blockDevices => blockDevices
+            .filter(bd => bd.type === "disk")
+            .map(bd => ({ _T: "Disk", ...bd })));
+    }
+}
 
 export type GetPartitionForPathOptions = {
     path: string;
     partitions?: Iterable<Partition>;
 };
-export const getPartitionForPath = async (pathOrOptions: string | GetPartitionForPathOptions) => {
-    const options: GetPartitionForPathOptions = typeof pathOrOptions === "string" ? { path: pathOrOptions } : pathOrOptions;
-    options.partitions ??= await getPartitions();
-    return Array.from(options.partitions).filter(p => options.path.startsWith(p.mount)).at(0);
-};
+
+export class Partition extends BlockDevice {
+    label: string;
+    constructor(partition: Partition) {
+        super(partition);
+        this.label = partition.label;
+    }
+    static async getAll(): Promise<Partition[]> {
+        return getBlockDevices().then(blockDevices => blockDevices
+            .filter(bd => bd.type === "part")
+            .map(bd => ({ _T: "Partition", ...bd })));
+    }
+
+    static async getForPath(pathOrOptions: string | GetPartitionForPathOptions) {
+        const options: GetPartitionForPathOptions = typeof pathOrOptions === "string" ? { path: pathOrOptions } : pathOrOptions;
+        options.partitions ??= await Partition.getAll();
+        return Array.from(options.partitions).filter(p => options.path.startsWith(p.mount)).at(0);
+    };
+}
 
 export const EntryTypeNames = {
     File: "File" as const,
@@ -52,28 +102,34 @@ export const EntryTypeNames = {
 };
 //  as const
 export type EntryTypeName = typeof EntryTypeNames[keyof typeof EntryTypeNames];
-export type EntryBase<_T extends EntryTypeName> = Aspect<_T, /* Timestamped< */{
+export abstract class Entry implements Aspect {
     path: string;
     stats: nodeFs.Stats;
     partition?: Partition;
-}>/* > */;
+    constructor({ path, stats, partition }: Entry) {
+        this.path = path;
+        this.stats = stats;
+        this.partition = partition;
+    }
+    static async create({ path, stats, partition, partitions }: PartiallyRequired<Entry, "path"> & { partitions?: Iterable<Partition>; }) {
+        stats ??= await nodeFs.promises.stat(path);
+        partition ??= (await Partition.getForPath({ partitions, path }));
+        const entry = (
+            stats.isFile() ? new File({ path, stats, partition }) :
+            stats.isDirectory() ? new Directory({ path, stats, partition }) :
+            new Unknown({ path, stats, partition }) );
+        return entry;
+    }
+}
 
-export type File = EntryBase<typeof EntryTypeNames.File>;
-export const File = ({ path, stats, partition }: Omit<File, "_T">): File => ({ _T: EntryTypeNames.File , path, stats, partition });
-export type Directory = EntryBase<typeof EntryTypeNames.Directory>;
-export const Directory = ({ path, stats, partition }: Omit<Directory, "_T">): Directory => ({ _T: EntryTypeNames.Directory, path, stats, partition });
-export type Unknown = EntryBase<typeof EntryTypeNames.Unknown>;
-export const Unknown = ({ path, stats, partition }: Omit<Unknown, "_T">): Unknown => ({ _T: EntryTypeNames.Unknown, path, stats, partition });
+export class File extends Entry { constructor(file: File) { super(file); }}
+export class Directory extends Entry { }
+export class Unknown extends Entry { }
 
-export type Entry = File | Directory | Unknown;
-export const Entry = async ({ path, partition, partitions }: { path: string, partition?: Partition, partitions?: Iterable<Partition>}): Promise<Entry> => {
-    const stats = await nodeFs.promises.stat(path!);
-    partition ??= (await getPartitionForPath({ partitions, path }));
-    return stats.isFile() ? File({ path, stats, partition }) : stats.isDirectory() ? Directory({ path, stats, partition }) : Unknown({ path, stats, partition });
-};
-export type NamespacedEntry = DiscriminatedModel<Entry, "_T">;
+// export type Entry = File | Directory | Unknown;
+// export type NamespacedEntry = DiscriminatedModel<Constructor<File | Directory | Unknown>>;
 
-export const isEntry = (e: any, _T: EntryTypeName): e is EntryBase<typeof _T> => !!e && e._T === _T && typeof e.path === 'string' && typeof e.stats === 'object';
+export const isEntry = (e: any, _T: EntryTypeName): e is Entry => !!e && e._T === _T && typeof e.path === 'string' && typeof e.stats === 'object';
 export const isFile = (f: any): f is File => isEntry(f, EntryTypeNames.File);
 export const isDirectory = (d: any): d is Directory => isEntry(d, EntryTypeNames.Directory);
 export const isUnknown = (u: any): u is Unknown => isEntry(u, EntryTypeNames.Unknown);
@@ -97,9 +153,9 @@ export const walk = async function *walk({
     progress?: Progress,
 }): AsyncGenerator<Entry> {
     try {
-        partitions ??= await getPartitions();
-        const partition = await getPartitionForPath({ path, partitions });
-        const entry = await Entry({ path, partition, partitions }); // TODO: eventually find a way to avoid finding the containing drive for every path - find a way to know when the path crosses under any of the stored mountpoints
+        partitions ??= await Partition.getAll();
+        const partition = await Partition.getForPath({ path, partitions });
+        const entry = await Entry.create({ path, partition, partitions }); // TODO: eventually find a way to avoid finding the containing drive for every path - find a way to know when the path crosses under any of the stored mountpoints
         const { emit, recurse } = callback(entry, depth);
         if (progress) progress.count++;
         if (emit) {
@@ -127,24 +183,23 @@ export const walk = async function *walk({
     }
 };
 
-export const enum HashType { Hash = "Hash" };
-export type Hash = Aspect<HashType.Hash, Timestamped<{ sha256: string; }>>;
-
-export const Hash = async (path: string): Promise<Hash> => {
-    try {
-        const hashDigest = nodeCrypto.createHash('sha256');
-        const input = nodeFs.createReadStream(path);
-        const sha256 = await new Promise((resolve: (value: string) => void, reject): void => {
-            input.on('end', () => resolve(hashDigest.digest('hex')));
-            input.on('error', () => reject(`Error hashing file '${path}'`));
-            input.on('readable', () => {
-                const data = input.read();
-                if (data)
-                    hashDigest.update(data);
-            });
-        });
-        return ({ _T: HashType.Hash, _ts: new Date(), sha256 });
-    } catch (error) {
-        throw new Error(`Error hashing file '${path}': ${error}`);
+export class Hash extends Aspect {
+    constructor(public sha256: string) { super(); }
+    static async create(path: string): Promise<Hash> {
+        try {
+            const hashDigest = nodeCrypto.createHash('sha256');
+            const input = nodeFs.createReadStream(path);
+            return new Hash(await new Promise((resolve: (value: string) => void, reject): void => {
+                input.on('end', () => resolve(hashDigest.digest('hex')));
+                input.on('error', () => reject(`Error hashing file '${path}'`));
+                input.on('readable', () => {
+                    const data = input.read();
+                    if (data)
+                        hashDigest.update(data);
+                });
+            }));
+        } catch (error) {
+            throw new Error(`Error hashing file '${path}': ${error}`);
+        }
     }
-};
+}

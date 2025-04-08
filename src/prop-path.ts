@@ -1,6 +1,13 @@
 export type ObjectWithProperties = { [K: string]: any };
 
-export const get = (obj: ObjectWithProperties, path: string | number): any => (path as string).split('.').reduce((prev, curr) => prev ? prev[curr] : undefined, obj);
+export const get = <T = any>(obj: ObjectWithProperties, path: string | number, createPaths: boolean = false, defaultValue?: T): T =>
+    <T>((path as string).split('.').reduce(
+        (prev, curr, index, arr) => prev ? (
+            prev?.[curr] ?? (
+                prev[curr] = index === arr.length - 1 ?
+                    defaultValue :
+                    createPaths ? {} : undefined
+         )) : defaultValue, obj));
 //     const paths = (path as string).split(".");
 //     if (paths.length === 1) {
 //         return obj[paths.shift()!];
@@ -8,7 +15,7 @@ export const get = (obj: ObjectWithProperties, path: string | number): any => (p
 //     return get(obj[paths.shift()!], paths.join("."));
 // }
 
-export const set = (obj: ObjectWithProperties, path: string | number, value: any): any => {
+export const set = <T = any>(obj: ObjectWithProperties, path: string | number, value: any): T | undefined => {
     const paths = (path as string).split(".");
     if (paths.length === 1) {
         obj[paths.shift()!] = value;

@@ -64,8 +64,7 @@ export class MongoStorage implements Storage {
     async store<T extends {}>(name: string, options?: MongoStoreOptions): Promise<MongoStore<T>> {
         await this.connect();
         log("Getting store '%s' options=%O ... ", name, options);
-        const collection = this._db!.collection<Artefact<T>>(name, options);
-        const store = new MongoStore<T>(this, name, collection, options);
+        const store = new MongoStore<T>(this, name, options);
         log("OK");
         return store;
     }
@@ -187,12 +186,13 @@ export interface Store<T extends {}> {
 };
 
 export class MongoStore<T extends {}> implements Store<T> {
+    public readonly collection: Collection<Artefact<T>>;
     constructor(
         public readonly storage: MongoStorage,
         public readonly name: string,
-        public readonly collection: Collection<Artefact<T>>,
         options: MongoStoreOptions = {}
     ) {
+        this.collection = storage.db!.collection<Artefact<T>>(name, options);
         this.options = { ...MongoStoreOptions.default, ...options };
         if (this.options.createIndexes && this.options.createIndexes.length > 0) {
             this.createIndexes(...this.options.createIndexes);

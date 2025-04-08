@@ -2,19 +2,37 @@ import yargs from "yargs";
 import { globalOptions } from "../cli";
 import { Task } from "../task";
 import { MongoStorage, Store } from "../db";
-import { walk, Hash, Unknown, File, Directory, getPartitions, Partition, getDisks, Disk } from "../models/file-system";
 import exitHook from "async-exit-hook";
-import { Audio } from "../models/audio";
+import * as Audio from "../models/audio";
 import * as nodePath from "node:path";
 import { AnyBulkWriteOperation, MongoError } from "mongodb";
 
 import debug from "debug";
 import { Artefact } from "../models/artefact";
 import { DiscriminatedModel } from "../models";
+import { PipelinePromise } from "node:stream";
+import * as FS from "../models/file-system";
 const log = debug(nodePath.basename(module.filename));
 
-export type FileSystemSchema = DiscriminatedModel<File | Directory | Unknown | Hash | Partition | Disk>;
+export type FileSystemSchema = DiscriminatedModel<FS.Disk | FS.Partition | FS.File | FS.Directory | FS.Unknown | FS.Hash>;
 export type FileSystemArtefactSchema = Artefact<FileSystemSchema>;
+
+export const FileSystemArtefact = Artefact.Type({
+    file: FS.File,
+    hash: FS.Hash,
+    audio: Audio.Audio,
+}, (e: Entry) => ({ [e.constructor.name as "file"]: e as FS.File }));
+
+export const DirectoryArtefact = Artefact.Type({
+    directory: FS.Directory,
+}, (e: Entry) => ({ [e.constructor.name]: e as FS.Directory }));
+
+export const UnknownArtefact = Artefact.Type({
+    unknown: FS.Unknown,
+}, (e: Entry) => ({ [e.constructor.name]: e as FS.Unknown }));
+
+// export type FileSystemArtefact = { [K in keyof typeof FileSystemArtefact]: Awaited<ReturnType<typeof FileSystemArtefact[K]>>; };
+
 
 export const command = 'file';
 export const description = 'File commands';
@@ -51,8 +69,8 @@ export const builder = (yargs: yargs.Argv) => yargs
 
                 async function enumerateBlockDevices(task: Task) {
                     await Task.repeat({ postDelay: 5000 }, async() => {           // 5s
-                        const disks = await getDisks();
-                        const partitions = await getPartitions();
+                        const disks = await FS.Disk.getDisks();
+                        const partitions = await FS.Partition.getAll();
                         const ops: AnyBulkWriteOperation<FileSystemArtefactSchema>[] = [];
                         ops.push(...disks.map(d => ({ "updateOne": {
                             filter: { $and: [ { "Disk.model": { $eq: d.model } }, { "Disk.serial": { $eq: d.serial } }, ], },
