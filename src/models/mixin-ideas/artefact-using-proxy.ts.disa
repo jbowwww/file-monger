@@ -1,13 +1,47 @@
 import * as nodePath from "node:path";
-import * as nodeUtil from "node:util";
-import { isProxy, isDate } from "node:util/types";
-import { Aspect, AsyncFunction, Constructor, mapObject, NamespacedAspect as ArtefactNamespacedProperty } from ".";
-import { Filter } from "mongodb";
-import { get } from "../prop-path";
 
 import debug from "debug";
+import { Aspect, AspectFn, AsyncFunction, Choose, Constructor, DeepProps, mapObject } from ".";
+import { Filter } from "mongodb";
+import { get } from "../prop-path";
+import { isDate } from "node:util";
+import { isProxy } from "node:util/types";
+import * as nodeUtil from "node:util";
+import { AbstractConstructor } from "./index";
 const log = debug(nodePath.basename(module.filename));
 const logProxy = log.extend("Proxy");
+
+export enum UpdateTimestamps {
+    create = "create",
+    check = "check",
+    update = "update",
+};
+
+// export type Artefact<T = {}> = {
+//     // (aspectFn: AsyncFunction<any> | Constructor<any>): Aspect;
+// } & T;
+
+export const isArtefact = (value: any): value is Artefact => typeof value._ts === "object" && value._ts instanceof Timestamps && typeof value._v === "number";
+
+const updateTimestamps = (updateType: UpdateTimestamps, _: Artefact<any>) => {
+
+};
+
+// export class Artefact<T extends {}> {
+//     _id?: string;
+//     _ts: TimestampTreeRoot<T>;
+//     _v: number;
+//     _e?: Error | Error[];
+//     constructor(data?: T | Artefact<T>, enableTimestamps: boolean = true) => {
+//     const _: Artefact = { _ts: new Timestamps(), _v: 1, ...data } as Artefact<T>;
+//     return _;
+// };
+
+// Artefact.stream = async function* stream<I, T extends {}>(source: AsyncIterable<I>, transform: (...args: [I]) => T) {
+//     for await (const item of source) {
+//         yield /* transform ?  */this(transform(...[item]))/*  : this(item, true) */;
+//     }
+// };
 
 export type TimestampTree<T> = (T extends {} ? {
     [K in keyof T]: TimestampTree<T[K]>;
@@ -65,41 +99,43 @@ export type ArtefactSchema<T extends ArtefactTypes> = {
 //     _e?: Error | Error[];
 // } & S;
 
-// export const ArtefactType = /* <
-//         T extends ArtefactTypes,
-//         S extends ArtefactSchema<T> = ArtefactSchema<T>,
-//         I = Partial<S>
-//     > */(
-//         types: T,
-//         createFn: (init: I) => S
-//     ): (init: I) => Artefact<S> {
-//         return function Artefact(init: I): Artefact<S> {
-//             const _ = { ...createFn(init), _ts: new Timestamps(), _v: 1, };
-//             return ChangeTrackingProxy<T, S>(
-//                 _,
-//                 (path: string, oldValue: any, newValue: any, isModified: boolean) => {
-//                     const _ts = get(_._ts, path, true, new Timestamps());
-//                     if (isModified) {
-//                         _ts._updated = new Date();
-//                     } else {
-//                         _ts._checked = new Date();
-//                     }
-//                 });
-//         };
-//     }
+export const Artefact_ = {
+    Type<
+        T extends ArtefactTypes,
+        S extends ArtefactSchema<T> = ArtefactSchema<T>,
+        I = Partial<S>
+    >(
+        types: T,
+        createFn: (init: I) => S
+    ): (init: I) => Artefact<S> {
+        return function Artefact(init: I): Artefact<S> {
+            const _ = { ...createFn(init), _ts: new Timestamps(), _v: 1, };
+            return ChangeTrackingProxy<T, S>(
+                _,
+                (path: string, oldValue: any, newValue: any, isModified: boolean) => {
+                    const _ts = get(_._ts, path, true, new Timestamps());
+                    if (isModified) {
+                        _ts._updated = new Date();
+                    } else {
+                        _ts._checked = new Date();
+                    }
+                });
+        };
+    }
 
-// }
+}
 
-export const isArtefact = (o: any): o is Artefact => o && typeof o === "object" && o instanceof Artefact;
-
-export abstract class Artefact/* <
+export class Artefact/* <
     T extends ArtefactTypes,
     S extends ArtefactSchema<T> = ArtefactSchema<T>,
     I = Partial<S>
 > */ {
-    
-    static isArtefact = isArtefact;
-
+    static isArtefact = (o: any): o is Artefact =>
+        typeof o === "object" && (
+            o._isArtefact ||
+            typeof o._id === "string" ||
+            typeof o._id === "object" ||
+            o.prototype === Artefact.prototype);
 /* 
     static Type<
         T extends ArtefactTypes,
@@ -123,27 +159,22 @@ export abstract class Artefact/* <
                 });
         };
     } */
-    
-    // export static is = Symbol("isArtefact: flag with value true to indicate this is an instance of Artefact");
-    // export static modifiedPaths = Symbol();
-
+    readonly _isArtefact = true; // TODO: DoNotSerialize either marked as decorator or maybe use double __ prefix or # (except this prop anyway should be public?)
     _id?: string;
     _v: number;
     _ts!: TimestampTree<{}>;
     _e?: Error[];
 
     #modifiedPaths: Set<string> = new Set();
-
     constructor(data?: Partial<Artefact>, enableTimestamps: boolean = true) {
         log("new Artefact(): data=%O enableTimestamps=%b", data, enableTimestamps);
         this._id = data?._id;
         this._v = data?._v ?? 1;
-        this._ts = data?._ts ?? new Timestamps<typeof this>();
+        this._ts = data?._ts ?? new Timestamps<A>();
         this._e = data?._e;
         const notifyChangeCallback = (propPath: string, oldValue: any, newValue: any, isModified: boolean) => {
             // const valueDiff = diff(oldValue, newValue);
             // const isModified = Object.keys(valueDiff).length > 0;
-            const _ts = get(this._ts, propPath, true, new Timestamps());
             if (isModified) {
                 this.markUpdated(propPath);
             } else {
@@ -203,16 +234,31 @@ export abstract class Artefact/* <
         return inspect(this.toData(), inspectOptions);
     }
 
+    get Query(): ArtefactInstanceQueries<Artefact, {}> {
+        return mapObject(
+            this.prototype.constructor.Query,
+            ([K, V]) => ([K, () => ([K, V(this)])]));
+    }
+
+    static Query: ArtefactStaticQueries<Artefact, {}> = Object.assign(
+        <A extends Artefact>(propPath: DeepProps<A>, value: A | Choose<A, DeepProps<A>>) => {
+            return ({ [propPath]: this.isArtefact(value) ? get(value, propPath) : value, });
+        }, {
+        byUnique: <A extends Artefact>(_: A) => ({ "_id": _._id }) as Filter<A>,
+        byId: <A extends Artefact>(_: A) => ({ "_id": _._id }) as Filter<A>,
+    });
+
     static async* stream<I, T extends {}>(this: Constructor<Artefact>, source: AsyncIterable<I>, transform?: (...args: [I]) => T) {
         for await (const item of source) {
             yield new this(transform?.(...[item]) ?? item, true);
         }
     }
-};
+}
 
 export declare namespace Artefact {
     export type WithId<A extends Artefact> = Omit<A, "_id"> & { _id: string; };
 };
+
 
 let _enableTimestamps = true;
 const targets = new WeakMap();
@@ -272,7 +318,7 @@ export const ChangeTrackingProxy = <T extends ArtefactTypes, S extends ArtefactS
             }
         }
     })).get(target);
-};
+}
 
 export type QueryableArtefact<
     A extends Artefact,
@@ -286,7 +332,7 @@ export type ArtefactFn<
     C extends any[],
 > = (...args: C) => A;
 
-export type ArtefactStaticQueryFn<A extends Artefact, T extends any = any> = (_: A | T) => Filter<A>;
+export type ArtefactStaticQueryFn<A extends Artefact> = (_: A) => Filter<A>;
 export type ArtefactInstanceQueryFn<A extends Artefact> = () => Filter<A>;
 export type ArtefactStaticExtensionQueries<A extends Artefact> = {
     [K: string]: ArtefactStaticQueryFn<A>;
@@ -294,19 +340,16 @@ export type ArtefactStaticExtensionQueries<A extends Artefact> = {
 export type ArtefactInstanceExtensionQueries<A extends Artefact> = {
     [K: string]: ArtefactInstanceQueryFn<A>;
 };
-export type ArtefactStaticQueries<A extends Artefact, Q extends ArtefactStaticExtensionQueries<A> = {}> = 
-    (this: typeof Aspect, aspectFilter: Filter<Aspect>) => ArtefactNamespacedProperty<Filter<Aspect>> &
-    Q & {
-        byUnique: ArtefactStaticQueryFn<A>;     // derived classes can redefine this to return one of several possible queries that uniquely identify the Artefact (e.g. _id ?? path ?? ...)
-        byId: ArtefactStaticQueryFn<A>;
-    };
-export type ArtefactInstanceQueries<A extends Artefact, Q extends ArtefactStaticExtensionQueries<A> = {}> =
-    (this: Artefact, aspectFilter: Filter<Aspect>) => ArtefactNamespacedProperty<Filter<Aspect>> & {
-        [K in keyof Q]: ArtefactInstanceQueryFn<A>;
-    } & {
-        byUnique: ArtefactInstanceQueryFn<A>;     // derived classes can redefine this to return one of several possible queries that uniquely identify the Artefact (e.g. _id ?? path ?? ...)
-        byId: ArtefactInstanceQueryFn<A>;
-    };
+export type ArtefactStaticQueries<A extends Artefact, Q extends ArtefactStaticExtensionQueries<A>> = Q & {
+    byUnique: ArtefactStaticQueryFn<A>;     // derived classes can redefine this to return one of several possible queries that uniquely identify the Artefact (e.g. _id ?? path ?? ...)
+    byId: ArtefactStaticQueryFn<A>;
+};
+export type ArtefactInstanceQueries<A extends Artefact, Q extends ArtefactStaticExtensionQueries<A>> = {
+    [K in keyof Q]: ArtefactInstanceQueryFn<A>;
+} & {
+    byUnique: ArtefactInstanceQueryFn<A>;     // derived classes can redefine this to return one of several possible queries that uniquely identify the Artefact (e.g. _id ?? path ?? ...)
+    byId: ArtefactInstanceQueryFn<A>;
+};
 
 export type ArtefactStaticMethods<A extends Artefact, Q extends ArtefactStaticExtensionQueries<A>> = {
     stream<I>(source: AsyncIterable<I>): AsyncGenerator<QueryableArtefact<A, Q>>;

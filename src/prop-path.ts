@@ -5,7 +5,7 @@ export const get = <T = any>(obj: ObjectWithProperties, path: string | number, c
         (prev, curr, index, arr) => prev ? (
             prev?.[curr] ?? (
                 prev[curr] = index === arr.length - 1 ?
-                    defaultValue :
+                    (defaultValue ?? undefined) :
                     createPaths ? {} : undefined
          )) : defaultValue, obj));
 //     const paths = (path as string).split(".");

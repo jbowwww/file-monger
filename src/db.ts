@@ -2,14 +2,13 @@ import { isDate } from "node:util/types";
 import * as nodePath from "node:path";
 import { AnyBulkWriteOperation, BulkWriteOptions, BulkWriteResult, ChangeStreamOptions, ChangeStreamDocument, ChangeStreamInsertDocument, ChangeStreamUpdateDocument, Collection, CollectionOptions, CountOptions, Db, Filter, FindOneAndUpdateOptions, FindOptions, MongoClient, MongoError, UpdateFilter, UpdateOptions, UpdateResult, WithId, IndexSpecification, CreateIndexesOptions, Condition, Document } from "mongodb";
 import { diff } from "deep-object-diff";
-import { Artefact } from "./models/artefact";
-import { AsyncFunction, Choose } from "./models/";
+import { Artefact, isArtefact, ArtefactStaticExtensionQueries, ArtefactStaticQueryFn } from "./models/artefact";
+import { Aspect, AspectType, AsyncFunction, DeepProps, Choose, Constructor, isAspect, isConstructor, isFunction } from "./models/";
 import { cargo } from "./pipeline";
 import { get } from "./prop-path";
 import { Progress } from "./progress";
 
 import debug from "debug";
-import { DeepProps } from "./models/index";
 const log = debug(nodePath.basename(module.filename));
 
 export interface Storage {
@@ -61,10 +60,10 @@ export class MongoStorage implements Storage {
         return this;
     }
 
-    async store<T extends {}>(name: string, options?: MongoStoreOptions): Promise<MongoStore<T>> {
+    async store<A extends Artefact>(name: string, options?: MongoStoreOptions): Promise<MongoStore<A>> {
         await this.connect();
         log("Getting store '%s' options=%O ... ", name, options);
-        const store = new MongoStore<T>(this, name, options);
+        const store = new MongoStore<A>(this, name, options);
         log("OK");
         return store;
     }
@@ -77,14 +76,20 @@ export function isChangeUpdate(value: ChangeStreamDocument): value is ChangeStre
     return value.operationType === "update";
 }
 
-export type MongoStoreOptions = CollectionOptions & {
+export type MongoStoreOptions<A extends Artefact = Artefact> = CollectionOptions & {
     createIndexes?: CreateIndexArgs[];
+    queries?: {
+        byUnique?: ArtefactStaticQueryFn<A>;    // byUnique is required to use store.updateOrCreate() or findOne() with a single Artefact arg (and probably other things sooner or later)
+    } & ArtefactStaticExtensionQueries<A>;      // unlike extension queries which may take any args, byUnique must take only the single Artefact arg as a static query method (or no args if implement as ArtefactInstanceQueryFn in future)
 };
 export const MongoStoreOptions: {
     default: MongoStoreOptions;
 } = {
     default: {
         createIndexes: [],
+        queries: {
+            byUnique: <A extends Artefact>(_: A) => ({ "_id": _._id, }),
+        },
     },
 };
 
@@ -93,15 +98,37 @@ export type CreateIndexArgs = {
     options?: CreateIndexesOptions;
 };
 
-export const Query = <T extends Record<string, any>, P extends string | number = DeepProps<T>>(path: P, value: Condition<Choose<Artefact<T>, P>>): Filter<Artefact<T>> => ({ [path]: value, }) as Filter<Artefact<T>>;
+export class Query<
+    A extends Artefact,
+    P extends DeepProps<A> = DeepProps<A>
+> {
+    [K: string]: Condition<WithId<A>>;
+    constructor(
+        aspectTypeOrPrefix: Aspect | Constructor<Aspect> | DeepProps<WithId<A>>,
+        valueOrSuffix: Condition<Choose<A, P>> | DeepProps<WithId<A>>,
+        value?: Condition<Choose<A, P>>
+    ) {
+        this[
+            (typeof aspectTypeOrPrefix === "string" ? aspectTypeOrPrefix :
+            isConstructor(aspectTypeOrPrefix) ? aspectTypeOrPrefix.name :
+            isAspect(aspectTypeOrPrefix) ? aspectTypeOrPrefix._T : "") +
+            typeof valueOrSuffix === "string" ? "." + valueOrSuffix : ""
+        ] = (
+            typeof valueOrSuffix === "string" ? value : valueOrSuffix
+        ) as Condition<WithId<A>>;
+    }
+}
 
 export const updateResultToString = (result: UpdateResult | null | undefined) =>
     result === null ? "(null)" : result === undefined ? "(undef)" :
     "{ ack.=${result.acknowledged} modifiedCount=${result.modifiedCount} upsertedId=${result.upsertedId} upsertedCount=${result.upsertedCount} matchedCount=${result.matchedCount} }";
 
-export type Updates<T extends {} = {}> = {
-    update: Partial<T>;
-    undefineds: Partial<Record<keyof T, undefined>>;
+export type Updates<A extends Artefact> = {
+    updated: Partial<A>;
+    original?: A;
+    aspectType?: Constructor<A>;
+    update: Partial<A>;
+    undefineds: Partial<Record<keyof A, undefined>>;
 };
 
 export const flattenPropertyNames = (
@@ -128,37 +155,52 @@ export const flattenPropertyNames = (
     return { update, undefineds };
 };
 
-export const getUpdates = (original: any, updated?: any) => {
-    if (!updated) {
-        updated = original;
-        original = {};
-    } else {
-        original ??= {};
-        if (original._id && updated._id && original._id !== updated._id) {
-            throw new RangeError("getUpdates(): original._id=${original._id} !== updated._id=${updated._id}");
+// Returns a flattened list of property paths that exist in updated, that are not equal to the same property in original (if supplied)
+export const getUpdates = <A extends Artefact>(updated: Partial<A>, originalOrAspectType?: A | AspectType, aspectType?: AspectType) => {
+    let original: A | undefined;
+    let updateDiff: object;
+    if (originalOrAspectType) {
+        if (isArtefact(originalOrAspectType)) {
+            original = originalOrAspectType;
+            if (original._id && updated._id && original._id !== updated._id) {
+                throw new RangeError("getUpdates(): original._id=${original._id} !== updated._id=${updated._id}");
+            }
+            updateDiff = diff(original, updated);
+        } else {
+            if (originalOrAspectType) {
+                aspectType = originalOrAspectType;
+            }
+            updateDiff = updated as object;
         }
+    } else {
+        if (aspectType) {
+            throw new RangeError(`getUpdates(): if originalOrAspectType is null, aspectType should be null too`);
+        }
+        updateDiff = updated as object;
     }
-    const updateDiff = diff(original, updated);
-    const { update, undefineds } = flattenPropertyNames(updateDiff);
-    return { update, undefineds } as Updates;
+    if (isConstructor(aspectType)) {
+        aspectType = aspectType.name;
+    }
+    const { update, undefineds } = flattenPropertyNames(aspectType ? { [aspectType]: get(updateDiff, aspectType), } : updateDiff);
+    return { updated, original, aspectType, update, undefineds } as Updates<A>;
 }
 
 export type UpdateOrCreateOptions = {
     unsetUndefineds?: boolean;
 };
-export type UpdateOneResult<T extends {}> = {
+export type UpdateOneResult<A extends Artefact> = {
     didWrite: boolean;
-    result?: UpdateResult<Artefact<T>>;
-    query: Filter<Artefact<T>>;
-    updates: UpdateFilter<Artefact<T>>;
+    result?: UpdateResult<A>;
+    query: Filter<A>;
+    updates: UpdateFilter<A>;
 };
-export type UpdateOrCreateResult<T extends {}> = UpdateOneResult<T> & {
-    _: Partial<Artefact<T>>;
+export type UpdateOrCreateResult<A extends Artefact> = UpdateOneResult<A> & {
+    _: Partial<A>;
 };
 export type ProgressOption = { progress?: Progress; };
 
-export type BulkWriterStore<T extends {}> = Store<T>;
-export type BulkWriterFn<T extends {}> = AsyncFunction<[AsyncGenerator<AnyBulkWriteOperation<T>>], BulkWriteResult>;
+export type BulkWriterStore<A extends Artefact> = Store<A>;
+export type BulkWriterFn<A extends Artefact> = AsyncFunction<[AsyncGenerator<AnyBulkWriteOperation<A>>], BulkWriteResult>;
 
 export type BulkWriterOptions = BulkWriteOptions & {
     maxBatchSize: number;
@@ -171,28 +213,31 @@ export const BulkWriterOptions = {
     } as BulkWriterOptions,
 };
 
-export interface Store<T extends {}> {
+export interface Store<A extends Artefact> {
     createIndexes(...createIndexes: CreateIndexArgs[]): Promise<string[]>;
-    count(query: Filter<Artefact<T>>, options?: CountOptions): Promise<number>;
-    find(query: Filter<Artefact<T>>, options?: FindOptions & ProgressOption): AsyncGenerator<WithId<Artefact<T>>>;
-    findOne(query: Filter<Artefact<T>>, options?: FindOptions): Promise<WithId<Artefact<T>> | null>;
-    findOneAndUpdate(query: Filter<Artefact<T>>, update: UpdateFilter<Artefact<T>>, options?: FindOneAndUpdateOptions): Promise<WithId<Artefact<T>> | null>;
-    updateOne(query: Filter<Artefact<T>>, update: UpdateFilter<Artefact<T>>, options?: UpdateOptions): Promise<UpdateOneResult<T> | null>;
-    updateOrCreate(artefact: T, query: Filter<Artefact<T>>, options?: UpdateOptions & UpdateOrCreateOptions): Promise<UpdateOrCreateResult<T>>;
-    bulkWrite(operations: AnyBulkWriteOperation<Artefact<T>>[], options?: BulkWriteOptions & ProgressOption): Promise<BulkWriteResult>;
-    bulkWriterFn(options?: BulkWriterOptions & ProgressOption): BulkWriterFn<Artefact<T>>;
-    bulkWriterStore(options?: BulkWriterOptions & ProgressOption): BulkWriterStore<T>;
-    watch(pipeline?: Filter<Artefact<T>>/* Document[] */, options?: ChangeStreamOptions & ProgressOption): AsyncGenerator<ChangeStreamDocument<Artefact<T>>>;//: ChangeStream<A, ChangeStreamDocument<A>>;
+    count(query: Filter<A>, options?: CountOptions): Promise<number>;
+    find(query: Filter<A>, options?: FindOptions & ProgressOption): AsyncGenerator<WithId<A>>;
+    findOne(query: Filter<A>, options?: FindOptions): Promise<WithId<A> | null>;
+    findOneAndUpdate(query: Filter<A>, update: UpdateFilter<A>, options?: FindOneAndUpdateOptions): Promise<WithId<A> | null>;
+    updateOne(query: Filter<A>, update: UpdateFilter<A>, options?: UpdateOptions): Promise<UpdateOneResult<A> | null>;
+    updateOrCreate(artefact: A, query: Filter<A>, options?: UpdateOptions & UpdateOrCreateOptions): Promise<UpdateOrCreateResult<A>>;
+    bulkWrite(operations: AnyBulkWriteOperation<A>[], options?: BulkWriteOptions & ProgressOption): Promise<BulkWriteResult>;
+    bulkWriterFn(options?: BulkWriterOptions & ProgressOption): BulkWriterFn<A>;
+    bulkWriterStore(options?: BulkWriterOptions & ProgressOption): BulkWriterStore<A>;
+    watch(pipeline?: Filter<A>/* Document[] */, options?: ChangeStreamOptions & ProgressOption): AsyncGenerator<ChangeStreamDocument<A>>;//: ChangeStream<A, ChangeStreamDocument<A>>;
+    ops: {
+        updateOne(_: A): AnyBulkWriteOperation<A>;
+    };
 };
 
-export class MongoStore<T extends {}> implements Store<T> {
-    public readonly collection: Collection<Artefact<T>>;
+export class MongoStore<A extends Artefact> implements Store<A> {
+    public readonly collection: Collection<A>;
     constructor(
         public readonly storage: MongoStorage,
         public readonly name: string,
         options: MongoStoreOptions = {}
     ) {
-        this.collection = storage.db!.collection<Artefact<T>>(name, options);
+        this.collection = storage.db!.collection<A>(name, options);
         this.options = { ...MongoStoreOptions.default, ...options };
         if (this.options.createIndexes && this.options.createIndexes.length > 0) {
             this.createIndexes(...this.options.createIndexes);
@@ -207,11 +252,11 @@ export class MongoStore<T extends {}> implements Store<T> {
         }));
     }
 
-    async count(query: Filter<Artefact<T>>, options: CountOptions = {}) {
+    async count(query: Filter<A>, options: CountOptions = {}) {
         return this.collection.countDocuments(query, options);
     }
 
-    async* find(query: Filter<Artefact<T>>, options: FindOptions & ProgressOption = {}) {
+    async* find(query: Filter<A>, options: FindOptions & ProgressOption = {}) {
         // for await (const item of this._collection.find(query))
         //     yield item;
         if (options.progress) {
@@ -225,66 +270,66 @@ export class MongoStore<T extends {}> implements Store<T> {
         });
     }
 
-    async findOne(query: Filter<Artefact<T>>, options: FindOptions = {}) {
+    async findOne(query: Filter<A>, options: FindOptions = {}) {
         return await this.collection.findOne(query, options);
     }
 
-    async findOneAndUpdate(query: Filter<Artefact<T>>, update: UpdateFilter<Artefact<T>>, options: FindOneAndUpdateOptions = {}) {
+    async findOneAndUpdate(query: Filter<A>, update: UpdateFilter<A>, options: FindOneAndUpdateOptions = {}) {
         return await this.collection.findOneAndUpdate(query, update, options);
     }
 
-    async updateOne(query: Filter<Artefact<T>>, updates: UpdateFilter<Artefact<T>>, options: UpdateOptions = {}): Promise<UpdateOneResult<T>> {
+    async updateOne(query: Filter<A>, updates: UpdateFilter<A>, options: UpdateOptions = {}): Promise<UpdateOneResult<A>> {
         const result = await this.collection.updateOne(query!, updates, options);
         return { didWrite: !!result, result: result, query, updates };
     }
 
-    async updateOrCreate(artefact: Partial<Artefact<T>>, query?: Filter<Artefact<T>>, options: UpdateOptions & UpdateOrCreateOptions = {}): Promise<UpdateOrCreateResult<T>> {
+    async updateOrCreate(artefact: Partial<A>, query?: Filter<A>, options: UpdateOptions & UpdateOrCreateOptions = {}): Promise<UpdateOrCreateResult<A>> {
         options = { ...options, upsert: true }; //, ignoreUndefined: true, includeResultMetadata: true, returnDocument: "after", */ };
         if (!("_id" in artefact) && !query) {
             throw new RangeError("updateOrCreate(): artefact=${nodeUtil.inspect(artefact)} does not have an _id and query is not specified either");
         }
-        query ??= ({ _id: artefact._id, });
-        let result: UpdateResult<T> | undefined = undefined;
-        const oldArtefact = await this.collection.findOne<Artefact<T>>(query, options);
+        query ??= ({ _id: artefact._id, }) as Filter<A>;
+        let result: UpdateResult<A> | undefined = undefined;
+        const oldArtefact = await this.collection.findOne<A>(query, options);
         if (oldArtefact !== null && !artefact._id) {
-            artefact._id = oldArtefact._id as Artefact<T>["_id"];
+            artefact._id = oldArtefact._id as A["_id"];
         }
-        const updates = ({ $set: getUpdates(oldArtefact, artefact/* .toData() */).update }) as UpdateFilter<Artefact<T>>;
+        const updates = ({ $set: getUpdates(artefact/* .toData() */, oldArtefact ?? undefined).update }) as UpdateFilter<A>;
         // let update = { /* $set: { */ ...updates/* .update */ /* } *//* , ...(options.unsetUndefineds ? { $unset: updates.undefineds } : {}) */ } as UpdateFilter<A>;
         if (Object.keys(updates/* .update */).filter(u => u !== "_id").length > 0) {
             if (oldArtefact !== null) {
-                query = ({ _id: oldArtefact._id, }) as Filter<Artefact<T>>;
+                query = ({ _id: oldArtefact._id, }) as Filter<A>;
             }
             result = await this.collection.updateOne(query, updates, options);
             if (!result?.acknowledged) {
                 throw new MongoError("updateOne not acknowledged for dbArtefact=${dbArtefact} dbUpdate=${dbUpdate} dbResult=${dbResult}");
             } else {
                 if (!artefact._id && !!result.upsertedId) {
-                    artefact._id = result.upsertedId.toString() as Artefact<T>["_id"];
+                    artefact._id = result.upsertedId.toString() as A["_id"];
                 }
             }
         }
         return { didWrite: !!result, result: result, query, updates, _: artefact };
     }
 
-    bulkWrite(opsOrSource: AnyBulkWriteOperation<Artefact<T>>[] | AsyncGenerator<AnyBulkWriteOperation<Artefact<T>>>, options: BulkWriteOptions & BulkWriterOptions & ProgressOption = BulkWriterOptions.default): Promise<BulkWriteResult> {
+    bulkWrite(opsOrSource: AnyBulkWriteOperation<A>[] | AsyncGenerator<AnyBulkWriteOperation<A>>, options: BulkWriteOptions & BulkWriterOptions & ProgressOption = BulkWriterOptions.default): Promise<BulkWriteResult> {
         return Array.isArray(opsOrSource) ?
             this.collection.bulkWrite(opsOrSource, options) :
             this.bulkWriterFn(options)(opsOrSource);
     }
 
-    bulkWriterFn(options: BulkWriterOptions & BulkWriteOptions & ProgressOption = BulkWriterOptions.default): BulkWriterFn<Artefact<T>> {
+    bulkWriterFn(options: BulkWriterOptions & BulkWriteOptions & ProgressOption = BulkWriterOptions.default): BulkWriterFn<A> {
         const _this = this;
-        return async function bulkWrite(source: AsyncGenerator<AnyBulkWriteOperation<Artefact<T>>>) {
+        return async function bulkWrite(source: AsyncGenerator<AnyBulkWriteOperation<A>> | (() => AsyncGenerator<AnyBulkWriteOperation<A>>)) {
             var result: BulkWriteResult = new BulkWriteResult();
-            for await (const ops of cargo(options.maxBatchSize, options.timeoutMs, source)) {
+            for await (const ops of cargo(options.maxBatchSize, options.timeoutMs, isFunction(source) ? source() : source)) {
                 result = await _this.collection.bulkWrite(ops, options);
             }
             return result;
         }
     };
 
-    bulkWriterStore(options: BulkWriterOptions & BulkWriteOptions & ProgressOption): BulkWriterStore<T> {
+    bulkWriterStore(options: BulkWriterOptions & BulkWriteOptions & ProgressOption): BulkWriterStore<A> {
         return ({
             ...this,
             bulkWriterFn: this.bulkWriterFn.bind(this),
@@ -293,10 +338,19 @@ export class MongoStore<T extends {}> implements Store<T> {
         });
     }
 
-    async* watch(query: Filter<Artefact<T>>/* Document[] = [] */, options: ChangeStreamOptions & ProgressOption = {})/* : Promise<ChangeStream<A, ChangeStreamDocument<A>>> */ {
+    async* watch(query: Filter<A>/* Document[] = [] */, options: ChangeStreamOptions & ProgressOption = {})/* : Promise<ChangeStream<A, ChangeStreamDocument<A>>> */ {
         if (options.progress) {
             options.progress.count = await this.collection.countDocuments(query);
         }
         /* return */yield* this.collection.watch([{ $match: query }], options);
     }
+
+    ops = {
+        updateOne: (updated: A, originalOrAspectType?: A | AspectType, aspectType?: AspectType): AnyBulkWriteOperation<A> => {
+            const filter = this.options.queries?.byUnique?.(updated) as Filter<A>;
+            let update = getUpdates<A>(updated, originalOrAspectType, aspectType);
+            const aspectTypeName = update.aspectType?.name;
+            return ({ "updateOne": { filter, update: { $set: update.update }, } });
+        }
+    };
 }

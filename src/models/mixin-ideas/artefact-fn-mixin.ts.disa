@@ -1,0 +1,125 @@
+
+// just another concept iw as messing with which may not be in source control
+// type Constructor<T = {}> = new (...args: any[]) => T;
+
+// type MixinFn<TBase extends {}, TExtra extends {}> = (base: Constructor<TBase>) => Constructor<TExtra & TBase>;
+
+// abstract class Aspect {}
+
+
+export type Behaviour = { [K: PropertyKey]: any; };
+export type Class = { new(...args: any[]): any; };
+export type AbstractClass = { new(...args: any[]): any; };
+
+function ClassMixin(behaviour: Behaviour) {
+    const instanceKeys = Reflect.ownKeys(behaviour);
+    return function mixin(clazz: AbstractClass) {
+        class mixin extends clazz {}
+        for (let property of instanceKeys) {
+            Object.defineProperty(mixin.prototype, property, {
+                value: behaviour[property],
+                writable: true
+            });
+        }
+        return mixin;
+    }
+}
+
+function Define(behaviour: Behaviour) {
+    const instanceKeys = Reflect.ownKeys(behaviour);
+    return function define(clazz: AbstractClass) {
+        
+        class mixin extends clazz {}
+        for (let property of instanceKeys) {
+            if (!Reflect.has(mixin.prototype, property)) {
+                Object.defineProperty(mixin.prototype, property, {
+                    value: behaviour[property],
+                    writable: true
+                });
+            }
+            else throw `illegal attempt to override ${property.toString()}, which already exists.`;
+        }
+        return mixin;
+    }
+}
+
+function Override(behaviour: Behaviour) {
+    const instanceKeys = Reflect.ownKeys(behaviour);
+    return function overrides(clazz: AbstractClass) {
+        class mixin extends clazz {}
+        for (let property of instanceKeys) {
+            if (!!Reflect.has(mixin.prototype, property)) {
+                let overriddenMethodFunction = Reflect.get(mixin.prototype, property);
+                Object.defineProperty(mixin.prototype, property, {
+                    value: function (...args: any[]) {
+                        return behaviour[property].call(this, overriddenMethodFunction.bind(this), ...args);
+                    },
+                    writable: true
+                });
+            }
+            else throw `attempt to override non-existant method ${property.toString()}`;
+        }
+        return mixin;
+    }
+}
+
+function Prepend(behaviour: Behaviour) {
+    const instanceKeys = Reflect.ownKeys(behaviour);
+    return function prepend(clazz: AbstractClass) {
+        class mixin extends clazz {}
+        for (let property of instanceKeys) {
+            if (!!Reflect.has(mixin.prototype, property)) {
+                let overriddenMethodFunction = Reflect.get(mixin.prototype, property);
+                Object.defineProperty(mixin.prototype, property, {
+                    value: function (...args: any[]) {
+                        const prependValue = behaviour[property].apply(this, args);
+                        if (prependValue === undefined || !!prependValue) {
+                            return overriddenMethodFunction.apply(this, args);;
+                        }
+                    },
+                    writable: true
+                });
+            }
+            else throw `attempt to override non-existant method ${property.toString()}`;
+        }
+        return mixin;
+    }
+}
+
+function Append(behaviour: Behaviour) {
+    const instanceKeys = Reflect.ownKeys(behaviour);
+    return function append(clazz: AbstractClass) {
+        class mixin extends clazz {}
+        for (let property of instanceKeys) {
+            if (!!Reflect.has(mixin.prototype, property)) {
+                let overriddenMethodFunction = Reflect.get(mixin.prototype, property);
+                Object.defineProperty(mixin.prototype, property, {
+                    value: function (...args: any[]) {
+                        const returnValue = overriddenMethodFunction.apply(this, args);
+                        behaviour[property].apply(this, args);
+                        return returnValue;
+                    },
+                    writable: true
+                });
+            }
+            else throw `attempt to override non-existant method ${property.toString()}`;
+        }
+        return mixin;
+    }              
+}
+
+const SubclassFactory = (behaviour: Behaviour) => (superclazz: AbstractClass) => ClassMixin(behaviour)(class extends superclazz { });
+
+//   const ColouredAsWellAs = SubclassFactory({ [methods] })
+//   class ConcreteClass extends ColouredAsWellAs(baseMaybeAbstractClass) {}
+
+type Aspect = {};
+
+type Artefact<T extends {}> = {
+    isArtefact: true;
+
+}
+const Artefact = <T extends {}>(initAspects?: { [K in keyof T]: Aspect; }) => {
+    const aspects = new Map<string, unknown>();
+    const _ = { ...initAspects };
+}

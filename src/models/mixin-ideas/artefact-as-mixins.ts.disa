@@ -1,0 +1,131 @@
+import * as nodeFs from "node:fs";
+import * as nodePath from "node:path";
+import { PartiallyRequired, throttle as cache } from ".";
+
+import si from "systeminformation";
+import { Class } from "./artefact-fn-mixin";
+
+type Constructor<T = {}> = new (...args: any[]) => T;
+
+type MixinFn<TBase extends {}, TExtra extends {}> = (base: Constructor<TBase>) => Constructor<TExtra & TBase>;
+
+abstract class Aspect {}
+
+// BlockDevice, Disk, Partition
+//
+
+export const FileSystemBlockDevicesExpiryAgeMs = 15000;
+export const blockDevices: si.Systeminformation.BlockDevicesData[] = [];
+export const getBlockDevices = cache({
+    expiryAgeMs: FileSystemBlockDevicesExpiryAgeMs,
+}, async function getBlockDevices() {
+    return await si.blockDevices();
+});
+
+export class BlockDevice extends Aspect {
+    name: string;
+    identifier: string;
+    type: string;
+    fsType: string;
+    mount: string;
+    size: number;
+    physical: string;
+    label: string;
+    removable: boolean;
+    protocol: string;
+    group?: string;
+    device?: string;
+
+    constructor(blockDevice: BlockDevice) {
+        super();
+        this.name = blockDevice.name;
+        this.identifier = blockDevice.identifier;
+        this.type = blockDevice.type;
+        this.fsType = blockDevice.fsType;
+        this.mount = blockDevice.mount;
+        this.size = blockDevice.size;
+        this.physical = blockDevice.physical;
+        this.label = blockDevice.label;
+        this.removable = blockDevice.removable;
+        this.protocol = blockDevice.protocol;
+        this.group = blockDevice.group;
+        this.device = blockDevice.device;
+    }
+}
+
+export class Disk extends BlockDevice {
+    model: string;
+    serial: string;
+    constructor(disk: Disk) {
+        super(disk);
+        this.model = disk.model;
+        this.serial = disk.serial;
+    }
+    static async getDisks(): Promise<Disk[]> {
+        return getBlockDevices().then(blockDevices => blockDevices
+            .filter(bd => bd.type === "disk")
+            .map(bd => ({ _T: "Disk", ...bd })));
+    }
+}
+
+export type GetPartitionForPathOptions = {
+    path: string;
+    partitions?: Iterable<Partition>;
+};
+
+export class Partition extends BlockDevice {
+    label: string;
+    constructor(partition: Partition) {
+        super(partition);
+        this.label = partition.label;
+    }
+    static async getAll(): Promise<Partition[]> {
+        return getBlockDevices().then(blockDevices => blockDevices
+            .filter(bd => bd.type === "part")
+            .map(bd => ({ _T: "Partition", ...bd })));
+    }
+
+    static async getForPath(pathOrOptions: string | GetPartitionForPathOptions) {
+        const options: GetPartitionForPathOptions = typeof pathOrOptions === "string" ? { path: pathOrOptions } : pathOrOptions;
+        options.partitions ??= await Partition.getAll();
+        return Array.from(options.partitions).filter(p => options.path.startsWith(p.mount)).at(0);
+    };
+}
+
+//
+// end BlockDevice, Disk, Partition
+//
+
+export abstract class Entry implements Aspect {
+    path: string;
+    stats: nodeFs.Stats;
+    partition?: Partition;
+    constructor({ path, stats, partition }: Entry) {
+        this.path = path;
+        this.stats = stats;
+        this.partition = partition;
+    }
+    static async create({ path, stats, partition, partitions }: PartiallyRequired<Entry, "path"> & { partitions?: Iterable<Partition>; }) {
+        stats ??= await nodeFs.promises.stat(path);
+        partition ??= (await Partition.getForPath({ partitions, path }));
+        const entry = (
+            stats.isFile() ? new File({ path, stats, partition }) :
+            stats.isDirectory() ? new Directory({ path, stats, partition }) :
+            new Unknown({ path, stats, partition }) );
+        return entry;
+    }
+}
+
+export class File extends Entry { constructor(file: File) { super(file); }}
+export class Directory extends Entry { }
+export class Unknown extends Entry { }
+
+// export type Hash = ReturnType<typeof Hash>;
+export const Hash: MixinFn<{ file: File; }, { hash: { sha256: string; }; }> = (ArtefactType: Constructor<{ file: File; }>) => {
+    return class MixedArtefact extends ArtefactType {
+        hash = {
+            sha256: "",
+        };
+
+    };
+}

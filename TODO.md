@@ -6,17 +6,24 @@
   - ~~**Any logic here around invalidating the Hash when File.stats.mtime changes (or sinilar) ? Or just in the hashFiles task?**~~
 
 - [X] Start using ``debug`` library and replace all console.[log|debug|error|warn|*] calls
-- [ ] Implement Disks, Partitions and populate
+- [X] Implement Disks, Partitions and populate
 
-  - [ ] Should be referenced by all FS entries, and be part of the index (partition UUID ? )
+  - [X] Should be referenced by all FS entries, and be part of the index (partition UUID ? )
   - [ ] FS entry paths should be relative to their partition? to neutralise effects of possibly changing mount points of same disk?
-- [ ] Wanting to switch again - try this:
 
-  - [ ] Aspects as classes, because:
-    - [ ] You are wanting a type anyway, and have to set it, as _T, which is awkward anyway instead of just new File(...)
-    - [ ] Can have "virtual" properties i.e. getters that don't get persisted but can use them e.g. filename, or pathFromPartition, both using the actual property this.path
-  - [ ] maybe Artefacts could/should be classes also? But could still try keep as type's, use a fn to define the "ctor", use DiscriminatedUnion to define an interface, which the "ctor" fn can use as return value, fn sets a property using Aspect class names of aspects passed to it (if isAspect(), or assumes it is Artefact data being passed)
-    - [ ] This could probably be just as easy as a class also. Which may be nicer for Queries and stuff ?
+  - ****[ ] Disk class should have an instance method/getter partitions[]** **
+  - ****[ ] Partitions should have getter called dirs  / files[] / entries[] , etc** **
+- [ ] Wanting to switch again - try this:
+- [ ] Aspects as classes, because:
+
+  - [ ] You are wanting a type anyway, and have to set it, as _T, which is awkward anyway instead of just new File(...)
+  - [ ] Can have "virtual" properties i.e. getters that don't get persisted but can use them e.g. filename, or pathFromPartition, both using the actual property this.path
+- [ ] Artefact.Type as previously, a plain fn that returns a ChangeTrackingProxy of a plain TS Artefact/derived type of POJO.
+
+  - [ ] Defined by schema object, of which the TS type for return of "ctor" fn is inferred
+    - [ ] each artefact poperty can be a primitive value or an Aspect class but artefact's schema object means artefact object instances can construct Aspect classes when necessary, for complex user-defined (ie not a single value property) aspect types, that can have getters etc
+    - [ ] artefact meta-behaviours can exist comfotably in a proxy e.g. time-tracking/stamping via "._ts" poroperty~~- [ ] maybe Artefacts could/should be classes also? But could still try keep as type's, use a fn to define the "ctor", use DiscriminatedUnion to define an interface, which the "ctor" fn can use as return value, fn sets a property using Aspect class names of aspects passed to it (if isAspect(), or assumes it is Artefact data being passed)~~
+  - [ ] This could probably be just as easy as a class also. Which may be nicer for Queries and stuff ?
 - [ ] Modules can define queries for use in main program, possibly actions (task inner fn's) too
 - [ ] Try watch() again - looks like can't use for await, need to use cursor.next() (and hasNext())
 - [ ] Possibly consider (again) defining schema with object literal with values that are Ctor&ltAspect&gt, AspectFn<>, or primitive
