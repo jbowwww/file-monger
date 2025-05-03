@@ -2,6 +2,7 @@ import { Filter, IndexSpecification, CreateIndexesOptions } from "mongodb";
 import * as nodePath from "node:path";
 
 import debug from "debug";
+import z from "zod";
 const log = debug(nodePath.basename(module.filename));
 const logProxy = log.extend("Proxy");
 
@@ -204,7 +205,16 @@ export type AspectType<A extends Aspect = Aspect> = string | Constructor<A>;
 //     }
 // }
 
-export abstract class Aspect {
+/* export const AspectTypeDef = z.object({
+    create/* <T extends ZodTypeAny> * /: z.function().args(z.tuple([z.any()])).rest(), z.type(/* T *//* ReturnType<typeof */ AspectType/* > * /)})
+    //  */
+
+export const AspectType = z.object({
+    _id: z.string().uuid().optional(),
+    _T: z.string().default("Aspect").readonly(),
+});
+// AspectType.parse()
+/* export abstract class Aspect {
     get _T() { return this.constructor.name; }
     constructor() {}
     
@@ -212,9 +222,9 @@ export abstract class Aspect {
     static async create<A extends Aspect>(this: Constructor<Aspect>, ...args: any) {
         return new this(...args);
     }
-}
+} */
 
-export abstract class UniqueAspect extends Aspect {
+/* export abstract class UniqueAspect extends Aspect {
     abstract Query(): AspectInstanceQueries<Aspect>;
 
     private static _uniqueIndex: IndexSpecification = {};
@@ -225,4 +235,4 @@ export abstract class UniqueAspect extends Aspect {
     public static get options() { return { ...this._options, unique: true, }; }
 
     public static set options(v) { this._options = v; }    
-}
+} */

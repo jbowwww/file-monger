@@ -1,12 +1,13 @@
 import * as nodeFs from "node:fs";
 import * as nodePath from "node:path";
 import * as nodeCrypto from "node:crypto";
-import { Aspect, AspectParameters, Constructor, DiscriminatedModel, Optional, PartiallyRequired, UniqueAspect, throttle as cache } from ".";
+import { Aspect, AspectParameters, AspectType, Constructor, DiscriminatedModel, Optional, PartiallyRequired, UniqueAspect, throttle as cache } from ".";
 import { Progress } from "../progress";
 import si from "systeminformation";
 import { Filter } from "mongodb";
 
 import debug from "debug";
+import z from "zod";
 const log = debug(nodePath.basename(module.filename));
 
 export type Test<T> = (value: T) => boolean;
@@ -130,7 +131,7 @@ export class Partition extends BlockDeviceBase {
     };
 }
 
-export abstract class Entry extends Aspect {
+/* export abstract class Entry extends Aspect {
     path: string;
     stats: nodeFs.Stats;
     partition?: Partition;
@@ -157,8 +158,21 @@ export abstract class Entry extends Aspect {
             new Unknown({ path, stats, partition }) );
         return entry as Entry;
     }
-}
+} */
 
+    const EntryType = AspectType.extend({
+        path: z.string().nonempty(),
+        stats: z.custom<nodeFs.Stats>(data => data instanceof nodeFs.Stats || "mtime" in data /* || [...etc...] */),
+    });
+    type Entry = z.infer<typeof EntryType>;
+    // export const FileType = EntryType.transform(entry => entry._T === "File");
+    // EntryType.pipe<>();
+    // EntryType.refine((entry: Entry): entry is File => entry._T === "File");//, (entry, ctx) => ctx.addIssue());
+    const FileType = z.discriminatedUnion("_T", [
+        z.object({ _T: "File", }),
+        z.object({ _T: "Directory", }),
+        z.object({ _T: "Unknown", }),
+    ])
 export class File extends Entry { constructor(file: Omit<File, "_T" | "Query">) { super({ ...file, }); }}
 export class Directory extends Entry { constructor(directory: Omit<Directory, "_T" | "Query">) { super({ ...directory, }); }}
 export class Unknown extends Entry { constructor(unknown: Omit<Unknown, "_T" | "Query">) { super({ ...unknown, }); }}
@@ -224,7 +238,7 @@ export class Hash extends Aspect {
             byUnique: () => ({ "Hash.sha256": { "$eq": this.sha256, }, }),
         })
     }
-    
+
     static async create(path: string): Promise<Hash> {
         try {
             const hashDigest = nodeCrypto.createHash('sha256');
@@ -243,3 +257,6 @@ export class Hash extends Aspect {
         }
     }
 }
+
+export const FileSystemArtefactUnion
+type g = z.infer<>;
