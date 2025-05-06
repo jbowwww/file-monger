@@ -13,7 +13,11 @@
 
 ---
 
-## Context ##
+## Possibilities & Research Topics
+
+### Queries / other DB stuff
+
+#### Context (concept) / Convex (library: [convex.dev])
 
 **Added**: 3/5/25
 The missing piece ?!?!
@@ -36,10 +40,62 @@ The missing piece ?!?!
   - **Context** !!
     - Contains db instance (or subset of, based on Task/Context type)
     - **OR**: query() mutation() and action() could be methods on the db instance
+- On further reading Convex is a larger project, and bills itself as an "open-source reactive database for app developers"
+  - [https://github.com/get-convex]
+  - [http://convex.dev/]
+
+##### Convex Context Examples
+
+Try defining queries something liike this, pay attention to the context and the args (as you planned on doing at some point):
+
+*from [https://github.com/get-convex/templates/blob/main/template-bare/convex/README.md]*
+
+```js
+// functions.js
+import { query } from "./_generated/server";
+import { v } from "convex/values";
+
+export const myQueryFunction = query({
+  // Validators for arguments.
+  args: {
+    first: v.number(),
+    second: v.string(),
+  },
+
+  // Function implementation.
+  handler: async (ctx, args) => {
+    // Read the database as many times as you need here.
+    // See https://docs.convex.dev/database/reading-data.
+    const documents = await ctx.db.query("tablename").collect();
+
+    // Arguments passed from the client are properties of the args object.
+    console.log(args.first, args.second);
+
+    // Write arbitrary JavaScript here: filter, aggregate, build derived data,
+    // remove non-public properties, or create new objects.
+    return documents;
+  },
+});
+```
 
 ---
 
-## Schemas
+### Schemas
+
+#### Effect.Schema (library: [effect.website])
+
+- Still absorbing this one!! On first appearances, it seems huge. I stumbled onto it while reading up on Zod, or maybe Convex (I think). Maybe it came from [this hackernews article](https://effect.website/docs/guides/schema/introduction)
+
+- Seems to do schemas and validation, like zod.
+- Seems more powerful, but possibly too opinionated / over-bearing.
+- Has some really cool looking features though
+- [[ Continue researching ... ]]
+
+##### Effect.Schema Examples
+
+- ...
+
+---
 
 ##### Aspects
 

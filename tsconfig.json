@@ -10,6 +10,7 @@
         "outDir": "dist/",
         "allowSyntheticDefaultImports": true,
         "lib": [ "esnext.decorators" ],
+        "exactOptionalPropertyTypes": true,
     },
     "include": [
         "src/"

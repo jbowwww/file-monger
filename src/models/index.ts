@@ -161,7 +161,7 @@ export type Converter<T, K extends string, V> = T extends any ? { [P in keyof Id
 
 export type NamespacedAspect<T> = { [K: string]: T; };
 
-export const isAspect = <A extends Aspect = Aspect>(value: any): value is Aspect => value !== null && value instanceof Aspect;
+export const isAspect = <A extends Aspect = Aspect>(value: any): value is Aspect => value !== null && "_T" in value;// value instanceof Aspect;
 
 export type AspectStaticQuery<A extends Aspect> = (this: Constructor<A>, _: A) => Filter<A>;
 export type AspectStaticQueries<A extends Aspect, Q extends AspectStaticExtensionQueries<A> = AspectStaticExtensionQueries<A>> = {
@@ -206,13 +206,17 @@ export type AspectType<A extends Aspect = Aspect> = string | Constructor<A>;
 // }
 
 /* export const AspectTypeDef = z.object({
-    create/* <T extends ZodTypeAny> * /: z.function().args(z.tuple([z.any()])).rest(), z.type(/* T *//* ReturnType<typeof */ AspectType/* > * /)})
+    create/* <T extends ZodTypeAny> * /: z.function().args(z.tuple([z.any()])).rest(), z.type(/* T *//* ReturnType<typeofAspectType */ /* > * /)})
     //  */
 
 export const AspectType = z.object({
-    _id: z.string().uuid().optional(),
     _T: z.string().default("Aspect").readonly(),
 });
+
+export type Aspect = z.infer<typeof AspectType> & {
+    constructor: Constructor<Aspect>;
+}
+
 // AspectType.parse()
 /* export abstract class Aspect {
     get _T() { return this.constructor.name; }

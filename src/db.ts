@@ -126,7 +126,7 @@ export const updateResultToString = (result: UpdateResult | null | undefined) =>
 export type Updates<A extends Artefact> = {
     updated: Partial<A>;
     original?: A;
-    aspectType?: Constructor<A>;
+    aspectType?: AspectType;
     update: Partial<A>;
     undefineds: Partial<Record<keyof A, undefined>>;
 };
@@ -309,7 +309,7 @@ export class MongoStore<A extends Artefact> implements Store<A> {
                 }
             }
         }
-        return { didWrite: !!result, result: result, query, updates, _: artefact };
+        return { didWrite: !!result, result: result!, query, updates, _: artefact };
     }
 
     bulkWrite(opsOrSource: AnyBulkWriteOperation<A>[] | AsyncGenerator<AnyBulkWriteOperation<A>>, options: BulkWriteOptions & BulkWriterOptions & ProgressOption = BulkWriterOptions.default): Promise<BulkWriteResult> {

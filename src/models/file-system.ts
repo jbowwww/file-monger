@@ -1,11 +1,9 @@
 import * as nodeFs from "node:fs";
 import * as nodePath from "node:path";
 import * as nodeCrypto from "node:crypto";
-import { Aspect, AspectParameters, AspectType, Constructor, DiscriminatedModel, Optional, PartiallyRequired, UniqueAspect, throttle as cache } from ".";
+import { mapObject, Aspect, AspectParameters, AspectType, Constructor, DiscriminatedModel, Optional, PartiallyRequired, throttle as cache } from ".";
 import { Progress } from "../progress";
 import si from "systeminformation";
-import { Filter } from "mongodb";
-
 import debug from "debug";
 import z from "zod";
 const log = debug(nodePath.basename(module.filename));
@@ -19,64 +17,38 @@ export const switchStream = <I extends {}>(iterable: Iterable<I>, ...tests: Test
     return returns;
 };
 
-export abstract class BlockDeviceBase extends UniqueAspect {
-    name: string;
-    identifier: string;
-    type: string;
-    fsType: string;
-    mount: string;
-    size: number;
-    physical: string;
-    uuid: string;
-    removable: boolean;
-    protocol: string;
-    group?: string;
-    device?: string;
-    constructor(blockDevice: AspectParameters<BlockDeviceBase>) {
-        super();
-        this.name = blockDevice.name;
-        this.identifier = blockDevice.identifier;
-        this.type = blockDevice.type;
-        this.fsType = blockDevice.fsType;
-        this.mount = blockDevice.mount;
-        this.size = blockDevice.size;
-        this.physical = blockDevice.physical;
-        this.uuid = blockDevice.uuid;
-        this.removable = blockDevice.removable;
-        this.protocol = blockDevice.protocol;
-        this.group = blockDevice.group;
-        this.device = blockDevice.device;
-    }
-}
+export const BlockDeviceType = AspectType.extend({
+    name: z.string(),
+    identifier: z.string(),
+    type: z.string(),
+    fsType: z.string(),
+    mount: z.string(),
+    size: z.number(),
+    physical: z.string(),
+    uuid: z.string(),
+    removable: z.boolean(),
+    protocol: z.string(),
+    group: z.string().optional(),
+    device: z.string().optional(),
+}); // .transform(_ => Object.create({   // one way to do something lke a class with zod
+//     // BlockDeviceBase.prototype equivalent (except would move the object to its own const definition to prevent a new prototype object created everytime?)
+// }, mapObject(_, ([K, V]) => ([K, { enumerable: true, value: V }]))));
 
-export abstract class BlockDevice extends BlockDeviceBase {
-    static ExpiryAgeMs = 15000;
+export type BlockDevice = z.infer<typeof BlockDeviceType>;
 
-    constructor(blockDevice: BlockDevice) {
-        super(blockDevice);
-    }
-
-    static async getAll(): Promise<(si.Systeminformation.BlockDevicesData)[]> {
-        return cache({
-            expiryAgeMs: BlockDevice.ExpiryAgeMs,
-        }, () => si.blockDevices())();
-    }
-}
+export const BlockDevice = {
+    ExpiryAgeMs: 15000,
+};
+export const getCachedBlockDevices = cache({ expiryAgeMs: BlockDevice.ExpiryAgeMs, }, () => si.blockDevices());
 
 export type GetDiskForPathOptions = {
     path: string;
     disks?: Iterable<Disk>;
 };
 
-export class Disk extends BlockDeviceBase {
-    model: string;
-    serial: string;
-
-    constructor(disk: AspectParameters<Disk>) {
-        super(disk);
-        this.model = disk.model;
-        this.serial = disk.serial;
-    }
+export const DiskType = BlockDeviceType.extend({
+    model: z.string(),
+    serial: z.string(),
 
     Query() {
         return ({
@@ -104,7 +76,7 @@ export type GetPartitionForPathOptions = {
     partitions?: Iterable<Partition>;
 };
 
-export class Partition extends BlockDeviceBase {
+export class Partition extends BlockDevice {
     uuid: string;
 
     constructor(partition: AspectParameters<Partition>) {

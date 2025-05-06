@@ -1,7 +1,7 @@
 import * as nodePath from "node:path";
 import * as nodeUtil from "node:util";
 import { isProxy, isDate } from "node:util/types";
-import { Aspect, AsyncFunction, Constructor, mapObject, NamespacedAspect as ArtefactNamespacedProperty } from ".";
+import { AsyncFunction, Constructor, mapObject, NamespacedAspect as ArtefactNamespacedProperty } from ".";
 import { Filter } from "mongodb";
 import { get } from "../prop-path";
 
@@ -15,14 +15,14 @@ export type TimestampTree<T> = (T extends {} ? {
     _created: Date;
     _checked: Date;
     _updated: Date;
-    _deleted?: Date;
+    _deleted: Date | undefined;
 };
 
 export class Timestamps<T extends {} = {}> {
     _created: Date;
     _checked: Date;
     _updated: Date;
-    _deleted?: Date;
+    _deleted: Date | undefined;
     public constructor(data: Partial<Timestamps<T>> = {}) {
         const { _created, _checked, _updated, _deleted, ...d } = data;
         this._created = _created ?? new Date();
@@ -127,10 +127,10 @@ export abstract class Artefact/* <
     // export static is = Symbol("isArtefact: flag with value true to indicate this is an instance of Artefact");
     // export static modifiedPaths = Symbol();
 
-    _id?: string;
+    _id: string | undefined;
     _v: number;
     _ts!: TimestampTree<{}>;
-    _e?: Error[];
+    _e: Error[] | undefined;
 
     #modifiedPaths: Set<string> = new Set();
 
