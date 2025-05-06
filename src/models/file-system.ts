@@ -1,9 +1,9 @@
 import * as nodeFs from "node:fs";
 import * as nodePath from "node:path";
 import * as nodeCrypto from "node:crypto";
-import { mapObject, Aspect, AspectParameters, AspectType, Constructor, DiscriminatedModel, Optional, PartiallyRequired, throttle as cache } from ".";
+import { mapObject, Aspect, AspectParameters, AspectType, Constructor, DiscriminatedModel, Optional, PartiallyRequired, throttle as cache, KeyValuePair } from ".";
 import { Progress } from "../progress";
-import si from "systeminformation";
+import { blockDevices as siBlockDevices, Systeminformation as si } from "systeminformation";
 import debug from "debug";
 import z from "zod";
 const log = debug(nodePath.basename(module.filename));
@@ -18,6 +18,7 @@ export const switchStream = <I extends {}>(iterable: Iterable<I>, ...tests: Test
 };
 
 export const BlockDeviceType = AspectType.extend({
+    _T: z.literal("BlockDevice"),
     name: z.string(),
     identifier: z.string(),
     type: z.string(),
@@ -30,54 +31,69 @@ export const BlockDeviceType = AspectType.extend({
     protocol: z.string(),
     group: z.string().optional(),
     device: z.string().optional(),
-}); // .transform(_ => Object.create({   // one way to do something lke a class with zod
+}).passthrough(); // .transform(_ => Object.create({   // one way to do something lke a class with zod
 //     // BlockDeviceBase.prototype equivalent (except would move the object to its own const definition to prevent a new prototype object created everytime?)
 // }, mapObject(_, ([K, V]) => ([K, { enumerable: true, value: V }]))));
-
 export type BlockDevice = z.infer<typeof BlockDeviceType>;
-
-export const BlockDevice = {
-    ExpiryAgeMs: 15000,
+export namespace BlockDevice {
+    export const _T = Symbol("BlockDevice");
+    export const ExpiryAgeMs = 15000;
+    export const getAll = cache<Iterable<BlockDevice>>({
+        expiryAgeMs: ExpiryAgeMs,
+    }, () => siBlockDevices().then(bds => bds
+        .filter(kbdp => kbdp.type === "disk")
+        .map(([K, bd]) => ([K, BlockDeviceType.parse(bd)])) as BlockDevice[]));
+            //V. s.filter(bd => .map(bd => BlockDeviceType.safeParse(({ _T, ...bd, })))),
 };
-export const getCachedBlockDevices = cache({ expiryAgeMs: BlockDevice.ExpiryAgeMs, }, () => si.blockDevices());
 
 export type GetDiskForPathOptions = {
     path: string;
     disks?: Iterable<Disk>;
 };
-
 export const DiskType = BlockDeviceType.extend({
-    model: z.string(),
-    serial: z.string(),
-
-    Query() {
-        return ({
-            byUnique: () => ({ "$and": [ { "Disk.model": { "$eq": this.model } }, { "Disk.serial": { "$eq": this.serial } } ] }),
-        });
-    }
+    _T: z.literal("Disk"),
+    model: z.string().nonempty(),
+    serial: z.string().nonempty(),
+});
+export type Disk = z.infer<typeof DiskType>;
+export namespace Disk {
+    export const Query = { //(disk?: Disk) {
+        byUnique: (disk: Disk) => Query.byModelAndSerial(disk),
+        byModelAndSerial: ({ model, serial }: { model: string, serial: string, }) => ({
+            "$and": [{
+                "Disk.model": { "$eq": model }
+            }, {
+                "Disk.serial": { "$eq": serial }
+            }]
+        }),
+        // return disk ? mapObject(query, ([K, V]) => ([K, V.bind(query, ({ model: disk.model, serial: disk.serial, }))])) : query;
+    };
     
-    static async getAll(): Promise<Disk[]> {
-        return BlockDevice.getAll().then(blockDevices => blockDevices
-            .filter(bd => bd.type === "disk")
-            .map(bd => new Disk(bd)));
-    }
+    export const getAll = (): Promise<Disk[]> =>
+        BlockDevice.getAll(),
+            // .then(blockDevices => blockDevices
+            //     .filter(bd => bd.type === "disk")
+            //     .map(bd => new Disk(bd))),
 
-    static async getForPath(pathOrOptions: string | GetDiskForPathOptions) {
+    async getForPath(pathOrOptions: string | GetDiskForPathOptions) {
         const options: GetDiskForPathOptions = typeof pathOrOptions === "string" ? { path: pathOrOptions } : pathOrOptions;
         options.disks ??= await Disk.getAll();
         const partition = await Partition.getForPath({ path: options.path });
         const disk = Array.from(options.disks).filter(d => partition?.device?.startsWith(d.device ?? "")).at(0);
         return disk;
-    };
-}
+  ,  };
+};
 
 export type GetPartitionForPathOptions = {
     path: string;
     partitions?: Iterable<Partition>;
 };
 
-export class Partition extends BlockDevice {
-    uuid: string;
+export const PartitionType = BlockDeviceType.extend({
+    _T: z.literal("Disk"),
+    uuid: z.string(),
+});
+export type Partition = z.infer<typeof PartitionType>;
 
     constructor(partition: AspectParameters<Partition>) {
         super(partition);

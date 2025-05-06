@@ -2,7 +2,7 @@ import { Filter, IndexSpecification, CreateIndexesOptions } from "mongodb";
 import * as nodePath from "node:path";
 
 import debug from "debug";
-import z from "zod";
+import z, { ZodSymbol } from "zod";
 const log = debug(nodePath.basename(module.filename));
 const logProxy = log.extend("Proxy");
 
@@ -35,7 +35,7 @@ export type Optional<T extends {}, K extends keyof T> = Omit<T, K> & { [P in K]?
 export type PartiallyRequired<T extends {}, R extends keyof T> = Required<Pick<T, R>> & Partial<Omit<T, R>>;
 
 export type KeyValuePair<K extends PropertyKey = PropertyKey, V = unknown> = [K: K, V: V];
-export type FilterFn<T extends {}> = (kv: KeyValuePair<keyof T, T[keyof T]>) => boolean;
+export type FilterFn<T extends {}> = (value: T) => boolean;// (kv: KeyValuePair<keyof T, T[keyof T]>) => boolean;
 export type MapFn<T extends {}, TOut extends {}> = (kv: KeyValuePair<keyof T, T[keyof T]>/* , obj: {} */) => KeyValuePair<keyof TOut, TOut[keyof TOut]>;
 export function mapObject<T extends { [K: string]: any; }, TOut extends { [K: string]: any; }>(o: T, map: MapFn<T, TOut>): TOut;
 export function mapObject<T extends { [K: string]: any; }, TOut extends { [K: string]: any; }>(o: T, filter: FilterFn<T> | MapFn<T, TOut>, map: MapFn<T, TOut>): TOut;
@@ -210,12 +210,11 @@ export type AspectType<A extends Aspect = Aspect> = string | Constructor<A>;
     //  */
 
 export const AspectType = z.object({
-    _T: z.string().default("Aspect").readonly(),
+    _T: z.literal("Aspect"),
 });
-
-export type Aspect = z.infer<typeof AspectType> & {
-    constructor: Constructor<Aspect>;
-}
+export type Aspect = z.infer<typeof AspectType>;
+//     constructor: Constructor<Aspect>;
+// }
 
 // AspectType.parse()
 /* export abstract class Aspect {
