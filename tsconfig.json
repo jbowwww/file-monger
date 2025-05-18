@@ -12,6 +12,9 @@
         "lib": [ "esnext.decorators" ],
     },
     "include": [
-        "src/"
+        "src/",
+    ],
+    "exclude": [
+        "node_modules",
     ]
 }
