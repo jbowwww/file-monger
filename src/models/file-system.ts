@@ -1,10 +1,9 @@
 import * as nodeFs from "node:fs";
 import * as nodePath from "node:path";
 import * as nodeCrypto from "node:crypto";
-import { Aspect, AspectParameters, Constructor, DiscriminatedModel, Optional, PartiallyRequired, UniqueAspect, throttle as cache } from ".";
+import { Aspect, AspectParameters, PartiallyRequired, UniqueAspect, UniqueAspectInstanceQueries, throttle as cache } from ".";
 import { Progress } from "../progress";
 import si from "systeminformation";
-import { Filter } from "mongodb";
 
 import debug from "debug";
 const log = debug(nodePath.basename(module.filename));
@@ -18,7 +17,8 @@ export const switchStream = <I extends {}>(iterable: Iterable<I>, ...tests: Test
     return returns;
 };
 
-export abstract class BlockDeviceBase extends UniqueAspect {
+export abstract class BlockDevice extends UniqueAspect {
+    static ExpiryAgeMs = 15000;
     name: string;
     identifier: string;
     type: string;
@@ -27,12 +27,15 @@ export abstract class BlockDeviceBase extends UniqueAspect {
     size: number;
     physical: string;
     uuid: string;
+    model: string;
+    serial: string;
     removable: boolean;
     protocol: string;
     group?: string;
     device?: string;
-    constructor(blockDevice: AspectParameters<BlockDeviceBase>) {
-        super();
+
+    constructor(blockDevice: AspectParameters<BlockDevice>) {
+        super(blockDevice);
         this.name = blockDevice.name;
         this.identifier = blockDevice.identifier;
         this.type = blockDevice.type;
@@ -41,24 +44,18 @@ export abstract class BlockDeviceBase extends UniqueAspect {
         this.size = blockDevice.size;
         this.physical = blockDevice.physical;
         this.uuid = blockDevice.uuid;
+        this.model = blockDevice.model;
+        this.serial = blockDevice.serial;
         this.removable = blockDevice.removable;
         this.protocol = blockDevice.protocol;
         this.group = blockDevice.group;
         this.device = blockDevice.device;
     }
-}
 
-export abstract class BlockDevice extends BlockDeviceBase {
-    static ExpiryAgeMs = 15000;
-
-    constructor(blockDevice: BlockDevice) {
-        super(blockDevice);
-    }
-
-    static async getAll(): Promise<(si.Systeminformation.BlockDevicesData)[]> {
+    static async getAll(): Promise</* (si.Systeminformation.BlockDevicesData) */AspectParameters<BlockDevice>[]> {
         return cache({
             expiryAgeMs: BlockDevice.ExpiryAgeMs,
-        }, () => si.blockDevices())();
+        }, () => si.blockDevices() as Promise<AspectParameters<BlockDevice>[]>)();//.then(bds => bds.map(bd => new ) as Promise<BlockDevice[]>)();
     }
 }
 
@@ -67,7 +64,7 @@ export type GetDiskForPathOptions = {
     disks?: Iterable<Disk>;
 };
 
-export class Disk extends BlockDeviceBase {
+export class Disk extends BlockDevice {
     model: string;
     serial: string;
 
@@ -77,13 +74,13 @@ export class Disk extends BlockDeviceBase {
         this.serial = disk.serial;
     }
 
-    Query() {
+    get Query() {
         return ({
-            byUnique: () => ({ "$and": [ { "Disk.model": { "$eq": this.model } }, { "Disk.serial": { "$eq": this.serial } } ] }),
+            byUnique: () => this.Query.byModelAndSerial(),
+            byModelAndSerial: () => ({ "$and": [ { "Disk.model": { "$eq": this.model } }, { "Disk.serial": { "$eq": this.serial } } ] }),    
         });
     }
-    
-    static async getAll(): Promise<Disk[]> {
+    static async getAll() {
         return BlockDevice.getAll().then(blockDevices => blockDevices
             .filter(bd => bd.type === "disk")
             .map(bd => new Disk(bd)));
@@ -103,7 +100,7 @@ export type GetPartitionForPathOptions = {
     partitions?: Iterable<Partition>;
 };
 
-export class Partition extends BlockDeviceBase {
+export class Partition extends BlockDevice {
     uuid: string;
 
     constructor(partition: AspectParameters<Partition>) {
@@ -111,9 +108,10 @@ export class Partition extends BlockDeviceBase {
         this.uuid = partition.uuid;
     }
 
-    Query() {
+    get Query() {
         return ({
-            byUnique: () => ({ "Partition.uuid": { "$eq": this.uuid } }),
+            byUnique: () => this.Query.byUuid(),
+            byUuid: () => ({ "Partition.uuid": { "$eq": this.uuid } }),
         });
     }
 
@@ -130,22 +128,23 @@ export class Partition extends BlockDeviceBase {
     };
 }
 
-export abstract class Entry extends Aspect {
+export abstract class Entry extends UniqueAspect {
     path: string;
     stats: nodeFs.Stats;
     partition?: Partition;
 
-    constructor({ path, stats, partition }: Omit<Entry, "_T" | "Query">) {
+    constructor({ path, stats, partition }: AspectParameters<Entry>) {
         super();
         this.path = path;
         this.stats = stats;
         this.partition = partition;
     }
 
-    Query() {
+    get Query() {// AspectInstanceQueries<Entry> {
         return ({
-            byUnique: () => ({ [`${this._T}.path`]: this.path, }),
-        })
+            byUnique: () => this.Query.byPath(),
+            byPath: () => ({ [`${this._T}.path`]: this.path, }),
+        });
     }
 
     static async create({ path, stats, partition, partitions }: PartiallyRequired<Entry, "path"> & { partitions?: Iterable<Partition>; }) {
@@ -159,13 +158,9 @@ export abstract class Entry extends Aspect {
     }
 }
 
-export class File extends Entry { constructor(file: Omit<File, "_T" | "Query">) { super({ ...file, }); }}
-export class Directory extends Entry { constructor(directory: Omit<Directory, "_T" | "Query">) { super({ ...directory, }); }}
-export class Unknown extends Entry { constructor(unknown: Omit<Unknown, "_T" | "Query">) { super({ ...unknown, }); }}
-
-type File_ = { _T: "File"; }
-type Directory_ = { _T: "Directory"; }
-type Unknown_ = { _T: "Unknown"; }
+export class File extends Entry { constructor(file: AspectParameters<File>) { super({ ...file, }); }}
+export class Directory extends Entry { constructor(directory: AspectParameters<Directory>) { super({ ...directory, }); }}
+export class Unknown extends Entry { constructor(unknown: AspectParameters<Unknown>) { super({ ...unknown, }); }}
 
 export type WalkCallbackFn = (entry: Entry, depth: number) => { emit: boolean, recurse?: boolean };
 export const walk = async function *walk({
@@ -216,16 +211,16 @@ export const walk = async function *walk({
     }
 };
 
-export class Hash extends Aspect {
+export class Hash extends UniqueAspect {
     constructor(public sha256: string) { super(); }
 
-    Query() {
+    get Query() {
         return ({
-            byUnique: () => ({ "Hash.sha256": { "$eq": this.sha256, }, }),
-        })
+            byUnique: () => ({ "sha256": { "$eq": this.sha256, }, }),
+        });
     }
     
-    static async create(path: string): Promise<Hash> {
+    static async create(path: string) {
         try {
             const hashDigest = nodeCrypto.createHash('sha256');
             const input = nodeFs.createReadStream(path);

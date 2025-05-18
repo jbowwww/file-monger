@@ -1,15 +1,19 @@
-import { Filter, IndexSpecification, CreateIndexesOptions } from "mongodb";
+import { Filter, IndexSpecification, CreateIndexesOptions, Document, UpdateFilter, BulkWriteOptions } from "mongodb";
 import * as nodePath from "node:path";
 
 import debug from "debug";
+import { Artefact } from "./artefact";
+import { flattenPropertyNames, Query } from "../db";
 const log = debug(nodePath.basename(module.filename));
 const logProxy = log.extend("Proxy");
 
+export const hasPrototype = (prototype: object, value: Constructor<any>): boolean =>
+    value && (value === prototype || (prototype && hasPrototype(prototype, value.prototype)));
 export type Constructor<T = any> = { name: string; new(...args: any[]): T; /* prototype: T; */ };
-export const isConstructor = (v: any): v is Constructor<any> => 
-    v && typeof v === "function" &&
-    v.prototype && typeof v.prototype === "object" &&
-    typeof v.name === "string";
+export const isConstructor = <T = {}>(value: unknown, ctor?: AbstractConstructor<T>): value is Constructor<T> =>
+    value && typeof value === "function" && value.prototype && (
+        !ctor || (typeof ctor.name === "string" &&
+        typeof ctor.prototype === "object" && hasPrototype(ctor.prototype, value as Constructor<T>)));
 
 export type AbstractConstructor<T = any> = abstract new (...args: any[]) => T;
 
@@ -46,7 +50,8 @@ export function mapObject<T extends { [K: string]: any; }, TOut extends { [K: st
 export function filterObject<T extends {}>(o: T, filter: FilterFn<T>): Partial<T> {
     return Object.fromEntries((Object.entries(o) as KeyValuePair<keyof T, T[keyof T]>[]).filter(filter)) as Partial<T>;
 }
-
+export function mapOp(op: { filter: Filter<Aspect>, update: UpdateFilter<Aspect>, } /* & BulkWriteOptions */, mapFn: MapFn<any, any>) { return mapObject(op, ([K, V]) => ([K, mapObject(V, mapFn)])); };
+export type ValueUnion<T extends {}> = T[keyof T];
 export type DiscriminateUnion<T, K extends keyof T, V extends T[K]> = Extract<T, Record<K, V>>;
 export type DiscriminatedModel<T extends Record<K, T[K]>, K extends PropertyKey = "_T"> = { [V in T[K]]: DiscriminateUnion<T, K, V> };
 
@@ -69,6 +74,9 @@ export type DeepProps<
                 ? Join<K, Exclude<keyof T[K], symbol>>
                 : U | Join<U, Exclude<keyof T[K], symbol>>
         > : U;
+
+// Use for ...rest parameters on functions, this type better handles both 0, 1, or more arguments, while using any[] sometimes fails with one parameter
+export type AnyParameters = [any] | any[];
 
 const getUnorderedParameters = <P1, P2>(
     p1: P1 | P2, typeGuard1: TypeGuard<P1>,
@@ -160,63 +168,52 @@ export type Converter<T, K extends string, V> = T extends any ? { [P in keyof Id
 
 export type NamespacedAspect<T> = { [K: string]: T; };
 
-export const isAspect = <A extends Aspect = Aspect>(value: any): value is Aspect => value !== null && value instanceof Aspect;
+export const isAspect = function isAspect<A extends Aspect>(this: AbstractConstructor<A>, value: any): value is A { return value !== null && value instanceof this; };
 
-export type AspectStaticQuery<A extends Aspect> = (this: Constructor<A>, _: A) => Filter<A>;
-export type AspectStaticQueries<A extends Aspect, Q extends AspectStaticExtensionQueries<A> = AspectStaticExtensionQueries<A>> = {
-    byUnique: AspectStaticQuery<A>;
+export type AspectStaticQuery<A extends Aspect = Aspect> = (...args: [A] | [unknown] | unknown[]) => Filter<A>;
+export type AspectStaticQueries<A extends Aspect = Aspect, Q extends AspectStaticExtensionQueries<A> = AspectStaticExtensionQueries<A>> = {
+    // byUnique: AspectStaticQuery<A>;
 } & Q;
-export type AspectStaticExtensionQueries<A extends Aspect> = {
+export type UniqueAspectStaticQueries<A extends UniqueAspect = UniqueAspect, Q extends AspectStaticExtensionQueries<A> = AspectStaticExtensionQueries<A>> = AspectStaticQueries<A, Q & {
+    byUnique: AspectStaticQuery<A>;
+}>;
+export type AspectStaticExtensionQueries<A extends Aspect = Aspect> = {
     [K: string]: AspectStaticQuery<A>;
 };
 
-export type AspectInstanceQuery<A extends Aspect> = () => Filter<A>;
-export type AspectInstanceQueries<A extends Aspect, Q extends AspectInstanceExtensionQueries<A> = AspectInstanceExtensionQueries<A>> = {
+export type AspectInstanceQuery<A extends Aspect = Aspect> = () => Filter<A>;
+export type AspectInstanceQueries<A extends Aspect = Aspect> = { [K: string]: AspectInstanceQuery; };
+export type UniqueAspectInstanceQueries<A extends UniqueAspect = UniqueAspect> = AspectInstanceQueries<A> & {
     byUnique: AspectInstanceQuery<A>;
-} & Q;
-export type AspectInstanceExtensionQueries<A extends Aspect> = {
+};
+export type AspectInstanceExtensionQueries<A extends Aspect = Aspect> = {
     [K: string]: AspectInstanceQuery<A>;
 };
 
-export type AspectParameters<A extends Aspect> = Omit<A, "_T" | "Query">;
+export type AspectParameters<A extends Aspect> = NonFunctionProperties<Omit<A, "_T" | "Query" | "uniqueQuery" | "isAspect">>;
 
-export type AspectType<A extends Aspect = Aspect> = string | Constructor<A>;
+export type AspectType<A extends Aspect = Aspect> = string | AbstractConstructor<A>;
 
-// function makeUniqueQueryFromIndex(uniqueIndex: IndexSpecification): Filter<Aspect> {
-//     let names: string[] = [];
-//     let directions: IndexDirection[] = [];
-//     if (Array.isArray(uniqueIndex)) {
-//         if (uniqueIndex.length > 0) {
-//             if (Array.isArray(uniqueIndex[0])) {
-//                 if (typeof uniqueIndex[0][0] === "string") {
-//                     names.push(...(uniqueIndex[0] as string[]).map(index => index[0]));
-//                     directions.push(uniqueIndex[0][1]);
-//                 }
-//                 uniqueIndex = uniqueIndex as any as [string, IndexDirection][];
-//                 if (Array.isArray(uniqueIndex)) {
-//                     names.push(...uniqueIndex.map((index: [string, IndexDirection]) => index[0]));
-//                 }
-//             } else if (typeof uniqueIndex[0][0] === "string") {
-//                 names.push(uniqueIndex[0][0]);
-//                 directions.push(uniqueIndex[0][1]);
-//             }
-//         }
-//     }
-// }
 
 export abstract class Aspect {
+    isAspect: true = true;
     get _T() { return this.constructor.name; }
-    constructor() {}
-    
-    static isAspect = isAspect;
-    static async create<A extends Aspect>(this: Constructor<Aspect>, ...args: any) {
-        return new this(...args);
+    constructor(...args: AnyParameters) {}
+    getUpdates<A extends Aspect>(previous?: A) {
+
     }
+    static is = isAspect;
+    static async create(this: typeof Aspect, ...args: any): Promise<Aspect> {
+        // return new this(...args);
+        throw new TypeError();
+    }
+    namespace(op: { filter: Filter<Aspect>, update: UpdateFilter<Aspect> }) {
+        return mapOp(op, ([K, V]: [any, any]) => ([(K.at(0) === "$" ? "" : this._T + ".") + K, /* flattenPropertyNames */(V)/* .update */]));
+    };
+    abstract get Query(): AspectInstanceQueries<Aspect>;
 }
 
 export abstract class UniqueAspect extends Aspect {
-    abstract Query(): AspectInstanceQueries<Aspect>;
-
     private static _uniqueIndex: IndexSpecification = {};
     public static get uniqueIndex(): IndexSpecification { return this._uniqueIndex; }
     public static set uniqueIndex(v: IndexSpecification) { this._uniqueIndex = v; }
@@ -224,5 +221,7 @@ export abstract class UniqueAspect extends Aspect {
     private static _options: CreateIndexesOptions = {};
     public static get options() { return { ...this._options, unique: true, }; }
 
-    public static set options(v) { this._options = v; }    
+    public static set options(v) { this._options = v; }
+
+    abstract get Query(): UniqueAspectInstanceQueries;
 }

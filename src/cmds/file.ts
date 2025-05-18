@@ -5,11 +5,11 @@ import { BulkWriterOptions, MongoStorage, Query, Store } from "../db";
 import exitHook from "async-exit-hook";
 import * as Audio from "../models/audio";
 import * as nodePath from "node:path";
-import { AnyBulkWriteOperation, MongoError } from "mongodb";
+import { AnyBulkWriteOperation, MongoError, WithId } from "mongodb";
 
 import debug from "debug";
 import { Artefact } from "../models/artefact";
-import { AbstractConstructor, Constructor, DiscriminatedModel } from "../models";
+import { AbstractConstructor, Aspect, Constructor, DiscriminatedModel } from "../models";
 import { PipelinePromise } from "node:stream";
 import * as FS from "../models/file-system";
 import * as Tags from "../models/tags";
@@ -65,13 +65,26 @@ const log = debug(nodePath.basename(module.filename));
 // export type FileSystemArtefact = { [K in keyof typeof FileSystemArtefact]: Awaited<ReturnType<typeof FileSystemArtefact[K]>>; };
 
 export class FileSystemArtefact extends Artefact {
+    // Must exist, supplied to constructor
+    get Entry() { 
+        const entry = this.File ?? this.Directory ?? this.Unknown;
+        if (!entry) {
+            throw new TypeError(`FS.Entry does not exist on FileSystemArtefact=${this}`);
+        }
+        return entry;
+    }
+    // And this.Entry above is returning the ONE of these that exists
     File?: FS.File;
-    Hash?: FS.Hash;
-    Audio?: Audio.Audio;
-
     Directory?: FS.Directory;
 
     Unknown?: FS.Unknown;
+
+    // Only iff !!this.File
+    Hash?: FS.Hash;
+    Audio?: Audio.Audio;
+
+    Disk?: FS.Disk;
+    Partition?: FS.Partition;
 }
 
 export const command = 'file';
@@ -108,17 +121,16 @@ export const builder = (yargs: yargs.Argv) => yargs
             await Task.start(
 
                 async function enumerateBlockDevices(task: Task) {
-                    const bulkWriter = store.bulkWriterFn({ ...BulkWriterOptions.default, progress: task.progress });
+                    const bulkWriter = store.bulkWriterSink({ ...BulkWriterOptions.default, progress: task.progress });
 
                     await Task.repeat({ postDelay: 5000 }, async() => {           // 5s
                         await bulkWriter(
                             (async function* enumerateBlockDevicesSource() {
                                 const disks = await FS.Disk.getAll();
                                 const partitions = await FS.Partition.getAll();
-                                const ops: AnyBulkWriteOperation<FileSystemArtefact>[] = [];
                                 // ops.push(...
-                                yield* disks.map(d => store.ops.updateOne(new FileSystemArtefact()., Disk));
-                                // {
+                                yield* disks.map(d => store.ops.updateOne(d));
+                                // 
                                 //     filter: { $and: [ { "Disk.model": { $eq: d.model } }, { "Disk.serial": { $eq: d.serial } }, ], },
                                 //     update: { $set: { "Disk": d } },
                                 //     upsert: true,
@@ -136,26 +148,21 @@ export const builder = (yargs: yargs.Argv) => yargs
                 },
 
                 async function indexFileSystem(task: Task) {
-                    const bulkWriter = store.bulkWriterFn({ ...BulkWriterOptions.default, progress: task.progress });
+                    const bulkWriter = store.bulkWriterSink({ ...BulkWriterOptions.default, progress: task.progress });
 
                     await Task.repeat({ postDelay: 180000/*0*/, }, async () => {   // 3/*0*/ minutes
                         bulkWriter(
                             (async function* indexFileSystemSource() {
                                 for (const path of argv.paths) {
                                     for await (const fsEntry of FS.walk({ path, progress: task.progress })) {
-                                        const _ = await store.findOne({ [`${fsEntry._T}.path`]: fsEntry.path, }) ?? new FileSystemArtefact();
-                                        _[fsEntry._T] = fsEntry;
                                         try {
-                                            log("%s: _=%O", task.name, _);
-                                            // const result = await store.updateOrCreate(_, { [`${fsEntry.constructor.name.toLowerCase()}.path`]: fsEntry.path });
-                                            yield ({ "updateOne": {
-                                                filter: { [`${fsEntry.constructor.name.toLowerCase()}.path`]: fsEntry.path, },
-                                                update: { $set: { [fsEntry.constructor.name.toLowerCase()]: fsEntry, } },
-                                                upsert: true,
-                                            } });
-                                            log("%s: result=%O\n%s: task.progress=%s", task.name, result, task.name, task.progress);
+                                            // const _ = yield ({ "findOne": { filter: Artefact.Query(FS.Entry, "path"), } }) ?? new FileSystemArtefact;
+                                            // const _ = await store.findOneOrCreate(Query(fsEntry, "path"), () => new FileSystemArtefact());
+                                            // _.update(fsEntry);
+                                            yield store.ops.updateOne(fsEntry);
+                                            log("%s: task.progress=%s", task.name, task.progress);
                                         } catch (e: any) {
-                                            handleError(e, task, _, store);
+                                            handleError(e, task, fsEntry, store);
                                         }
                                     }
                                 }
@@ -166,7 +173,7 @@ export const builder = (yargs: yargs.Argv) => yargs
                 },
 
                 async function hashFiles(task: Task) {
-                    const bulkWriter = store.bulkWriterFn({ ...BulkWriterOptions.default, progress: task.progress });
+                    const bulkWriter = store.bulkWriterSink({ ...BulkWriterOptions.default, progress: task.progress });
                     await Task.repeat({ preDelay: 3000, }, async () => {     // 3 seconds
                         bulkWriter(
                             (async function* hashFilesSource() {
@@ -181,8 +188,8 @@ export const builder = (yargs: yargs.Argv) => yargs
                                 }, { progress: task.progress }))) {
                                     try {
                                         log("%s: _=%O", task.name, _);
-                                        if (_.file) {
-                                            const result = await store.updateOne({ _id: _._id }, { $set: { Hash: FS.Hash.create(_.file.path) } });
+                                        if (_.File) {
+                                            const result = await store.updateOne({ _id: _._id }, { $set: { Hash: await FS.Hash.create(_.File.path) } });
                                             log("%s: result=%O\n%s: task.progress=%s", task.name, result, task.name, task.progress);
                                         }
                                     } catch (e: any) {
@@ -195,7 +202,7 @@ export const builder = (yargs: yargs.Argv) => yargs
                 },
 
                 async function analyzeAudioFiles(task: Task) {
-                    const bulkWriter = store.bulkWriterFn({ ...BulkWriterOptions.default, progress: task.progress });
+                    const bulkWriter = store.bulkWriterSink({ ...BulkWriterOptions.default, progress: task.progress });
                     await Task.repeat({ preDelay: 3000, }, async () => {     // 3 seconds
                         bulkWriter(
                             (async function* analyzeAudioFilesSource() {
@@ -211,7 +218,7 @@ export const builder = (yargs: yargs.Argv) => yargs
                                 }, { progress: task.progress }))) {
                                     try {
                                         log("%s: _=%O", task.name, _);
-                                        const result = await store.updateOne({ _id: _._id }, { $set: { Audio: await Audio.Audio(_.file!.path) } });
+                                        const result = await store.updateOne({ _id: _._id }, { $set: { Audio: await Audio.Audio(_.File!.path) } });
                                         log("%s: result=%O\n%s: task.progress=%s", task.name, result, task.name, task.progress);
                                     } catch (e: any) {
                                         handleError(e, task, _, store);
@@ -227,17 +234,19 @@ export const builder = (yargs: yargs.Argv) => yargs
         }
     ).demandCommand();
 
-async function handleError(e: Error, task: Task, _: Partial<FileSystemArtefactSchema>, store: Store<FileSystemArtefactSchema>) {
+async function handleError(e: Error, task: Task, _: Partial<FileSystemArtefact | FS.Entry>, store: Store<FileSystemArtefact>) {
     // const error = Object.assign(e, { task: task });//new Error("${task.name}: Error!\n_=${nodeUtil.inspect(_, false, 1)}\nError={e/* .stack */}"), { /* cause: e, stack: e.stack */ });
     if (!(e instanceof MongoError)) {
         const result = await store.updateOne(
-            _._id ? { _id: _._id } :
-            _.file ? { "File.path": _.file.path } :
-            _.directory ? { "Directory.path": _.directory.path } :
-            _.unknown ? { "Unknown.path": _.unknown?.path } :
-            _.partition ? { "Partition.uuid": _.partition?.uuid } :
-            _.disk ? { $and: [ { "Disk.model": _.disk.model }, { "Disk.serial": _.disk?.serial }, ], } :
-            {},
+            FS.Entry.is(_) ? ({ [`${_._T}.path`]: _.path }) :
+            FileSystemArtefact.is(_) ? (_._id ? { _id: _._id } :
+            _.File ? { "File.path": _.File.path } :
+            _.Directory ? { "Directory.path": _.Directory.path } :
+            _.Unknown ? { "Unknown.path": _.Unknown?.path } :
+            _.Partition ? { "Partition.uuid": _.Partition?.uuid } :
+            _.Disk ? { $and: [ { "Disk.model": _.Disk.model }, { "Disk.serial": _.Disk?.serial }, ], } :
+            _.Hash ? { "Hash.sha256": _.Hash.sha256 } :
+            ({ "$eq": _ })) : ({}),
             { $set: { _e: [e] } });
         task.warnings.push(e);
         log("${task.name}: Warn! _=%O Error=%s", _, e.stack);
