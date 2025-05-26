@@ -1,18 +1,15 @@
 import yargs from "yargs";
 import { globalOptions } from "../cli";
 import { Task } from "../task";
-import { BulkWriterOptions, MongoStorage, Query, Store } from "../db";
+import { BulkWriterOptions, MongoStorage, Store } from "../db";
 import exitHook from "async-exit-hook";
 import * as Audio from "../models/audio";
 import * as nodePath from "node:path";
-import { AnyBulkWriteOperation, MongoError, WithId } from "mongodb";
+import { MongoError } from "mongodb";
+import { Artefact, isArtefact } from "../models/artefact";
+import * as FS from "../models/file-system";
 
 import debug from "debug";
-import { Artefact } from "../models/artefact";
-import { AbstractConstructor, Aspect, Constructor, DiscriminatedModel } from "../models";
-import { PipelinePromise } from "node:stream";
-import * as FS from "../models/file-system";
-import * as Tags from "../models/tags";
 const log = debug(nodePath.basename(module.filename));
 
 // export const FileArtefact = {
@@ -64,16 +61,18 @@ const log = debug(nodePath.basename(module.filename));
 
 // export type FileSystemArtefact = { [K in keyof typeof FileSystemArtefact]: Awaited<ReturnType<typeof FileSystemArtefact[K]>>; };
 
-export class FileSystemArtefact extends Artefact {
-    // Must exist, supplied to constructor
-    get Entry() { 
-        const entry = this.File ?? this.Directory ?? this.Unknown;
-        if (!entry) {
-            throw new TypeError(`FS.Entry does not exist on FileSystemArtefact=${this}`);
-        }
-        return entry;
-    }
-    // And this.Entry above is returning the ONE of these that exists
+// export class FileSystemArtefact extends Artefact {
+//     // Must exist, supplied to constructor
+//     get Entry() { 
+//         const entry = this.File ?? this.Directory ?? this.Unknown;
+//         if (!entry) {
+//             throw new TypeError(`FS.Entry does not exist on FileSystemArtefact=${this}`);
+//         }
+//         return entry;
+//     }
+//     // And this.Entry above is returning the ONE of these that exists
+
+type FileSystemArtefact = Artefact & {
     File?: FS.File;
     Directory?: FS.Directory;
 
@@ -103,7 +102,7 @@ export const builder = (yargs: yargs.Argv) => yargs
         async function (argv): Promise<void> {
 
             const storage = new MongoStorage(argv.dbUrl);
-            const store = await storage.store<FileSystemArtefact>("fileSystemEntries", {
+            const store = await storage.store<FileSystemArtefact>("fileSystemEntries"/* , FileSystemArtefact */, {
                 createIndexes: [{
                     index: { "File.path": 1, "Directory.path": 1, "Unknown.path": 1, "Partition.uuid": 1, "Disk.model": 1, "Disk.serial": 1, },
                     options: { unique: true, },
@@ -123,7 +122,7 @@ export const builder = (yargs: yargs.Argv) => yargs
                 async function enumerateBlockDevices(task: Task) {
                     const bulkWriter = store.bulkWriterSink({ ...BulkWriterOptions.default, progress: task.progress });
 
-                    await Task.repeat({ postDelay: 5000 }, async() => {           // 5s
+                    await Task.repeat({ postDelay: 15000 }, async() => {           // 15s
                         await bulkWriter(
                             (async function* enumerateBlockDevicesSource() {
                                 const disks = await FS.Disk.getAll();
@@ -136,12 +135,12 @@ export const builder = (yargs: yargs.Argv) => yargs
                                 //     upsert: true,
                                 // } }));
                                 // ops.push(...
-                                yield* partitions.map(p => ({ "updateOne": {
-                                    filter: { "Partition.uuid": { $eq: p.uuid } },
-                                    update: { $set: { "Partition": p } },
-                                    upsert: true,
-                                } }));
-
+                                // yield* partitions.map(p => ({ "updateOne": {
+                                //     filter: { "Partition.uuid": { $eq: p.uuid } },
+                                //     update: { $set: { "Partition": p } },
+                                //     upsert: true,
+                                // } }));
+                                yield* partitions.map(p => store.ops.updateOne(p))
                             })()
                         );
                     });
@@ -160,7 +159,7 @@ export const builder = (yargs: yargs.Argv) => yargs
                                             // const _ = await store.findOneOrCreate(Query(fsEntry, "path"), () => new FileSystemArtefact());
                                             // _.update(fsEntry);
                                             yield store.ops.updateOne(fsEntry);
-                                            log("%s: task.progress=%s", task.name, task.progress);
+                                            log("%s: task.progress=%s fsEntry=%O", task.name, task.progress, fsEntry);
                                         } catch (e: any) {
                                             handleError(e, task, fsEntry, store);
                                         }
@@ -187,11 +186,11 @@ export const builder = (yargs: yargs.Argv) => yargs
                                     ]
                                 }, { progress: task.progress }))) {
                                     try {
-                                        log("%s: _=%O", task.name, _);
                                         if (_.File) {
-                                            const result = await store.updateOne({ _id: _._id }, { $set: { Hash: await FS.Hash.create(_.File.path) } });
-                                            log("%s: result=%O\n%s: task.progress=%s", task.name, result, task.name, task.progress);
+                                            _.Hash = await FS.Hash.create(_.File.path);
+                                            yield await store.ops.updateOne(_);
                                         }
+                                        log("%s: task.progress=%s _=%O", task.name, task.progress, _);
                                     } catch (e: any) {
                                         handleError(e, task, _, store);
                                     }
@@ -217,9 +216,9 @@ export const builder = (yargs: yargs.Argv) => yargs
                                     ]
                                 }, { progress: task.progress }))) {
                                     try {
-                                        log("%s: _=%O", task.name, _);
-                                        const result = await store.updateOne({ _id: _._id }, { $set: { Audio: await Audio.Audio(_.File!.path) } });
-                                        log("%s: result=%O\n%s: task.progress=%s", task.name, result, task.name, task.progress);
+                                        _.Audio = await Audio.Audio.create(_.File!.path);
+                                        yield store.ops.updateOne(_);
+                                        log("%s: task.progress=%s _=%O", task.name, task.progress, _);
                                     } catch (e: any) {
                                         handleError(e, task, _, store);
                                     }
@@ -239,7 +238,7 @@ async function handleError(e: Error, task: Task, _: Partial<FileSystemArtefact |
     if (!(e instanceof MongoError)) {
         const result = await store.updateOne(
             FS.Entry.is(_) ? ({ [`${_._T}.path`]: _.path }) :
-            FileSystemArtefact.is(_) ? (_._id ? { _id: _._id } :
+            isArtefact<FileSystemArtefact>(_) ? (_._id ? { _id: _._id } :
             _.File ? { "File.path": _.File.path } :
             _.Directory ? { "Directory.path": _.Directory.path } :
             _.Unknown ? { "Unknown.path": _.Unknown?.path } :
@@ -249,10 +248,10 @@ async function handleError(e: Error, task: Task, _: Partial<FileSystemArtefact |
             ({ "$eq": _ })) : ({}),
             { $set: { _e: [e] } });
         task.warnings.push(e);
-        log("${task.name}: Warn! _=%O Error=%s", _, e.stack);
+        log("%s: Warn! _=%O Error=%s", task.name, _, e.stack);
     } else {
         task.errors.push(e);
-        log("${task.name}: Error! _=%O Error=%s", _, e.stack);
+        log("%s: Error! _=%O Error=%s", task.name, _, e.stack);
         throw e;
     }
 }

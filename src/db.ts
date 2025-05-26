@@ -1,21 +1,19 @@
-import { isDate } from "node:util/types";
 import * as nodePath from "node:path";
-import { AnyBulkWriteOperation, BulkWriteOptions, BulkWriteResult, ChangeStreamOptions, ChangeStreamDocument, ChangeStreamInsertDocument, ChangeStreamUpdateDocument, Collection, CollectionOptions, CountOptions, Db, Filter, FindOneAndUpdateOptions, FindOptions, MongoClient, MongoError, UpdateFilter, UpdateOptions, UpdateResult, WithId, IndexSpecification, CreateIndexesOptions, Condition, Document, OperationOptions, InsertOneModel, DeleteManyModel, DeleteOneModel, ReplaceOneModel, UpdateManyModel, UpdateOneModel, BSON, CollationOptions, Hint, DeleteOptions, ReplaceOptions, InsertOneOptions, OptionalId } from "mongodb";
-import { diff } from "deep-object-diff";
-import { Artefact, isArtefact, ArtefactStaticExtensionQueries, ArtefactStaticQueryFn, ArtefactFn } from "./models/artefact";
-import { Aspect, AspectType, AsyncFunction, DeepProps, Choose, Constructor, isAspect, isConstructor, isFunction, AbstractConstructor, ValueUnion } from "./models/";
-import { cargo } from "./pipeline";
-import { get } from "./prop-path";
+import { AnyBulkWriteOperation, BulkWriteOptions, BulkWriteResult, ChangeStreamOptions, ChangeStreamDocument, ChangeStreamInsertDocument, ChangeStreamUpdateDocument, Collection, CollectionOptions, CountOptions, Db, Filter, FindOneAndUpdateOptions, FindOptions, MongoClient, UpdateFilter, UpdateOptions, UpdateResult, WithId, IndexSpecification, CreateIndexesOptions, Condition, InsertOneModel, DeleteManyModel, DeleteOneModel, ReplaceOneModel, UpdateManyModel, UpdateOneModel, BSON, DeleteOptions, ReplaceOptions, InsertOneOptions, OptionalId, WithoutId } from "mongodb";
+import { Artefact, ArtefactQueryFn, hasId, isArtefact } from "./models/artefact";
+import { Aspect, AsyncFunction, DeepProps, Choose, Constructor, isConstructor, ValueUnion, makeDefaultOptions, isNonDateObject, isAspect } from "./models/";
+import { isAsyncGeneratorFunction } from "./pipeline";
 import { Progress } from "./progress";
 
 import debug from "debug";
+import { inspect } from "node:util";
 const log = debug(nodePath.basename(module.filename));
 
 export interface Storage {
     isConnected(): boolean;
     connect(): Promise<Storage>;
     close(): Promise<Storage>;
-    store<A extends Artefact>(name: string, options?: any): Promise<Store<A>>;
+    store<A extends Artefact>(name: string, artefactCtorOrOptions?: Constructor<A> | MongoStoreOptions<A>, options?: any): Promise<Store<A>>;
 }
 
 export class MongoStorage implements Storage {
@@ -60,10 +58,10 @@ export class MongoStorage implements Storage {
         return this;
     }
 
-    async store<A extends Artefact>(name: string, artefactCtorOrOptions?: Constructor<A> | MongoStoreOptions<A>, options?: MongoStoreOptions<A>): Promise<MongoStore<A>> {
+    async store<A extends Artefact>(name: string, options?: MongoStoreOptions<A>): Promise<MongoStore<A>> {
         await this.connect();
-        log("Getting store '%s' options=%O ... ", name, artefactCtorOrOptions);
-        const store = new MongoStore<A>(this, name, artefactCtorOrOptions, options);
+        log("Getting store '%s' options=%O ... ", name, options);
+        const store = new MongoStore<A>(this, name, options);
         log("OK");
         return store;
     }
@@ -79,8 +77,8 @@ export function isChangeUpdate(value: ChangeStreamDocument): value is ChangeStre
 export type MongoStoreOptions<A extends Artefact = Artefact> = CollectionOptions & {
     createIndexes?: CreateIndexArgs[];
     queries?: {
-        byUnique?: ArtefactStaticQueryFn<A>;    // byUnique is required to use store.updateOrCreate() or findOne() with a single Artefact arg (and probably other things sooner or later)
-    } & ArtefactStaticExtensionQueries<A>;      // unlike extension queries which may take any args, byUnique must take only the single Artefact arg as a static query method (or no args if implement as ArtefactInstanceQueryFn in future)
+        byUnique?: ArtefactQueryFn<A>;    // byUnique is required to use store.updateOrCreate() or findOne() with a single Artefact arg (and probably other things sooner or later)
+    };      // unlike extension queries which may take any args, byUnique must take only the single Artefact arg as a static query method (or no args if implement as ArtefactInstanceQueryFn in future)
 };
 export const MongoStoreOptions: {
     default: MongoStoreOptions;
@@ -159,7 +157,7 @@ export const flattenPropertyNames = (
         const V = source[K];
         if (V !== null && V !== undefined && typeof V === "function") {
             continue;
-        } else if (V !== null && V !== undefined && typeof V === "object" && !isDate(V)) {
+        } else if (V !== null && V !== undefined && isNonDateObject(V)) {
             flattenPropertyNames(V, prefix + K + ".", update, undefineds);
         } else if (V !== undefined) {
             update[prefix + K] = V;
@@ -170,35 +168,35 @@ export const flattenPropertyNames = (
     return { update, undefineds };
 };
 
-// Returns a flattened list of property paths that exist in updated, that are not equal to the same property in original (if supplied)
-export const getUpdates = <A extends Artefact>(updated: Partial<A>, originalOrAspectType?: A | AspectType, aspectType?: AspectType) => {
-    let original: A | undefined;
-    let updateDiff: object;
-    if (originalOrAspectType) {
-        if (isArtefact(originalOrAspectType)) {
-            original = originalOrAspectType;
-            if (original._id && updated._id && original._id !== updated._id) {
-                throw new RangeError("getUpdates(): original._id=${original._id} !== updated._id=${updated._id}");
-            }
-            updateDiff = diff(original, updated);
-        } else {
-            if (originalOrAspectType) {
-                aspectType = originalOrAspectType;
-            }
-            updateDiff = updated as object;
-        }
-    } else {
-        if (aspectType) {
-            throw new RangeError(`getUpdates(): if originalOrAspectType is null, aspectType should be null too`);
-        }
-        updateDiff = updated as object;
-    }
-    if (isConstructor(aspectType)) {
-        aspectType = aspectType.name;
-    }
-    const { update, undefineds } = flattenPropertyNames(aspectType ? { [aspectType as string]: get(updateDiff, aspectType as string), } : updateDiff);
-    return { updated, original, aspectType, update, undefineds } as Updates<A>;
-}
+// // Returns a flattened list of property paths that exist in updated, that are not equal to the same property in original (if supplied)
+// export const getUpdates = <A extends Artefact>(updated: Partial<A>, originalOrAspectType?: A | AspectType, aspectType?: AspectType) => {
+//     let original: A | undefined;
+//     let updateDiff: object;
+//     if (originalOrAspectType) {
+//         if (isArtefact(originalOrAspectType)) {
+//             original = originalOrAspectType;
+//             if (original._id && updated._id && original._id !== updated._id) {
+//                 throw new RangeError("getUpdates(): original._id=${original._id} !== updated._id=${updated._id}");
+//             }
+//             updateDiff = diff(original, updated);
+//         } else {
+//             if (originalOrAspectType) {
+//                 aspectType = originalOrAspectType;
+//             }
+//             updateDiff = updated as object;
+//         }
+//     } else {
+//         if (aspectType) {
+//             throw new RangeError(`getUpdates(): if originalOrAspectType is null, aspectType should be null too`);
+//         }
+//         updateDiff = updated as object;
+//     }
+//     if (isConstructor(aspectType)) {
+//         aspectType = aspectType.name;
+//     }
+//     const { update, undefineds } = flattenPropertyNames(aspectType ? { [aspectType as string]: get(updateDiff, aspectType as string), } : updateDiff);
+//     return { updated, original, aspectType, update, undefineds } as Updates<A>;
+// }
 
 export type ProgressOption = { progress?: Progress; };
 
@@ -219,24 +217,22 @@ export type BulkWriterOptions = BulkWriteOptions & {
     maxBatchSize: number;
     timeoutMs: number;
 };
-export const BulkWriterOptions = {
-    default: {
-        maxBatchSize: 10,
-        timeoutMs: 200,
-    } as BulkWriterOptions,
-};
+export const BulkWriterOptions = makeDefaultOptions<BulkWriterOptions>({
+    maxBatchSize: 10,
+    timeoutMs: 200,
+});
 
-export type BulkOpFnMap<T extends BSON.Document = BSON.Document> = {
+export type BulkOpFnMap<T extends BSON.Document = BSON.Document, TOut extends BSON.Document = T> = {
     // TODO: Some typeof fancy mapped type and deduce the parameters of the fn's? I don't want to have to specify the object with prop names like updateOne: { filter: xxx, $set: yyy, ... },
     // i want functions that make the code more concise e.g.'s: updateOne(Query(FS.Disk, "path", "./file.txt"), fsDisk) , updateOne(Query(fsDisk, "path"), fsDisk)
     // [K in BulkOpNames]: 
     // TODO: Should do the above and integrate it with these same 6 operations defined on MongoStore as well, including the function arguments as a tuple? as a func type? some way to not type it 1600 times each
-    insertOne(document: OptionalId<T>, options: InsertOneOptions): BulkOp<T, "insertOne">;
-    updateOne(aspect: Aspect, options?: UpdateOptions): BulkOp<T, "updateOne">;
-    updateMany(filter: Filter<T>, update: UpdateFilter<T>, options: UpdateOptions): BulkOp<T, "updateMany">;
-    deleteOne(filter: Filter<T>, update: UpdateFilter<T>, options: DeleteOptions): BulkOp<T, "deleteOne">;
-    deleteMany(filter: Filter<T>, update: UpdateFilter<T>, options: DeleteOptions): BulkOp<T, "deleteMany">;
-    replaceOne(filter: Filter<T>, update: T, options: ReplaceOptions): BulkOp<T, "replaceOne">;
+    insertOne(_: T, options: InsertOneOptions): BulkOp<TOut, "insertOne">;
+    updateOne(_: T, options?: UpdateOptions): BulkOp<TOut, "updateOne">;
+    updateMany(_: Filter<T>, update: UpdateFilter<TOut>, options: UpdateOptions): BulkOp<TOut, "updateMany">;
+    deleteOne(_: T, update: UpdateFilter<TOut>, options: DeleteOptions): BulkOp<TOut, "deleteOne">;
+    deleteMany(_: Filter<T>, update: UpdateFilter<TOut>, options: DeleteOptions): BulkOp<TOut, "deleteMany">;
+    replaceOne(_: T, replacement: WithoutId<TOut>, options: ReplaceOptions): BulkOp<TOut, "replaceOne">;
 };
 export type BulkOpModelMap<T extends BSON.Document = BSON.Document> = {
     insertOne: InsertOneModel<T>;
@@ -250,8 +246,8 @@ export type BulkOpNames = keyof BulkOpModelMap;
 export type BulkOpModels<T extends BSON.Document> = ValueUnion<BulkOpModelMap<T>>;
 export type BulkOp<
     T extends BSON.Document,
-    O extends keyof BulkOpModelMap<T>,
-    M extends BulkOpModels<T> = BulkOpModelMap<T>[O]
+    O extends keyof BulkOpModelMap<T> = keyof BulkOpModelMap<T>,
+    M extends BulkOpModels<T> = BulkOpModelMap<T>[O],
 > = {
         [K in O]: M;
     };
@@ -275,16 +271,16 @@ export type BulkOp<
 export interface Store<A extends Artefact> {
     createIndexes(...createIndexes: CreateIndexArgs[]): Promise<string[]>;
     count(query: Filter<A>, options?: CountOptions): Promise<number>;
-    find(query: Filter<A>, options?: FindOptions & ProgressOption): AsyncGenerator<WithId<A>>;
-    findOne(query: Filter<A>, options?: FindOptions): Promise<WithId<A> | null>;
+    find(query: Filter<A>, options?: FindOptions & ProgressOption): AsyncGenerator<A>;
+    findOne(query: Filter<A>, options?: FindOptions): Promise<A | null>;
     findOneOrCreate(query: Filter<A>, createFn: () => A | Promise<A>, options?: FindOptions): Promise<A>;
-    findOneAndUpdate(query: Filter<A>, update: UpdateFilter<A>, options?: FindOneAndUpdateOptions): Promise<WithId<A> | null>;
+    findOneAndUpdate(query: Filter<A>, update: UpdateFilter<A>, options?: FindOneAndUpdateOptions): Promise<A | null>;
     updateOne(query: Filter<A>, update: UpdateFilter<A>, options?: UpdateOptions): Promise<UpdateResult<A> | null>;
     bulkWrite(operations: AnyBulkWriteOperation<A>[], options?: BulkWriteOptions & ProgressOption): Promise<BulkWriteResult>;
     bulkWriterSink(options?: BulkWriterOptions & ProgressOption): BulkWriterSink<A>;
     bulkWriterStore(options?: BulkWriterOptions & ProgressOption): BulkWriterStore<A>;
     watch(pipeline?: Filter<A>/* Document[] */, options?: ChangeStreamOptions & ProgressOption): AsyncGenerator<ChangeStreamDocument<A>>;
-    ops: BulkOpFnMap<A>;
+    ops: BulkOpFnMap<A | Aspect, A>;
 };
 
 export class MongoStore<A extends Artefact> implements Store<A> {
@@ -292,21 +288,22 @@ export class MongoStore<A extends Artefact> implements Store<A> {
     public readonly name: string;
     public readonly collection: Collection<A>;
     public readonly options: MongoStoreOptions<A>;
-    public readonly artefactCtor?: Constructor<A>;
+    // public readonly artefactCtor?: Constructor<A>;
 
     constructor(
         storage: MongoStorage,
         name: string,
-        artefactCtorOrOptions?: Constructor<A> | MongoStoreOptions<A>,
+        // artefactCtorOrOptions?: Constructor<A> | MongoStoreOptions<A>,
         options?: MongoStoreOptions<A>,
     ) {
         this.storage = storage;
         this.name = name;
+        // this.artefactCtor = isConstructor<Artefact>(artefactCtorOrOptions) ? artefactCtorOrOptions : undefined;
         this.options = {
             ...MongoStoreOptions.default as MongoStoreOptions<A>,
-            ...options || isConstructor(artefactCtorOrOptions, Artefact) ? {} : artefactCtorOrOptions,
+            ...options,// || isConstructor(artefactCtorOrOptions, Artefact) ? {} : artefactCtorOrOptions,
         };
-        this.collection = storage.db!.collection<A>(name, options);
+        this.collection = storage.db!.collection<A>(this.name, this.options);
         if (this.options.createIndexes && this.options.createIndexes.length > 0) {
             this.createIndexes(...this.options.createIndexes);
         }
@@ -332,25 +329,35 @@ export class MongoStore<A extends Artefact> implements Store<A> {
             if (options.progress) {
                 options.progress.count++;
             }
-            return this.artefactCtor ? new this.artefactCtor(r) as WithId<A> : r;
+            log(`find(): r = ${inspect(r)}`);
+            return r as A;
         });
     }
 
     findOne(query: Filter<A>, options: FindOptions = {}) {
         return this.collection.findOne(query, options)
-            .then(r => r && this.artefactCtor ? new this.artefactCtor(r) as WithId<A> : r);
+            .then(r => {
+                log(`findOne(): r = ${inspect(r)}`);
+                return r as A;
+            });
     }
 
     findOneOrCreate(query: Filter<A>, createFn?: () => A | Promise<A>, options: FindOptions = {}) {
         return this.collection.findOne(query, options)
             .then(r => r as A ?? (createFn && createFn()))
-            .then(r => this.artefactCtor ? new this.artefactCtor(r) : r);
+            .then(r => {
+                log(`findOneOrCreate(): r = ${inspect(r)}`);
+                return r as A;
+            });
     }
 
     findOneAndUpdate(query: Filter<A>, update: UpdateFilter<A>, options: FindOneAndUpdateOptions = {}) {
         options = { ...options, upsert: true, ignoreUndefined: true, };
         return this.collection.findOneAndUpdate(query, update, options)
-            .then(r => this.artefactCtor ? new this.artefactCtor(r) as WithId<A> : r);
+        .then(r => {
+            log(`findOneAndUpdate(): r = ${inspect(r)}`);
+            return r as A;
+        });
     }
 
     updateOne(query: Filter<A>, updates: UpdateFilter<A>, options: UpdateOptions = {}): Promise<UpdateResult<A>> {
@@ -365,10 +372,14 @@ export class MongoStore<A extends Artefact> implements Store<A> {
 
     bulkWriterSink(options: BulkWriterOptions & BulkWriteOptions & ProgressOption = BulkWriterOptions.default): BulkWriterSink<A> {
         const _this = this;
+        BulkWriterOptions.applyDefaults(options);
         return async function bulkWrite(source: AsyncGenerator<AnyBulkWriteOperation<A>/*  | ReadOperation<A> */> | (() => AsyncGenerator<AnyBulkWriteOperation<A>/*  | ReadOperation<A> */>)) {
-            var result: BulkWriteResult = new BulkWriteResult();
-            for await (const ops of cargo(options.maxBatchSize, options.timeoutMs, isFunction(source) ? source() : source)) {
+            let result!: BulkWriteResult;// = new BulkWriteResult();
+            for await (const op of /* cargo(options.maxBatchSize, options.timeoutMs, */ isAsyncGeneratorFunction(source) ? source() : source)/* ) */ {
+                const ops = [op];
+                log(`bulkWrite(): ops(${ops.length})=${inspect(ops, { depth: 6, })}`);
                 result = await _this.collection.bulkWrite(ops, options);
+                log(`bulkWrite(): result=${inspect(result, { depth: 4, })}`);
             }
             return result;
         }
@@ -388,15 +399,23 @@ export class MongoStore<A extends Artefact> implements Store<A> {
             options.progress.count = await this.collection.countDocuments(query);
         }
         /* return */yield* this.collection.watch([{ $match: query }], options)
-            .stream({ transform: r => this.artefactCtor ? new this.artefactCtor(r) as WithId<A> : r });
+            .stream({ transform: r => {
+                log(`findOneAndUpdate(): r = ${inspect(r)}`);
+                return r as A;
+            } });
+            // { transform: r => this.artefactCtor ? new this.artefactCtor(r) as WithId<A> : r });
     }
 
-    ops: BulkOpFnMap<A> = {
-        insertOne: (document: OptionalId<A>, options?: InsertOneOptions) => ({ "insertOne": { document, ...options } }),
-        updateOne: (aspect: Aspect, options: UpdateOptions = { upsert: true, }) => ({ "updateOne": { ...aspect.namespace({ filter: aspect.Query.byUnique(), update: { $set: flattenPropertyNames({ [aspect._T]: aspect.getUpdates(), }), } }), ...options, } }),
-        updateMany: (filter: Filter<A>, update: UpdateFilter<A>, options: UpdateOptions = { upsert: true, }) => ({ "updateMany": { filter, update, ...options } }),
-        deleteOne: (filter: Filter<A>, update: UpdateFilter<A>, options: DeleteOptions) => ({ "deleteOne": { filter, update, ...options } }),
-        deleteMany: (filter: Filter<A>, update: UpdateFilter<A>, options: DeleteOptions) => ({ "deleteMany": { filter, update, ...options } }),
-        replaceOne: (filter: Filter<A>, replacement: A, options: ReplaceOptions) => ({ "replaceOne": { filter, replacement, ...options } }),
+    ops: BulkOpFnMap<A | Aspect, A> = {
+        insertOne: (_, options?) => ({ "insertOne": { document: (isArtefact(_) ? _ : { [_._T]: _ }) as OptionalId<A>, ...options } }),
+        updateOne: (_, options = { upsert: true, }) => ({ "updateOne": {
+            filter: (hasId(_) ? ({ _id: _._id, }) : _.Query.byUnique()) as Filter<A>,
+            update: { $set: !Aspect.is(_) ? _ : _.asArtefact() } as UpdateFilter<A>,
+            ...options,
+        } }),
+        updateMany: (_, update, options = { upsert: true, }) => ({ "updateMany": { filter: _ as Filter<A>, update, ...options } }),
+        deleteOne: (_, update, options) => ({ "deleteOne": { filter: _ as Filter<A>, update, ...options } }),
+        deleteMany: (_, update, options) => ({ "deleteMany": { filter: _ as Filter<A>, update, ...options } }),
+        replaceOne: (_, replacement, options) => ({ "replaceOne": { filter: _ as Filter<A>, replacement, ...options } }),
     };
 }

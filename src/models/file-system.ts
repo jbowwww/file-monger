@@ -1,5 +1,6 @@
 import * as nodeFs from "node:fs";
 import * as nodePath from "node:path";
+import { inspect }  from "node:util";
 import * as nodeCrypto from "node:crypto";
 import { Aspect, AspectParameters, PartiallyRequired, UniqueAspect, UniqueAspectInstanceQueries, throttle as cache } from ".";
 import { Progress } from "../progress";
@@ -55,7 +56,7 @@ export abstract class BlockDevice extends UniqueAspect {
     static async getAll(): Promise</* (si.Systeminformation.BlockDevicesData) */AspectParameters<BlockDevice>[]> {
         return cache({
             expiryAgeMs: BlockDevice.ExpiryAgeMs,
-        }, () => si.blockDevices() as Promise<AspectParameters<BlockDevice>[]>)();//.then(bds => bds.map(bd => new ) as Promise<BlockDevice[]>)();
+        }, () => si.blockDevices())();//.then(bds => bds.map(bd => new ) as Promise<BlockDevice[]>)();
     }
 }
 
@@ -124,7 +125,11 @@ export class Partition extends BlockDevice {
     static async getForPath(pathOrOptions: string | GetPartitionForPathOptions) {
         const options: GetPartitionForPathOptions = typeof pathOrOptions === "string" ? { path: pathOrOptions } : pathOrOptions;
         options.partitions ??= await Partition.getAll();
-        return Array.from(options.partitions).filter(p => options.path.startsWith(p.mount)).at(0);
+
+        const path = nodePath.resolve(options.path);
+        const r = Array.from(options.partitions).filter(p => p.mount !== "" && path.startsWith(p.mount)).at(0);
+        log(`getForPath("${inspect(pathOrOptions)}"): r = ${inspect(r)}`);
+        return r;
     };
 }
 
@@ -147,7 +152,8 @@ export abstract class Entry extends UniqueAspect {
         });
     }
 
-    static async create({ path, stats, partition, partitions }: PartiallyRequired<Entry, "path"> & { partitions?: Iterable<Partition>; }) {
+    static async create({ path, stats, partition, partitions/* , drive, drives */ }: PartiallyRequired<Entry, "path"> & { partitions?: Iterable<Partition>; /* drives?: Iterable<Drive>; */ }) {
+        path = nodePath.resolve(path);
         stats ??= await nodeFs.promises.stat(path);
         partition ??= (await Partition.getForPath({ partitions, path }));
         const entry = (

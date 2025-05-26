@@ -1,7 +1,12 @@
 import { isAsyncFunction, isGeneratorFunction } from "node:util/types";
 import { get, ObjectWithProperties } from "./prop-path";
 
-export type AsyncGeneratorFunction<I = any, O = any> = (source: AsyncIterable<I>) => AsyncGenerator<O>;
+
+export type AsyncGeneratorFunction<I = unknown, O = unknown, R = any, N = any, L extends 0 | 1 = 0 | 1> = (...args: L extends 1 ? [AsyncIterable<I/* , R, N */>] : []) => AsyncGenerator<O, R, N>;
+
+export type AsyncGeneratorSourceFunction<O = unknown, R = any, N = any> = AsyncGeneratorFunction<never, O, R, N, 0>;
+
+export type AsyncGeneratorTransformFunction<I = unknown, O = unknown, R = any, N = any> = AsyncGeneratorFunction<I, O, R, N, 1>;
 
 export type PipelineFunctionStage<I = any, O = any> = (input: I) => O | Promise<O>;
 export type PipelineGeneratorStage<I = any, O = any> = (source: AsyncIterable<I>) => AsyncGenerator<O>;
@@ -19,8 +24,12 @@ export const makeGeneratorFnFromFn = <I = any, O = any>(stage: PipelineFunctionS
         }
     };
 
-export const isAsyncGenerator = (generator: any): generator is AsyncGenerator => (["next", "return", "throw", Symbol.asyncIterator]).every(prop => typeof prop === "function");
-export const isAsyncGeneratorFunction = (generatorFn: any): generatorFn is AsyncGeneratorFunction => isAsyncGenerator(generatorFn.prototype);
+export const isAsyncGenerator = <T = unknown, R = any, N = any>(generator: any): generator is AsyncGenerator<T, R, N> =>
+    (["next", "return", "throw", Symbol.asyncIterator]).every(prop => typeof prop === "function");
+export const isAsyncGeneratorFunction = <I = any, O = any, R = any, N = any, L extends 0 | 1 = 0 | 1>(generatorFn: any, argumentsLength?: 0 | 1): generatorFn is AsyncGeneratorFunction<I, O, N, L> =>
+    isAsyncGenerator<O, any, N>(generatorFn.prototype) && (!argumentsLength || generatorFn.length === argumentsLength);
+export const isAsyncGeneratorSourceFunction = <O = unknown, R = any, N = any>(generatorFn: any): generatorFn is AsyncGeneratorFunction<never, O, R, N> => isAsyncGeneratorFunction(generatorFn.prototype, 0)
+export const isAsyncGeneratorTransformFunction = (generatorFn: any): generatorFn is AsyncGeneratorFunction => isAsyncGenerator(generatorFn.prototype);
 
 // export const compose = <I = any, O = any>(...stages: PipelineFunctionStage[]) => stages.reduce(
 //     (prevStages, stage, i, arr) => async (input: any) => stage(prevStages(await input)) as O | Promise<O>) as Pipeline<I/* , O>;
