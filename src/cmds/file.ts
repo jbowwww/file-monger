@@ -85,6 +85,18 @@ type FileSystemArtefact = Artefact & {
     Disk?: FS.Disk;
     Partition?: FS.Partition;
 }
+// ^ make this a const var with the exact same property names (OR: schhema: Artefact[K] = Aspect<K, TAspect>)
+// with values built with a ArtefactSliceDefinition<TAspectsUnion>([{]     // * S (can and usually does take multiple Aspect types as a union, represents all known Aspect types for this Artefact type)
+//  source:
+//      [? AspectSource<S extends TAspectsUnion> =] AsyncGenerator<S[?, shouldRecurse(): boolean, stats: SourceStatsFinished]>,     // * S (can and usually does take multiple Aspect types as a union, represents Aspect types subset from this Artefact type to include in yielded values)
+//          // * also: Query<[? TArtefact, ]I extends TAspectsUnion> = AspectSource<I> & Partial<ProgressOptions<?>>
+//          // * also PeriodicQuery<I extends TAspectsUnion> = Query<I> & { taskOptions: TaskOptions<?> }
+//  fn: [? ArtefactSlice<I extends TAspectsUnion, O extends TAspectsUnion =] AsyncFunction<I extends TAspectsUnion, O extends TAspectsUnion> | Constructor<O, I> | AsyncClass<O, I>     // *also AsyncClass<T, I> = { create([? ...]input: I): T}
+//  ...? probably other things..
+//  [}]);
+//
+// that schema/Artefact definition object can be used to produce and process (evolve i.e. add properties) Artefact instances in parallel slices that are persisted to the DB individually as produced
+// some slices (i.e. properties on an Artefact type with name same as the class or fn name )
 
 export const command = 'file';
 export const description = 'File commands';
