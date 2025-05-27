@@ -187,7 +187,13 @@ export type Converter<T, K extends string, V> = T extends any ? { [P in keyof Id
 
 export type NamespacedAspect<T> = { [K: string]: T; };
 
-export function isAspect<A extends Aspect>(this: AbstractConstructor<A> | undefined, value: any): value is A { return "_T" in value && typeof value._T === "string"; };// { return value !== null && value instanceof this; };
+export function isAspect<A extends Aspect>(this: AspectType<A> | string | undefined, value: any): value is A {
+    return "_T" in value && (this ? (
+        typeof this === "function" ?
+            value._T === this.name : 
+            value._T === this) :
+        typeof value._T === "string");
+};// { return value !== null && value instanceof this; };
 
 export type AspectStaticQuery<A extends Aspect = Aspect> = (...args: [A] | [unknown] | unknown[]) => Filter<Document>;
 export type AspectStaticQueries<A extends Aspect = Aspect, Q extends AspectStaticExtensionQueries<A> = AspectStaticExtensionQueries<A>> = {
@@ -221,7 +227,7 @@ export abstract class Aspect {
     getUpdates<A extends Aspect>(previous?: A) {
 
     }
-    static is = isAspect;
+    static is<A extends Aspect>(this: AbstractConstructor<A>, value: any): value is A { return isAspect.call(this, value); }
     static async create(this: typeof Aspect, ...args: any): Promise<Aspect> {
         // return new this(...args);
         throw new TypeError();
