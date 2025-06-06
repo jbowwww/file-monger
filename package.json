@@ -5,8 +5,8 @@
   "main": "index.js",
   "scripts": {
     "build": "npx tsc",
-    "start": "npm run build ; node ./dist/cli.js",
-    "debug": "npm run build ; node --inspect-brk ./dist/cli.js",
+    "start": "npm run build ; node --enable-source-maps ./dist/cli.js",
+    "debug": "npm run build ; node --enable-source-maps --inspect-brk ./dist/cli.js",
     "dev": "node --enable-source-maps ./dist/cli.js",
     "help": "node dist/cli.js --help",
     "test": "echo \"Error: no test specified\" && exit 1"
