@@ -1,9 +1,10 @@
 import { Filter, IndexSpecification, CreateIndexesOptions, Document } from "mongodb";
 import * as nodePath from "node:path";
 import { isDate } from "node:util/types";
+import { Artefact } from "./artefact";
+import { Progress } from "../progress";
 
 import debug from "debug";
-import { Artefact } from "./artefact";
 const log = debug(nodePath.basename(module.filename));
 
 export const hasPrototype = (prototype: object, value: Constructor<any>): boolean =>
@@ -19,10 +20,10 @@ export type AbstractConstructor<T = any> = abstract new (...args: any[]) => T;
 export const isObject = (o: any): o is Object => o !== null && typeof o === "object";
 export const isNonDateObject = (o: any): o is Object => typeof o === "object" && !isDate(o) && !(o instanceof Date);
 export const isFunction = (fn: any): fn is Function => typeof fn === "function";
-export const isAsyncIterable = <T extends any = any>(o: any): o is AsyncIterable<T> => o && "next" in o && typeof o.next === "function";
 
-export type AsyncFunction<A extends any[] = [], TReturn extends any = void> = (...args: A) => Promise<TReturn>;
-
+export type Function<A extends AnyParameters = [], R extends any = void> = (...args: A) => R;
+export type AsyncFunction<A extends AnyParameters = [], R extends any = void> = (...args: A) => Promise<R>;
+export type MaybeAsyncFunction<A extends AnyParameters = [], R extends any = void> = (...args: A) => R | Promise<R>;
 export type FunctionPropertyNames<T> = {
     [K in keyof T]: T[K] extends Function ? K : never;
 }[keyof T];
@@ -32,7 +33,7 @@ export type NonFunctionPropertyNames<T> = {
     [K in keyof T]: T[K] extends Function ? never : K;
 }[keyof T];
 export type NonFunctionProperties<T> = Pick<T, NonFunctionPropertyNames<T>>;
-   
+
 export type TypeGuard<T> = (value: any) => value is T;
 
 export type Optional<T extends {}, K extends keyof T> = Omit<T, K> & { [P in K]?: T[P]; }
@@ -45,23 +46,21 @@ function _mapObject<T extends { [K: string]: any; }, TOut extends { [K: string]:
 function _mapObject<T extends { [K: string]: any; }, TOut extends { [K: string]: any; }>(o: T, filter: FilterFn<T> | MapFn<T, TOut>, map?: MapFn<T, TOut>): TOut;
 function _mapObject
     <T extends { [K: string]: any; }, TOut extends { [K: string]: any; }>(o: T, filterOrMap: FilterFn<T> | MapFn<T, TOut>, map?: MapFn<T, TOut>): TOut {
-        return Object.fromEntries((Object.entries(o) as KeyValuePair<keyof T, T[keyof T]>[])
-            .filter(map ? filterOrMap : () => true)
-            .map(map ?? ((kv: KeyValuePair<keyof T, T[keyof T]>) => kv as KeyValuePair<PropertyKey, any>))) as TOut;
-    }
-// export const mapObject = Object.assign<{ recursive: typeof _mapObject; } & typeof _mapObject, { recursive: typeof _mapObject; } & typeof _mapObject>(
-    _mapObject.
-    recursive = function <T extends { [K: string]: any; }, TOut extends { [K: string]: any; }>(o: T, filterOrMap: FilterFn<T[keyof T]> | MapFn<T[keyof T], TOut>, map?: MapFn<T[keyof T], TOut>): TOut {
+    return Object.fromEntries((Object.entries(o) as KeyValuePair<keyof T, T[keyof T]>[])
+        .filter(map ? filterOrMap : () => true)
+        .map(map ?? ((kv: KeyValuePair<keyof T, T[keyof T]>) => kv as KeyValuePair<PropertyKey, any>))) as TOut;
+}
+_mapObject.recursive = function <T extends { [K: string]: any; }, TOut extends { [K: string]: any; }>(o: T, filterOrMap: FilterFn<T[keyof T]> | MapFn<T[keyof T], TOut>, map?: MapFn<T[keyof T], TOut>): TOut {
         const filter = map ? filterOrMap as FilterFn<any> : () => true;
         const recursiveMap: MapFn<any, any> = ([K, V]: [any, any]) => (map ? map : filterOrMap as MapFn<any, TOut>)([K, _mapObject.recursive(V, filter, recursiveMap)]);
         return _mapObject<any, TOut>(o, filter, recursiveMap)
     };
-        // return Object.fromEntries((Object.entries(o) as KeyValuePair<keyof T, T[keyof T]>[])
-        //     .filter(map ? filterOrMap : (() => true))
-        //     .map((kv: KeyValuePair<keyof T, T[keyof T]>) => isNonDateObject(kv[1]) && (map || filterOrMap) ? (map ?? filterOrMap as MapFn<any, any>)(_mapObject.recursive(kv, filterOrMap, map)) : kv)) as TOut;
-        // };//,
-    // });
-    export const mapObject: typeof _mapObject & { recursive: typeof _mapObject.recursive; } = Object.assign(_mapObject, { recursive: _mapObject.recursive });
+// return Object.fromEntries((Object.entries(o) as KeyValuePair<keyof T, T[keyof T]>[])
+//     .filter(map ? filterOrMap : (() => true))
+//     .map((kv: KeyValuePair<keyof T, T[keyof T]>) => isNonDateObject(kv[1]) && (map || filterOrMap) ? (map ?? filterOrMap as MapFn<any, any>)(_mapObject.recursive(kv, filterOrMap, map)) : kv)) as TOut;
+// };//,
+// });
+export const mapObject: typeof _mapObject & { recursive: typeof _mapObject.recursive; } = Object.assign(_mapObject, { recursive: _mapObject.recursive });
 export function filterObject<T extends {}>(o: T, filter: FilterFn<T>): Partial<T> {
     return Object.fromEntries((Object.entries(o) as KeyValuePair<keyof T, T[keyof T]>[]).filter(filter)) as Partial<T>;
 }
@@ -71,27 +70,28 @@ export type DiscriminateUnion<T, K extends keyof T, V extends T[K]> = Extract<T,
 export type DiscriminatedModel<T extends Record<K, T[K]>, K extends PropertyKey = "_T"> = { [V in T[K]]: DiscriminateUnion<T, K, V> };
 
 export type Choose<
-  T extends Record<string | number, any>,
-  K extends string | number //   K extends DeepProps<T>
+    T extends Record<string | number, any>,
+    K extends string | number //   K extends DeepProps<T>
 > = K extends `${infer U}.${infer Rest}` ? Choose<T[U], Rest> : T[K];
 
 export type Join<K extends string | number, P extends string | number> = `${K}.${P}`
 export type DeepProps<
-  T extends Record<string | number, any>,
-  K extends Exclude<keyof T, symbol> = Exclude<keyof T, symbol>,
-  U extends string | number = ''
+    T extends Record<string | number, any>,
+    K extends Exclude<keyof T, symbol> = Exclude<keyof T, symbol>,
+    U extends string | number = ''
 > = T[K] extends Record<string | number, unknown> ?
     (U extends '' ? K : U) |
-        DeepProps<
-            T[K],
-            Exclude<keyof T[K], symbol>,
-            U extends ''
-                ? Join<K, Exclude<keyof T[K], symbol>>
-                : U | Join<U, Exclude<keyof T[K], symbol>>
-        > : U;
+    DeepProps<
+        T[K],
+        Exclude<keyof T[K], symbol>,
+        U extends ''
+        ? Join<K, Exclude<keyof T[K], symbol>>
+        : U | Join<U, Exclude<keyof T[K], symbol>>
+    > : U;
 
 // Use for ...rest parameters on functions, this type better handles both 0, 1, or more arguments, while using any[] sometimes fails with one parameter
-export type AnyParameters = [any] | any[];
+export type AnyParameters<T = any> = /* [] |  */[T] | T[];
+export type NonEmptyArray<T = any> = [T] | T[];
 
 const getUnorderedParameters = <P1, P2>(
     p1: P1 | P2, typeGuard1: TypeGuard<P1>,
@@ -130,12 +130,14 @@ const getUnorderedParameterAndOption = <P1, P2>(
 // could be a class ? but then would always have to new () when passing options :/
 export type OptionsDefaultContainer<T extends {}> = {
     default: T;
-    merge: (this: OptionsDefaultContainer<T>, defaultOptions: T) => T;
-    applyDefaults: (this: OptionsDefaultContainer<T>, options: T) => void;
+    mergeDefaults: (this: OptionsDefaultContainer<T>, defaultOptions: Partial<T>) => T;
+    applyDefaults: (this: OptionsDefaultContainer<T>, options: Partial<T>) => void;
 };
-export function mergeOptions<T extends {}>(this: /* defaultOptionsContainer: */ OptionsDefaultContainer<T>, options?: T): T { return ({ ...this.default, ...options, }); }
-export function applyDefaultOptions<T extends {}>(this: OptionsDefaultContainer<T>, options: T): void { for (const name in this) { if (!(name in options)) { options[name as keyof T] = this.default[name as keyof T]; } } }
-export function makeDefaultOptions<T extends {}>(defaultOptions: T): OptionsDefaultContainer<T> { return ({ default: defaultOptions, merge: mergeOptions, applyDefaults: applyDefaultOptions, }); }
+export function mergeOptions<T extends {}>(this: /* defaultOptionsContainer: */ OptionsDefaultContainer<T>, options?: Partial<T>): T { return ({ ...this.default, ...options, }); }
+export function applyDefaultOptions<T extends {}>(this: OptionsDefaultContainer<T>, options: Partial<T>): void { for (const name in this) { if (!(name in options)) { options[name as keyof T] = this.default[name as keyof T]; } } }
+export function makeDefaultOptions<T extends {}>(defaultOptions: T): OptionsDefaultContainer<T> { return ({ default: defaultOptions, mergeDefaults: mergeOptions, applyDefaults: applyDefaultOptions, }); }
+
+export type ProgressOption = { progress?: Progress; };
 
 export type ThrottleOptions = {
     expiryAgeMs: number;
@@ -190,7 +192,7 @@ export type NamespacedAspect<T> = { [K: string]: T; };
 export function isAspect<A extends Aspect>(this: AspectType<A> | string | undefined, value: any): value is A {
     return "_T" in value && (this ? (
         typeof this === "function" ?
-            value._T === this.name : 
+            value._T === this.name :
             value._T === this) :
         typeof value._T === "string");
 };// { return value !== null && value instanceof this; };
@@ -223,7 +225,7 @@ export type AspectType<A extends Aspect = Aspect> = string | AbstractConstructor
 export abstract class Aspect {
     isAspect: true = true;
     get _T() { return this.constructor.name; }
-    constructor(...args: AnyParameters) {}
+    constructor(...args: AnyParameters) { }
     getUpdates<A extends Aspect>(previous?: A) {
 
     }
@@ -251,7 +253,7 @@ export abstract class UniqueAspect extends Aspect {
     private static _uniqueIndex: IndexSpecification = {};
     public static get uniqueIndex(): IndexSpecification { return this._uniqueIndex; }
     public static set uniqueIndex(v: IndexSpecification) { this._uniqueIndex = v; }
-    
+
     private static _options: CreateIndexesOptions = {};
     public static get options() { return { ...this._options, unique: true, }; }
 
