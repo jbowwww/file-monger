@@ -1,6 +1,9 @@
 import * as nodePath from "node:path";
 import { Progress } from "./progress";
 
+import { makeDefaultOptions } from "./models";
+import { PipelineSource, pipe, PipelineStage, PipelineSink, PipelineSourceFunction } from "./pipeline";
+
 import debug from "debug";
 const log = debug(nodePath.basename(module.filename));
 
@@ -17,16 +20,18 @@ export type TaskOptions = Partial<{
 export const TaskOptions: {
     default: TaskOptions;
 } = {
-    get default() { return ({
-        progress: new Progress(),
-        errors: [],
-        warnings: [],
-    }); },
+    get default() {
+        return ({
+            progress: new Progress(),
+            errors: [],
+            warnings: [],
+        });
+    },
 }
 
 export type TaskRepeatOptions = Partial<{
     preDelay: number;
-    postDelay: number;    
+    postDelay: number;
 }>;
 export const TaskRepeatOptions: {
     default: TaskRepeatOptions;
@@ -37,13 +42,16 @@ export const TaskRepeatOptions: {
     },
 };
 
+// export type 
+export const TaskPipeOptions = makeDefaultOptions<{}>({});
+
 export class Task<TArgs extends any[] = [], TResult = void> {
-    
+
     static #taskAnonIdNum = 0;
 
     #taskPr: Promise<TResult> | null = null;
     #result: TResult | null = null;
-    
+
     public readonly name: string;
     public readonly progress: Progress;
     public readonly errors: Array<TaskError>;
@@ -91,5 +99,14 @@ export class Task<TArgs extends any[] = [], TResult = void> {
     public async repeat<TSubArgs extends any[] = [], TSubReturn = void>(options: TaskOptions & TaskRepeatOptions, taskFn: TaskFn<TSubArgs, TSubReturn>, ...args: TSubArgs) {
         options = { ...TaskOptions.default, ...TaskRepeatOptions.default, progress: this.progress, ...options };
         return Task.repeat<TSubArgs, TSubReturn>(options, taskFn, ...args);
+    }
+
+    public static pipe<I = any, O = void, R = any>(
+        source: PipelineSource<I> | PipelineSourceFunction<I>,
+        ...stages: 
+            [PipelineStage<I, O>] |
+            [PipelineStage<I, any>, ...PipelineStage<any, any>[], PipelineStage<any, O>]
+    ) {
+        return pipe(source, ...stages);
     }
 }

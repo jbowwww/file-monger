@@ -1,12 +1,12 @@
 import * as nodePath from "node:path";
-import { AnyBulkWriteOperation, BulkWriteOptions, BulkWriteResult, ChangeStreamOptions, ChangeStreamDocument, ChangeStreamInsertDocument, ChangeStreamUpdateDocument, Collection, CollectionOptions, CountOptions, Db, Filter, FindOneAndUpdateOptions, FindOptions, MongoClient, UpdateFilter, UpdateOptions, UpdateResult, WithId, IndexSpecification, CreateIndexesOptions, Condition, InsertOneModel, DeleteManyModel, DeleteOneModel, ReplaceOneModel, UpdateManyModel, UpdateOneModel, BSON, DeleteOptions, ReplaceOptions, InsertOneOptions, OptionalId, WithoutId } from "mongodb";
+import { AnyBulkWriteOperation, BulkWriteOptions, BulkWriteResult, ChangeStreamOptions, ChangeStreamDocument, ChangeStreamInsertDocument, ChangeStreamUpdateDocument, Collection, CollectionOptions, CountOptions, Db, Filter, FindOneAndUpdateOptions, FindOptions, MongoClient, UpdateFilter, UpdateOptions, UpdateResult, IndexSpecification, CreateIndexesOptions, Condition, InsertOneModel, DeleteManyModel, DeleteOneModel, ReplaceOneModel, UpdateManyModel, UpdateOneModel, BSON, DeleteOptions, ReplaceOptions, InsertOneOptions, OptionalId, WithoutId } from "mongodb";
 import { Artefact, ArtefactQueryFn, hasId, isArtefact } from "./models/artefact";
-import { Aspect, AsyncFunction, DeepProps, Choose, Constructor, isConstructor, ValueUnion, makeDefaultOptions, isNonDateObject, isAspect } from "./models/";
-import { isAsyncGeneratorFunction } from "./pipeline";
+import { Aspect, DeepProps, Choose, Constructor, isConstructor, ValueUnion, makeDefaultOptions, isNonDateObject, ProgressOption } from "./models/";
+import { PipelineGeneratorStage, PipelineSink, batch, isIterable, makeAsyncGenerator } from "./pipeline";
 import { Progress } from "./progress";
 
-import debug from "debug";
 import { inspect } from "node:util";
+import debug from "debug";
 const log = debug(nodePath.basename(module.filename));
 
 export interface Storage {
@@ -198,8 +198,6 @@ export const flattenPropertyNames = (
 //     return { updated, original, aspectType, update, undefineds } as Updates<A>;
 // }
 
-export type ProgressOption = { progress?: Progress; };
-
 export type BulkWriterStore<A extends Artefact> = Store<A>;
 export type ReadOperation<A extends Artefact> = {
     "findOne": { filter: Filter<A>, },
@@ -211,12 +209,12 @@ export type BulkOperationStats<A extends Artefact> = {
     // ...
 };
 
-export type BulkWriterSink<A extends Artefact> = AsyncFunction<[AsyncGenerator<AnyBulkWriteOperation<A>/*  | ReadOperation<A> *//* , BulkOperationStats<A>, WithId<A> | number */>], BulkWriteResult>;
+export interface BulkWriterSink<A extends Artefact> extends PipelineGeneratorStage<BulkOp<A>, BulkWriteResult, any, void> {}     //AsyncFunction<[AsyncGenerator<AnyBulkWriteOperation<A>/*  | ReadOperation<A> *//* , BulkOperationStats<A>, WithId<A> | number */>], BulkWriteResult>;
 
 export type BulkWriterOptions = BulkWriteOptions & {
     maxBatchSize: number;
     timeoutMs: number;
-};
+} & ProgressOption;
 export const BulkWriterOptions = makeDefaultOptions<BulkWriterOptions>({
     maxBatchSize: 10,
     timeoutMs: 200,
@@ -244,13 +242,14 @@ export type BulkOpModelMap<T extends BSON.Document = BSON.Document> = {
 };
 export type BulkOpNames = keyof BulkOpModelMap;
 export type BulkOpModels<T extends BSON.Document> = ValueUnion<BulkOpModelMap<T>>;
-export type BulkOp<
-    T extends BSON.Document,
-    O extends keyof BulkOpModelMap<T> = keyof BulkOpModelMap<T>,
-    M extends BulkOpModels<T> = BulkOpModelMap<T>[O],
+export type BulkOp<T extends BSON.Document,
+    O extends keyof BulkOpModelMap<T> = keyof BulkOpModelMap<T>,// = keyof BulkOpModelMap<T>,
+
+    // > = { [K in O]: BulkOpModelMap<T>[O]; };
+    // M extends BulkOpModelMap<T>[keyof BulkOpModelMap<T>] = BulkOpModelMap<T>[O],
 > = {
-        [K in O]: M;
-    };
+    [K in O]: BulkOpModelMap<T>[O];
+};
 // may/probably won't go with this style?
 // export const makeBulkOp = <
 //     A extends Artefact,
@@ -268,7 +267,7 @@ export type BulkOp<
 // export const BulkOpDeleteMany = makeBulkOp("deleteMany");
 // export const BulkOpReplaceOne = makeBulkOp("replaceOne");
 
-export interface Store<A extends Artefact> {
+export interface Store<A extends Artefact = Artefact> {
     createIndexes(...createIndexes: CreateIndexArgs[]): Promise<string[]>;
     count(query: Filter<A>, options?: CountOptions): Promise<number>;
     find(query: Filter<A>, options?: FindOptions & ProgressOption): AsyncGenerator<A>;
@@ -276,8 +275,8 @@ export interface Store<A extends Artefact> {
     findOneOrCreate(query: Filter<A>, createFn: () => A | Promise<A>, options?: FindOptions): Promise<A>;
     findOneAndUpdate(query: Filter<A>, update: UpdateFilter<A>, options?: FindOneAndUpdateOptions): Promise<A | null>;
     updateOne(query: Filter<A>, update: UpdateFilter<A>, options?: UpdateOptions): Promise<UpdateResult<A> | null>;
-    bulkWrite(operations: AnyBulkWriteOperation<A>[], options?: BulkWriteOptions & ProgressOption): Promise<BulkWriteResult>;
-    bulkWriterSink(options?: BulkWriterOptions & ProgressOption): BulkWriterSink<A>;
+    bulkWrite(operations: BulkOp<A, keyof BulkOpModelMap<A>>[] | AsyncIterable<BulkOp<A>>, options?: BulkWriteOptions & ProgressOption): AsyncGenerator<BulkWriteResult[]>;
+    bulkWriterSink(options?: BulkWriterOptions & ProgressOption): PipelineSink<BulkOp<A>>;
     bulkWriterStore(options?: BulkWriterOptions & ProgressOption): BulkWriterStore<A>;
     watch(pipeline?: Filter<A>/* Document[] */, options?: ChangeStreamOptions & ProgressOption): AsyncGenerator<ChangeStreamDocument<A>>;
     ops: BulkOpFnMap<A | Aspect, A>;
@@ -364,25 +363,36 @@ export class MongoStore<A extends Artefact> implements Store<A> {
         return this.collection.updateOne(query!, updates, options);
     }
 
-    bulkWrite(opsOrSource: AnyBulkWriteOperation<A>[] | AsyncGenerator<AnyBulkWriteOperation<A>>, options: BulkWriteOptions & BulkWriterOptions & ProgressOption = BulkWriterOptions.default): Promise<BulkWriteResult> {
-        return Array.isArray(opsOrSource) ?
-            this.collection.bulkWrite(opsOrSource, options) :
-            this.bulkWriterSink(options)(opsOrSource);
+    async* bulkWrite(opsOrSource: BulkOp<A, keyof BulkOpModelMap<A>>[] | AsyncGenerator<BulkOp<A>>, options: Partial<BulkWriterOptions & ProgressOption> = {}): AsyncGenerator<BulkWriteResult> {
+        const _options = BulkWriterOptions.mergeDefaults(options);
+        if (Array.isArray(opsOrSource)) {
+            return [await this.collection.bulkWrite(opsOrSource as AnyBulkWriteOperation<A>[], _options)];
+        } else {
+            yield* this.bulkWriterSink(_options)(opsOrSource);
+        }
     }
 
-    bulkWriterSink(options: BulkWriterOptions & BulkWriteOptions & ProgressOption = BulkWriterOptions.default): BulkWriterSink<A> {
+    bulkWriterSink(options: BulkWriterOptions & BulkWriteOptions & ProgressOption = BulkWriterOptions.default): PipelineSink<BulkOp<A>> {
         const _this = this;
         BulkWriterOptions.applyDefaults(options);
-        return async function bulkWrite(source: AsyncGenerator<AnyBulkWriteOperation<A>/*  | ReadOperation<A> */> | (() => AsyncGenerator<AnyBulkWriteOperation<A>/*  | ReadOperation<A> */>)) {
-            let result!: BulkWriteResult;// = new BulkWriteResult();
-            for await (const op of /* cargo(options.maxBatchSize, options.timeoutMs, */ isAsyncGeneratorFunction(source) ? source() : source)/* ) */ {
-                const ops = [op];
-                log(`bulkWrite(): ops(${ops.length})=${inspect(ops, { depth: 6, })}`);
-                result = await _this.collection.bulkWrite(ops, options);
+        return (async function* bulkWrite(source: AsyncIterable<BulkOp<A>>) {
+            let result: BulkWriteResult[] = [];
+            for await (const ops of batch({ maxSize: options.maxBatchSize, timeoutMs: options.timeoutMs }, source)) {
+                /* cargo(
+                options.maxBatchSize,
+                options.timeoutMs, */
+                // isIterable(source) ? makeAsyncIterable(source) : source
+                // isAsyncGeneratorFunction(source) ? source() : source
+            /* )) { */
+            // const ops = [op]; // TODO: Rewrite cargo so it works (generally, ideally, or at leat just with this) - Write it as a separate generator stage?
+                log(`bulkWrite(): ops=${inspect(ops, { depth: 6, })}`);//(${ops.length})
+                const r = await _this.collection.bulkWrite(ops as AnyBulkWriteOperation<A>[], options);
                 log(`bulkWrite(): result=${inspect(result, { depth: 4, })}`);
+                // result.push(r);
+                yield r;
             }
             return result;
-        }
+        });
     };
 
     bulkWriterStore(options: BulkWriterOptions & BulkWriteOptions & ProgressOption): BulkWriterStore<A> {
@@ -394,16 +404,15 @@ export class MongoStore<A extends Artefact> implements Store<A> {
         });
     }
 
-    async* watch(query: Filter<A>/* Document[] = [] */, options: ChangeStreamOptions & ProgressOption = {})/* : Promise<ChangeStream<A, ChangeStreamDocument<A>>> */ {
+    async* watch(query: Filter<A>, options: ChangeStreamOptions & ProgressOption = {}) {
         if (options.progress) {
             options.progress.count = await this.collection.countDocuments(query);
         }
-        /* return */yield* this.collection.watch([{ $match: query }], options)
+        yield* this.collection.watch([{ $match: query }], options)
             .stream({ transform: r => {
                 log(`findOneAndUpdate(): r = ${inspect(r)}`);
                 return r as A;
             } });
-            // { transform: r => this.artefactCtor ? new this.artefactCtor(r) as WithId<A> : r });
     }
 
     ops: BulkOpFnMap<A | Aspect, A> = {

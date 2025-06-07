@@ -2,16 +2,23 @@ import yargs from "yargs";
 import { globalOptions } from "../cli";
 import { Task } from "../task";
 import { BulkWriterOptions, MongoStorage, Store } from "../db";
-import exitHook from "async-exit-hook";
 import * as Audio from "../models/audio";
 import * as nodePath from "node:path";
-import { MongoError } from "mongodb";
+import { BulkWriteResult, MongoError } from "mongodb";
 import { Artefact, isArtefact } from "../models/artefact";
 import * as FS from "../models/file-system";
 
+import { Aspect, AsyncFunction } from "../models";
+import { AsyncGeneratorFunction } from "../pipeline";
+
 import debug from "debug";
+import { DbCommandArgv } from "./db";
+import { inspect } from "node:util";
 const log = debug(nodePath.basename(module.filename));
 
+export interface FileCommandArgv {
+    paths: string | string[];
+}
 // export const FileArtefact = {
 //     file: FS.File,
 //     disk: {
@@ -72,19 +79,61 @@ const log = debug(nodePath.basename(module.filename));
 //     }
 //     // And this.Entry above is returning the ONE of these that exists
 
-type FileSystemArtefact = Artefact & {
-    File?: FS.File;
-    Directory?: FS.Directory;
+type ArtefactSlice<P extends PropertyKey, A extends Aspect | Aspect[]> = AsyncFunction<A extends Aspect[] ? A : [A], { [K in P]: A; }>;
 
-    Unknown?: FS.Unknown;
+type AspectSource<A extends Aspect> = AsyncGenerator<A> | AsyncGeneratorFunction<A> | AsyncIterable<A> | Iterable<A>;
+
+// Define a slice (individual property) of an Artefact
+// type ArtefactSliceDefinition<I extends Aspect, O extends Artefact> = {
+//     source: AspectSource<I>;
+//     fn: ArtefactSlice<I, O>;
+// };
+
+// export type FileSystemArtefact = Artefact &
+//     ArtefactSlice<"File" | "Directory" | "Unknown", FS.File | FS.Directory | FS.Unknown> &
+//     ArtefactSlice<"Hash", FS.Hash>;//&
+
+export type FileSystemArtefact = Artefact & {
+    File: FS.File;
+    Directory: FS.Directory;
+
+    Unknown: FS.Unknown;
 
     // Only iff !!this.File
-    Hash?: FS.Hash;
-    Audio?: Audio.Audio;
+    Hash: FS.Hash;
+    Audio: Audio.Audio;
+    Disk: FS.Disk;
+    Partition: FS.Partition;
+};
 
-    Disk?: FS.Disk;
-    Partition?: FS.Partition;
-}
+// const FileSystemArtefact = (store: Store):
+//     ArtefactSlice<"File" | "Directory" | "Unknown", FS.File | FS.Directory | FS.Unknown, FileSystemArtefact> &
+//     Artefact
+
+// const FileSystemArtefact = pipeline() (_: FileSystemArtefact | FS.Entry, store: Store) => (
+//     isArtefact(_) ? _ : ({ [_._T]: _ })
+// })
+//     // Only iff !!this.File
+//     Hash?: FS.Hash;
+//     Audio?: Audio.Audio;
+
+//     Disk?: FS.Disk;
+//     Partition?: FS.Partition;
+// } => ({
+//     set Entry(_: Entry) { this[_._T] = _; }
+    
+//     File:  FS.File,
+//     Directory: FS.Directory,
+
+//     Unknown: FS.Unknown,
+
+//     // Only iff !!this.File
+//     HashFS.Hash,
+//     Audio: Audio.Audio,
+//     Disk: FS.Disk,
+//     Partition: FS.Partition,
+// });
+
 // ^ make this a const var with the exact same property names (OR: schhema: Artefact[K] = Aspect<K, TAspect>)
 // with values built with a ArtefactSliceDefinition<TAspectsUnion>([{]     // * S (can and usually does take multiple Aspect types as a union, represents all known Aspect types for this Artefact type)
 //  source:
@@ -100,8 +149,8 @@ type FileSystemArtefact = Artefact & {
 
 export const command = 'file';
 export const description = 'File commands';
-export const builder = (yargs: yargs.Argv) => yargs
-    .options(globalOptions)
+export const builder = (yargs: yargs.Argv<DbCommandArgv & FileCommandArgv>) => yargs
+    // .options(globalOptions)
     .command('index <paths...>', 'Index file', yargs => yargs
 
         .positional('paths', {
@@ -111,7 +160,7 @@ export const builder = (yargs: yargs.Argv) => yargs
             demandOption: true
         }),
 
-        async function (argv): Promise<void> {
+        async (argv: DbCommandArgv & FileCommandArgv) => {
 
             const storage = new MongoStorage(argv.dbUrl);
             const store = await storage.store<FileSystemArtefact>("fileSystemEntries"/* , FileSystemArtefact */, {
@@ -121,124 +170,160 @@ export const builder = (yargs: yargs.Argv) => yargs
                 }],
             });//.bulkWriterStore();
 
-            exitHook(async (cb) => {
-                log("Exiting ...");
-                if (!!storage && storage.isConnected()) {
-                    await storage.close();
-                }
-                cb();
-            });
 
             await Task.start(
 
                 async function enumerateBlockDevices(task: Task) {
                     const bulkWriter = store.bulkWriterSink({ ...BulkWriterOptions.default, progress: task.progress });
 
-                    await Task.repeat({ postDelay: 15000 }, async() => {           // 15s
-                        await bulkWriter(
-                            (async function* enumerateBlockDevicesSource() {
-                                const disks = await FS.Disk.getAll();
-                                const partitions = await FS.Partition.getAll();
-                                // ops.push(...
-                                yield* disks.map(d => store.ops.updateOne(d));
-                                // 
-                                //     filter: { $and: [ { "Disk.model": { $eq: d.model } }, { "Disk.serial": { $eq: d.serial } }, ], },
-                                //     update: { $set: { "Disk": d } },
-                                //     upsert: true,
-                                // } }));
-                                // ops.push(...
-                                // yield* partitions.map(p => ({ "updateOne": {
-                                //     filter: { "Partition.uuid": { $eq: p.uuid } },
-                                //     update: { $set: { "Partition": p } },
-                                //     upsert: true,
-                                // } }));
-                                yield* partitions.map(p => store.ops.updateOne(p))
-                            })()
-                        );
-                    });
+                    await Task.repeat({ postDelay: 15000 }, async task => {
+                        for await (const bulkWriteResult of Task.pipe(
+                            (await FS.Disk.getAll() as (FS.Disk | FS.Partition)[]).concat(await FS.Partition.getAll()) as (FS.Disk | FS.Partition)[],
+                            // console.log,
+                            store.ops.updateOne,
+                            bulkWriter,//store.bulkWrite
+                        )) {
+                            log(`enumerateBlockDevices(): bulkWriteResult=${inspect(bulkWriteResult)}`);
+                        }
+                    })
+                        // async() => {           // 15s
+                        // Task.pipe<FS.Disk | FS.Partition>(
+                            // (await FS.Disk.getAll() as (FS.Disk | FS.Partition)[]).concat(await FS.Partition.getAll()) as (FS.Disk | FS.Partition)[],
+                            // store.ops.updateOne,
+                            // store.bulkWrite);
+                        // await bulkWriter(
+                        //     (async function* enumerateBlockDevicesSource() {
+                        //         const disks = await FS.Disk.getAll();
+                        //         const partitions = await FS.Partition.getAll();
+                        //         // ops.push(...
+                        //         yield* disks.map(d => store.ops.updateOne(d));
+                        //         // 
+                        //         //     filter: { $and: [ { "Disk.model": { $eq: d.model } }, { "Disk.serial": { $eq: d.serial } }, ], },
+                        //         //     update: { $set: { "Disk": d } },
+                        //         //     upsert: true,
+                        //         // } }));
+                        //         // ops.push(...
+                        //         // yield* partitions.map(p => ({ "updateOne": {
+                        //         //     filter: { "Partition.uuid": { $eq: p.uuid } },
+                        //         //     update: { $set: { "Partition": p } },
+                        //         //     upsert: true,
+                        //         // } }));
+                        //         yield* partitions.map(p => store.ops.updateOne(p))
+                        //     })()
+                        // );
+                    //});
                 },
 
-                async function indexFileSystem(task: Task) {
-                    const bulkWriter = store.bulkWriterSink({ ...BulkWriterOptions.default, progress: task.progress });
+                // async function indexFileSystem(task: Task) {
+                //     const bulkWriter = store.bulkWriterSink({ ...BulkWriterOptions.default, progress: task.progress });
 
-                    await Task.repeat({ postDelay: 180000/*0*/, }, async () => {   // 3/*0*/ minutes
-                        bulkWriter(
-                            (async function* indexFileSystemSource() {
-                                for (const path of argv.paths) {
-                                    for await (const fsEntry of FS.walk({ path, progress: task.progress })) {
-                                        try {
-                                            // const _ = yield ({ "findOne": { filter: Artefact.Query(FS.Entry, "path"), } }) ?? new FileSystemArtefact;
-                                            // const _ = await store.findOneOrCreate(Query(fsEntry, "path"), () => new FileSystemArtefact());
-                                            // _.update(fsEntry);
-                                            yield store.ops.updateOne(fsEntry);
-                                            log("%s: task.progress=%s fsEntry=%O", task.name, task.progress, fsEntry);
-                                        } catch (e: any) {
-                                            handleError(e, task, fsEntry, store);
-                                        }
-                                    }
-                                }
+                //     await Promise.all(
+                //         (Array.isArray(argv.paths) ? argv.paths : argv.paths.split(" "))
+                //             .map((path, searchId) => {
+                //                 Task.repeat({ postDelay: 180000/*0*/, }, async task =>
+                //                     Task.pipe(
+                //                         FS.walk({ path, progress: task.progress }),     // 3/*0*/ minutes
+                //                         store.ops.updateOne,
+                //                         bulkWriter,
+                //                     ));
+                //             }));                           
+                //         //  (async function* indexFileSystemSource() {
+                //         //         for await (const fsEntry of FS.walk()) {
+                //         //             try {
+                //         //                 // const _ = yield ({ "findOne": { filter: Artefact.Query(FS.Entry, "path"), } }) ?? new FileSystemArtefact;
+                //         //                 // const _ = await store.findOneOrCreate(Query(fsEntry, "path"), () => new FileSystemArtefact());
+                //         //                 // _.update(fsEntry);
+                //         //                 yield store.ops.updateOne(fsEntry);
+                //         //                 log("%s: task.progress=%s fsEntry=%O", task.name, task.progress, fsEntry);
+                //         //             } catch (e: any) {
+                //         //                 handleError(e, task, fsEntry, store);
+                //         //             }
+                //         //         }
                                 
-                            })()
-                        );
-                    });
-                },
+                //         //     })()
+                //         // );
+                //     // });
+                // },
 
-                async function hashFiles(task: Task) {
-                    const bulkWriter = store.bulkWriterSink({ ...BulkWriterOptions.default, progress: task.progress });
-                    await Task.repeat({ preDelay: 3000, }, async () => {     // 3 seconds
-                        bulkWriter(
-                            (async function* hashFilesSource() {
-                                for await (const _ of /* Artefact.stream */(store.find({//.watch({
-                                    $and: [
-                                        { File: { $exists: true } },
-                                        { $or: [
-                                            { Hash: { $exists: false } },
-                                            { $expr: { $lt: [ "$Hash._ts", "$File.stats.mtime" ] } }
-                                        ]}
-                                    ]
-                                }, { progress: task.progress }))) {
-                                    try {
-                                        if (_.File) {
-                                            _.Hash = await FS.Hash.create(_.File.path);
-                                            yield await store.ops.updateOne(_);
-                                        }
-                                        log("%s: task.progress=%s _=%O", task.name, task.progress, _);
-                                    } catch (e: any) {
-                                        handleError(e, task, _, store);
-                                    }
-                                }
-                            })()
-                        );
-                    });
-                },
+                // async function hashFiles(task: Task) {
+                //     const bulkWriter = store.bulkWriterSink({ ...BulkWriterOptions.default, progress: task.progress });
+                //     await Task.repeat({ preDelay: 3000, }, async task =>
+                //         Task.pipe(
+                //             store.find({
+                //                 $and: [
+                //                     { File: { _T: "File", } }, // { $exists: true } },
+                //                     { $or: [
+                //                         { Hash: { $exists: false } },
+                //                         { $expr: { $lt: [ "$Hash._ts", "$File.stats.mtime" ] } }
+                //                     ]}
+                //                 ]
+                //             }, {
+                //                 progress: task.progress
+                //             }),
+                //             async (_: FileSystemArtefact) => await FS.Hash.create(_.File.path),
+                //             store.ops.updateOne,
+                //             bulkWriter
+                //         ));     // 3 seconds
+                //         // bulkWriter(
+                //         //     (async function* hashFilesSource() {
+                //         //         for await (const _ of /* Artefact.stream */() {
+                //         //             try {
+                //         //                 if (_.File) {
+                //         //                     _.Hash = await FS.Hash.create(_.File.path);
+                //         //                     yield await store.ops.updateOne(_);
+                //         //                 }
+                //         //                 log("%s: task.progress=%s _=%O", task.name, task.progress, _);
+                //         //             } catch (e: any) {
+                //         //                 handleError(e, task, _, store);
+                //         //             }
+                //         //         }
+                //         //     })()
+                //         // );
+                //     // });
+                // },
 
-                async function analyzeAudioFiles(task: Task) {
-                    const bulkWriter = store.bulkWriterSink({ ...BulkWriterOptions.default, progress: task.progress });
-                    await Task.repeat({ preDelay: 3000, }, async () => {     // 3 seconds
-                        bulkWriter(
-                            (async function* analyzeAudioFilesSource() {
-                                for await (const _ of /* Artefact.stream */(store.find({
-                                    $and: [
-                                        { File: { $exists: true } },
-                                        { $or: Audio.fileExtensions.map(ext => ({ "File.path": { $regex: "\^.*\\." + ext + "$", $options: "i" } })) },
-                                        { $or: [
-                                            { Audio: { $exists: false } },
-                                            { "Audio._ts": { $lt: "$File.stats.mtime" } }
-                                        ]}
-                                    ]
-                                }, { progress: task.progress }))) {
-                                    try {
-                                        _.Audio = await Audio.Audio.create(_.File!.path);
-                                        yield store.ops.updateOne(_);
-                                        log("%s: task.progress=%s _=%O", task.name, task.progress, _);
-                                    } catch (e: any) {
-                                        handleError(e, task, _, store);
-                                    }
-                                }
-                            })()
-                        );
-                    });
-                },
+                // async function analyzeAudioFiles(task: Task) {
+                //     const bulkWriter = store.bulkWriterSink({ ...BulkWriterOptions.default, progress: task.progress });
+                //     await Task.repeat({ preDelay: 3000, }, async () => {     // 3 seconds
+                //         Task.pipe(
+                //             store.find({
+                //                 $and: [
+                //                     { File: { $exists: true } },
+                //                     { $or: Audio.fileExtensions.map(ext => ({ "File.path": { $regex: "\^.*\\." + ext + "$", $options: "i" } })) },
+                //                     { $or: [
+                //                         { Audio: { $exists: false } },
+                //                         { "Audio._ts": { $lt: "$File.stats.mtime" } }
+                //                     ]}
+                //                 ]
+                //             }, { progress: task.progress }),
+                //             async (_: FileSystemArtefact) => await Audio.Audio.create(_.File!.path),
+                //             store.ops.updateOne
+                //         );
+                //     });
+                //     //     bulkWriter(
+                //     //         (async function* analyzeAudioFilesSource() {
+                //     //             for await (const _ of /* Artefact.stream */(store.find({
+                //     //                 $and: [
+                //     //                     { File: { $exists: true } },
+                //     //                     { $or: Audio.fileExtensions.map(ext => ({ "File.path": { $regex: "\^.*\\." + ext + "$", $options: "i" } })) },
+                //     //                     { $or: [
+                //     //                         { Audio: { $exists: false } },
+                //     //                         { "Audio._ts": { $lt: "$File.stats.mtime" } }
+                //     //                     ]}
+                //     //                 ]
+                //     //             }, { progress: task.progress }))) {
+                //     //                 try {
+                //     //                     _.Audio = await Audio.Audio.create(_.File!.path);
+                //     //                     yield store.ops.updateOne(_);
+                //     //                     log("%s: task.progress=%s _=%O", task.name, task.progress, _);
+                //     //                 } catch (e: any) {
+                //     //                     handleError(e, task, _, store);
+                //     //                 }
+                //     //             }
+                //     //         })()
+                //     //     );
+                //     // });
+                // },
             
             );
 
