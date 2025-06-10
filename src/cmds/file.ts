@@ -177,7 +177,7 @@ export const builder = (yargs: yargs.Argv<DbCommandArgv & FileCommandArgv>) => y
                     const bulkWriter = store.bulkWriterSink({ ...BulkWriterOptions.default, progress: task.progress });
 
                     await Task.repeat({ postDelay: 15000 }, async task => {
-                        for await (const bulkWriteResult of Task.pipe(
+                        for await (const bulkWriteResult of Task.pipe<BulkWriteResult>(
                             (await FS.Disk.getAll() as (FS.Disk | FS.Partition)[]).concat(await FS.Partition.getAll()) as (FS.Disk | FS.Partition)[],
                             // console.log,
                             store.ops.updateOne,

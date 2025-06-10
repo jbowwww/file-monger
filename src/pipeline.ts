@@ -52,18 +52,28 @@ export const makeAsyncGenerator = <I = any, R = any, N = any>(source: Iterable<I
         }
     })(source);
 
-export const pipe = <I = any, O = void>(
+
+export function pipe<I = any, O = void, R = any>(source: PipelineSource<I> | PipelineSourceFunction<I>, ...stages: [PipelineStage<I, O>]): AsyncIterable<O, R>;
+export function pipe<I = any, O = void, R = any>(source: PipelineSource<I> | PipelineSourceFunction<I>, ...stages: [PipelineStage<I, O>, PipelineSink<O, R>]): R | Promise<R>;
+export function pipe<I = any, O = void, R = any>(source: PipelineSource<I> | PipelineSourceFunction<I>, ...stages: [PipelineStage<I, any>, PipelineStage<any, O>]): AsyncIterable<O, R>;
+export function pipe<I = any, O = void, R = any>(source: PipelineSource<I> | PipelineSourceFunction<I>, ...stages: [PipelineStage<I, any>, PipelineStage<any, O>, PipelineSink<O, R>]): R | Promise<R>;
+export function pipe<I = any, O = void, R = any>(source: PipelineSource<I> | PipelineSourceFunction<I>, ...stages: [PipelineStage<I, any>, ...PipelineStage<any, any>[], PipelineStage<any, O>]): AsyncIterable<O, R>;
+export function pipe<I = any, O = void, R = any>(source: PipelineSource<I> | PipelineSourceFunction<I>, ...stages: [PipelineStage<I, any>, ...PipelineStage<any, any>[], PipelineStage<any, O>, PipelineSink<O, R>]): R | Promise<R>;
+export function pipe<I = any, O = void, R = any>(
     source: PipelineSource<I> | PipelineSourceFunction<I>,
     ...stages: 
         [PipelineStage<I, O>] |
-        [PipelineStage<I, any>, ...PipelineStage<any, any>[], PipelineStage<any, O>]
-) => {
+        [PipelineStage<I, O>, PipelineSink<O, R>] |
+        [PipelineStage<I, any>, PipelineStage<any, O>] |
+        [PipelineStage<I, any>, PipelineStage<any, O>, PipelineSink<O, R>] |
+        [PipelineStage<I, any>, ...PipelineStage<any, any>[], PipelineStage<any, O>] |
+        [PipelineStage<I, any>, ...PipelineStage<any, any>[], PipelineStage<any, O>, PipelineSink<O, R>]
+): AsyncIterable<O, R> {
     source = isFunction(source) ? source() : source;
     const asyncSource = isAsyncIterable(source) ? source : isIterable(source) ? makeAsyncGenerator(source) : source;
     const stagesAsGenerators = stages.map(stage => isAsyncGeneratorFunction(stage) ? stage : makeAsyncGeneratorFunction(stage as PipelineItemFunctionStage) as AsyncGeneratorFunction);
     log(`Task.pipe(): source=${inspect(source)}\nisIterable=${isIterable(source)} isAsyncIterable=${isAsyncIterable(source)} isAsyncGeneratorFunction=${isAsyncGeneratorFunction(source)}\nasyncSource=${inspect(asyncSource)}\nisIterable=${isIterable(asyncSource)} isAsyncIterable=${isAsyncIterable(asyncSource)} isAsyncGeneratorFunction=${isAsyncGeneratorFunction(asyncSource)}\nTask.pipe(): stages=${inspect(stages)}: ${inspect(stages.map(s => s.toString()))}`);
-    const p = stagesAsGenerators.reduce((r, stageGen, i, arr) => stageGen(r), asyncSource);
-    return isAsyncGeneratorFunction(p) ? p : makeAsyncGenerator(p);
+    return stagesAsGenerators.reduce((r, stageGen, i, arr) => stageGen(r), asyncSource) as AsyncIterable<O, R>;
 };
 
 export const tap = <I = any>(fn: (input: I) => Promise<void>) => async (input: I) => { await fn(input); };

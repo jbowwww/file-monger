@@ -101,12 +101,16 @@ export class Task<TArgs extends any[] = [], TResult = void> {
         return Task.repeat<TSubArgs, TSubReturn>(options, taskFn, ...args);
     }
 
-    public static pipe<I = any, O = void, R = any>(
-        source: PipelineSource<I> | PipelineSourceFunction<I>,
+    public static pipe<O = any, R = any>(
+        source: PipelineSource<any> | PipelineSourceFunction<any>,
         ...stages: 
-            [PipelineStage<I, O>] |
-            [PipelineStage<I, any>, ...PipelineStage<any, any>[], PipelineStage<any, O>]
-    ) {
+            [PipelineStage<any, O>] |
+            [PipelineStage<any, O>, PipelineSink<O, R>] |
+            [PipelineStage<any, any>, PipelineStage<any, O>] |
+            [PipelineStage<any, any>, PipelineStage<any, O>, PipelineSink<O, R>] |
+            [PipelineStage<any, any>, ...PipelineStage<any, any>[], PipelineStage<any, O>] |
+            [PipelineStage<any, any>, ...PipelineStage<any, any>[], PipelineStage<any, O>, PipelineSink<O, R>]
+    ): AsyncIterable<O> {
         return pipe(source, ...stages);
     }
 }

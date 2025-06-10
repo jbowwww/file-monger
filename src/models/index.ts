@@ -195,8 +195,7 @@ export function isAspect<A extends Aspect>(this: AspectType<A> | string | undefi
             value._T === this.name :
             value._T === this) :
         typeof value._T === "string");
-};// { return value !== null && value instanceof this; };
-
+};
 export type AspectStaticQuery<A extends Aspect = Aspect> = (...args: [A] | [unknown] | unknown[]) => Filter<Document>;
 export type AspectStaticQueries<A extends Aspect = Aspect, Q extends AspectStaticExtensionQueries<A> = AspectStaticExtensionQueries<A>> = {
     // byUnique: AspectStaticQuery<Document>;
