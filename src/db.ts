@@ -7,6 +7,7 @@ import { Progress } from "./progress";
 
 import { inspect } from "node:util";
 import debug from "debug";
+import { PipelineSource } from "node:stream";
 const log = debug(nodePath.basename(module.filename));
 
 export interface Storage {
@@ -275,8 +276,8 @@ export interface Store<A extends Artefact = Artefact> {
     findOneOrCreate(query: Filter<A>, createFn: () => A | Promise<A>, options?: FindOptions): Promise<A>;
     findOneAndUpdate(query: Filter<A>, update: UpdateFilter<A>, options?: FindOneAndUpdateOptions): Promise<A | null>;
     updateOne(query: Filter<A>, update: UpdateFilter<A>, options?: UpdateOptions): Promise<UpdateResult<A> | null>;
-    bulkWrite(operations: BulkOp<A, keyof BulkOpModelMap<A>>[] | AsyncIterable<BulkOp<A>>, options?: BulkWriteOptions & ProgressOption): AsyncGenerator<BulkWriteResult[]>;
-    bulkWriterSink(options?: BulkWriterOptions & ProgressOption): PipelineSink<BulkOp<A>>;
+    bulkWrite(operations: AsyncIterable<AnyBulkWriteOperation<A>>, options?: BulkWriteOptions & ProgressOption): AsyncGenerator<BulkWriteResult[]>;
+    bulkWriterSink(options?: BulkWriterOptions & ProgressOption): PipelineSink<AnyBulkWriteOperation<A>>;
     bulkWriterStore(options?: BulkWriterOptions & ProgressOption): BulkWriterStore<A>;
     watch(pipeline?: Filter<A>/* Document[] */, options?: ChangeStreamOptions & ProgressOption): AsyncGenerator<ChangeStreamDocument<A>>;
     ops: BulkOpFnMap<A | Aspect, A>;
@@ -363,7 +364,7 @@ export class MongoStore<A extends Artefact> implements Store<A> {
         return this.collection.updateOne(query!, updates, options);
     }
 
-    async* bulkWrite(opsOrSource: BulkOp<A, keyof BulkOpModelMap<A>>[] | AsyncGenerator<BulkOp<A>>, options: Partial<BulkWriterOptions & ProgressOption> = {}): AsyncGenerator<BulkWriteResult> {
+    async* bulkWrite(opsOrSource: AsyncIterable<AnyBulkWriteOperation<A>>, options: Partial<BulkWriterOptions & ProgressOption> = {}): AsyncGenerator<BulkWriteResult> {
         const _options = BulkWriterOptions.mergeDefaults(options);
         if (Array.isArray(opsOrSource)) {
             return [await this.collection.bulkWrite(opsOrSource as AnyBulkWriteOperation<A>[], _options)];
@@ -372,10 +373,10 @@ export class MongoStore<A extends Artefact> implements Store<A> {
         }
     }
 
-    bulkWriterSink(options: BulkWriterOptions & BulkWriteOptions & ProgressOption = BulkWriterOptions.default): PipelineSink<BulkOp<A>> {
+    bulkWriterSink(options: BulkWriterOptions & BulkWriteOptions & ProgressOption = BulkWriterOptions.default) {//: PipelineSink<AnyBulkWriteOperation<A>, BulkWriteResult, BulkWriteResult[]> {
         const _this = this;
         BulkWriterOptions.applyDefaults(options);
-        return (async function* bulkWrite(source: AsyncIterable<BulkOp<A>>) {
+        return (async function* bulkWrite(source: AsyncIterable<AnyBulkWriteOperation<A>>): AsyncGenerator<BulkWriteResult, BulkWriteResult[]> {
             let result: BulkWriteResult[] = [];
             for await (const ops of batch({ maxSize: options.maxBatchSize, timeoutMs: options.timeoutMs }, source)) {
                 /* cargo(
@@ -387,8 +388,8 @@ export class MongoStore<A extends Artefact> implements Store<A> {
             // const ops = [op]; // TODO: Rewrite cargo so it works (generally, ideally, or at leat just with this) - Write it as a separate generator stage?
                 log(`bulkWrite(): ops=${inspect(ops, { depth: 6, })}`);//(${ops.length})
                 const r = await _this.collection.bulkWrite(ops as AnyBulkWriteOperation<A>[], options);
+                result.push(r);
                 log(`bulkWrite(): result=${inspect(result, { depth: 4, })}`);
-                // result.push(r);
                 yield r;
             }
             return result;

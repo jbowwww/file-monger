@@ -2,7 +2,7 @@ import * as nodePath from "node:path";
 import { Progress } from "./progress";
 
 import { makeDefaultOptions } from "./models";
-import { PipelineSource, pipe, PipelineStage, PipelineSink, PipelineSourceFunction } from "./pipeline";
+import { PipelineSource, PipelineStage, PipelineSink, PipelineSourceFunction, genChain } from "./pipeline";
 
 import debug from "debug";
 const log = debug(nodePath.basename(module.filename));
@@ -101,16 +101,16 @@ export class Task<TArgs extends any[] = [], TResult = void> {
         return Task.repeat<TSubArgs, TSubReturn>(options, taskFn, ...args);
     }
 
-    public static pipe<O = any, R = any>(
-        source: PipelineSource<any> | PipelineSourceFunction<any>,
-        ...stages: 
-            [PipelineStage<any, O>] |
-            [PipelineStage<any, O>, PipelineSink<O, R>] |
-            [PipelineStage<any, any>, PipelineStage<any, O>] |
-            [PipelineStage<any, any>, PipelineStage<any, O>, PipelineSink<O, R>] |
-            [PipelineStage<any, any>, ...PipelineStage<any, any>[], PipelineStage<any, O>] |
-            [PipelineStage<any, any>, ...PipelineStage<any, any>[], PipelineStage<any, O>, PipelineSink<O, R>]
-    ): AsyncIterable<O> {
-        return pipe(source, ...stages);
-    }
+    // public static pipe<I = any, O = any, R = any>(
+    //     source: PipelineSource<any> | PipelineSourceFunction<any>,
+    //     ...stages: 
+    //         [PipelineStage<I, O>] |
+    //         [PipelineStage<I, O>, PipelineSink<O, R>] |
+    //         [PipelineStage<I, any>, PipelineStage<any, O>] |
+    //         [PipelineStage<I, any>, PipelineStage<any, O>, PipelineSink<O, R>] |
+    //         [PipelineStage<I, any>, ...PipelineStage<any, any>[], PipelineStage<any, O>] |
+    //         [PipelineStage<I, any>, ...PipelineStage<any, any>[], PipelineStage<any, O>, PipelineSink<O, R>]
+    // ): AsyncIterable<O> {
+    //     return genChain(...stages)(source);
+    // }
 }

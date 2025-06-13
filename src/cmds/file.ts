@@ -9,7 +9,7 @@ import { Artefact, isArtefact } from "../models/artefact";
 import * as FS from "../models/file-system";
 
 import { Aspect, AsyncFunction } from "../models";
-import { AsyncGeneratorFunction } from "../pipeline";
+import { AsyncGeneratorFunction, chain, execute, genChain, makeAsyncGenerator, pipe } from "../pipeline";
 
 import debug from "debug";
 import { DbCommandArgv } from "./db";
@@ -177,14 +177,18 @@ export const builder = (yargs: yargs.Argv<DbCommandArgv & FileCommandArgv>) => y
                     const bulkWriter = store.bulkWriterSink({ ...BulkWriterOptions.default, progress: task.progress });
 
                     await Task.repeat({ postDelay: 15000 }, async task => {
-                        for await (const bulkWriteResult of Task.pipe<BulkWriteResult>(
-                            (await FS.Disk.getAll() as (FS.Disk | FS.Partition)[]).concat(await FS.Partition.getAll()) as (FS.Disk | FS.Partition)[],
+                        // for await (const bulkWriteResult of 
+                        const r = await execute(pipe(
+                            (await FS.Disk.getAll() as (FS.Disk | FS.Partition)[]).concat(await FS.Partition.getAll()),
                             // console.log,
                             store.ops.updateOne,
                             bulkWriter,//store.bulkWrite
-                        )) {
-                            log(`enumerateBlockDevices(): bulkWriteResult=${inspect(bulkWriteResult)}`);
-                        }
+                        ));
+
+                                log(`r=${inspect(r)} r.toString()=${r.toString()}`);
+                    // ) {
+                    //         log(`enumerateBlockDevices(): bulkWriteResult=${inspect(bulkWriteResult)}`);
+                    //     }
                     })
                         // async() => {           // 15s
                         // Task.pipe<FS.Disk | FS.Partition>(
