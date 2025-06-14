@@ -178,14 +178,14 @@ export const builder = (yargs: yargs.Argv<DbCommandArgv & FileCommandArgv>) => y
 
                     await Task.repeat({ postDelay: 15000 }, async task => {
                         // for await (const bulkWriteResult of 
-                        const r = await execute(pipe(
+                        const r = await pipe(
                             (await FS.Disk.getAll() as (FS.Disk | FS.Partition)[]).concat(await FS.Partition.getAll()),
                             // console.log,
                             store.ops.updateOne,
                             bulkWriter,//store.bulkWrite
-                        ));
+                        ).execute();
 
-                                log(`r=${inspect(r)} r.toString()=${r.toString()}`);
+                                log(`r=${inspect(r)}`);
                     // ) {
                     //         log(`enumerateBlockDevices(): bulkWriteResult=${inspect(bulkWriteResult)}`);
                     //     }

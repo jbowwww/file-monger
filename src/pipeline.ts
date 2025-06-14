@@ -22,7 +22,10 @@ export type PipelineFunctionStage<I = any, O = any, R = any, N = any> = (source:
 export type PipelineGeneratorStage<I = any, O = any, R = any, N = any> = AsyncGeneratorFunction<I, O, R, N, typeof Infinity>;// (source: AsyncIterable<I>) => AsyncGenerator<O, R, N>;
 export type PipelineStage<I = any, O = any, R = void> = PipelineGeneratorStage<I, O, R> | PipelineItemFunctionStage<I, O>;// | */ PipelineFunctionStage<I, O>;// | 
 export type PipelineSink<I = any, O = any, R = any> = (source: AsyncIterable<I, any, any>) => AsyncIterable<O, R, any>;// AsyncFunction<[AsyncIterable<I>/* , ...AnyParameters */], R>;
-export type Pipeline<I = any, O = any, R = any, N = any> = (source: PipelineSource<I>) => AsyncGenerator<O, R, N>;
+export type PipelineFunction<I = any, O = any, R = any, N = any> = (source: PipelineSource<I, R, N>) => AsyncGenerator<O, R, N>;
+export type Pipeline<I = any, O = any, R = any, N = any> = AsyncGenerator<O, R, N> & {
+    execute: (sinkFn?: (source: AsyncIterable<O, R, N>) => R | Promise<R>) => R | Promise<R>;
+};
 
 export const isIterable = <T extends any = any, R = any, N = any>(value: any): value is Iterable<T, R, N> => value && Symbol.iterator in value && typeof value[Symbol.iterator] === "function";
 export const isAsyncIterable = <T extends any = any, R = any, N = any>(value: any): value is AsyncIterable<T, R, N> => value && Symbol.asyncIterator in value && typeof value[Symbol.asyncIterator] === "function";
@@ -75,18 +78,18 @@ export function gen<I = any, O = any>(fn: PipelineItemFunctionStage<I, O>) {
     };
 }
 
-export function genChain<T0 = any, T1 = any, R = void>(stage0: PipelineStage<T0, T1, R>): Pipeline<T0, T1, R>;
-export function genChain<T0 = any, T1 = any, T2 = any, R = void>(stage0: PipelineStage<T0, T1, R | void>, stage1: PipelineStage<T1, T2, R>): Pipeline<T0, T2, R>;
-export function genChain<T0 = any, T1 = any, T2 = any, T3 = any, R = void>(stage0: PipelineStage<T0, T1, R | void>, stage1: PipelineStage<T1, T2, R | void>, stage2: PipelineStage<T2, T3, R>): Pipeline<T0, T3, R>;
-export function genChain<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, R = void>(stage0: PipelineStage<T0, T1, R | void>, stage1: PipelineStage<T1, T2, R | void>, stage2: PipelineStage<T2, T3, R | void>, stage3: PipelineStage<T3, T4, R>): Pipeline<T0, T4, R>;
-export function genChain<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, R = void>(stage0: PipelineStage<T0, T1, R | void>, stage1?: PipelineStage<T1, T2, R | void>, stage2?: PipelineStage<T2, T3, R | void>, stage3?: PipelineStage<T3, T4, R | void>, stage4?: PipelineStage<T4, T5, R>): Pipeline<T0, T5, R>;
+export function genChain<T0 = any, T1 = any, R = void>(stage0: PipelineStage<T0, T1, R>): PipelineFunction<T0, T1, R>;
+export function genChain<T0 = any, T1 = any, T2 = any, R = void>(stage0: PipelineStage<T0, T1, R | void>, stage1: PipelineStage<T1, T2, R>): PipelineFunction<T0, T2, R>;
+export function genChain<T0 = any, T1 = any, T2 = any, T3 = any, R = void>(stage0: PipelineStage<T0, T1, R | void>, stage1: PipelineStage<T1, T2, R | void>, stage2: PipelineStage<T2, T3, R>): PipelineFunction<T0, T3, R>;
+export function genChain<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, R = void>(stage0: PipelineStage<T0, T1, R | void>, stage1: PipelineStage<T1, T2, R | void>, stage2: PipelineStage<T2, T3, R | void>, stage3: PipelineStage<T3, T4, R>): PipelineFunction<T0, T4, R>;
+export function genChain<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, R = void>(stage0: PipelineStage<T0, T1, R | void>, stage1?: PipelineStage<T1, T2, R | void>, stage2?: PipelineStage<T2, T3, R | void>, stage3?: PipelineStage<T3, T4, R | void>, stage4?: PipelineStage<T4, T5, R>): PipelineFunction<T0, T5, R>;
 export function genChain<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, R = void>(
     stage0: PipelineStage<T0, T1, R | void>,
     stage1?: PipelineStage<T1, T2, R | void>,
     stage2?: PipelineStage<T2, T3, R | void>,
     stage3?: PipelineStage<T3, T4, R | void>,
     stage4?: PipelineStage<T4, T5, R | void>,
-): Pipeline<T0, T1 | T2 | T3 | T4 | T5, R> {
+): PipelineFunction<T0, T1 | T2 | T3 | T4 | T5, R> {
     const r = async function* (source: PipelineSource<T0>) {//: AsyncGenerator<T1 | T2 | T3 | T4 | T5, R, any> {
         let isLastStage = false;
         const r = [stage0, stage1, stage2, stage3, stage4]
@@ -108,36 +111,70 @@ export function genChain<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = 
                 return innerR;
             }, makeAsyncGenerator(source)) as AsyncGenerator<T1 | T2 | T3 | T4 | T5, R>;
         log(`r=${inspect(r)} r.toString()=${r.toString()}`);
-        // yield* r;
-        const v = execute(r);
-        return execute(r);
+        yield* r;
     };
     log(`r=${inspect(r)} r.toString()=${r.toString()}`);
-    return r as Pipeline<T0, T1 | T2 | T3 | T4 | T5, R>;
+    return r as PipelineFunction<T0, T1 | T2 | T3 | T4 | T5, R>;
 }
 export const pipeline = genChain;
 
-export function pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, R = void>(source: PipelineSource<T0>, stage0: PipelineStage<T0, T1, R>): AsyncIterable<T1, R>;
-export function pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, R = void>(source: PipelineSource<T0>, stage0: PipelineStage<T0, T1, R | void>, stage1: PipelineStage<T1, T2, R>): AsyncIterable<T2, R>;
-export function pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, R = void>(source: PipelineSource<T0>, stage0: PipelineStage<T0, T1, R | void>, stage1: PipelineStage<T1, T2, R | void>, stage2: PipelineStage<T2, T3, R>): AsyncIterable<T3, R>;
-export function pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, R = void>(source: PipelineSource<T0>, stage0: PipelineStage<T0, T1, R | void>, stage1: PipelineStage<T1, T2, R | void>, stage2: PipelineStage<T2, T3, R | void>, stage3: PipelineStage<T3, T4, R>): AsyncIterable<T4, R>;
-export function pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, R = void>(source: PipelineSource<T0>, stage0: PipelineStage<T0, T1, R | void>, stage1: PipelineStage<T1, T2, R | void>, stage2: PipelineStage<T2, T3, R | void>, stage3: PipelineStage<T3, T4, R | void>, stage4: PipelineStage<T4, T5, R>): AsyncIterable<T5, R>;
-export function pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, R = void>(
+export function pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, R = void, N = any>(source: PipelineSource<T0>, stage0: PipelineStage<T0, T1, R>): Pipeline<T0, T1, R, N>;
+export function pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, R = void, N = any>(source: PipelineSource<T0>, stage0: PipelineStage<T0, T1, R | void>, stage1: PipelineStage<T1, T2, R>): Pipeline<T0, T2, R, N>;
+export function pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, R = void, N = any>(source: PipelineSource<T0>, stage0: PipelineStage<T0, T1, R | void>, stage1: PipelineStage<T1, T2, R | void>, stage2: PipelineStage<T2, T3, R>): Pipeline<T0, T3, R, N>;
+export function pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, R = void, N = any>(source: PipelineSource<T0>, stage0: PipelineStage<T0, T1, R | void>, stage1: PipelineStage<T1, T2, R | void>, stage2: PipelineStage<T2, T3, R | void>, stage3: PipelineStage<T3, T4, R>): Pipeline<T0, T4, R, N>;
+export function pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, R = void, N = any>(source: PipelineSource<T0>, stage0: PipelineStage<T0, T1, R | void>, stage1: PipelineStage<T1, T2, R | void>, stage2: PipelineStage<T2, T3, R | void>, stage3: PipelineStage<T3, T4, R | void>, stage4: PipelineStage<T4, T5, R>): Pipeline<T0, T5, R, N>;
+export function pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, R = void, N = any>(
     source: PipelineSource<T0>,
     stage0: PipelineStage<T0, T1, R | void>,
     stage1?: PipelineStage<T1, T2, R | void>,
     stage2?: PipelineStage<T2, T3, R | void >,
     stage3?: PipelineStage<T3, T4, R | void>,
     stage4?: PipelineStage<T4, T5, R>
-): AsyncIterable<T1 | T2 | T3 | T4 | T5, R> {
-    return pipeline<T0, T1, T2, T3, T4, T5, R>(stage0, stage1, stage2, stage3, stage4)(source);
-}
+): Pipeline<T0, T1 | T2 | T3 | T4 | T5, R, N> {
+    const iterable = pipeline<T0, T1, T2, T3, T4, T5, R>(stage0, stage1, stage2, stage3, stage4)(source);
+    // return (async function* execute() {
 
-export async function execute<I = any, R = any>(source: AsyncIterable<I, R>) {
+    // })
+    const r = Object.assign(iterable, {
+        execute(sinkFn?: (source: AsyncIterable<T5, R, N>) => R | Promise<R>) {
+            return (
+                sinkFn?.(iterable) ??
+                execute<T5, R, N>(iterable) );
+        },
+    });
+    log(`r=${inspect(r)} r.toString()=${r.toString()}`);
+    return r;
+}
+    //     async* execute<S extends any = any>(loopOrSinkFn?: (item: T5) => N | Promise<N>, sinkFn?: () {
+    //         let i, n;
+    //         const loopFn = sinkFn ? loopOrSinkFn : undefined;
+    //         while (i = await iterable.next(n)) {
+    //             if (!i.done) {
+    //                 const n = await loopFn?.(i.value);
+    //             } else {
+    //                 return i.value
+    //             }
+    //             if (i.done) {
+    //                 return i.value;
+    //             } else {
+    //                 yield i.value;
+    //             }
+    //         }
+    //     }
+    // });
+    // return r;
+// }
+
+export async function execute<I = any, R = void, N = any>(source: AsyncIterable<I, R>, itemFunc?: (item: I) => N | Promise<N>): Promise<R> {
     const sourceGen = source[Symbol.asyncIterator]();
+    let n;
     do {
-        const { value, done } = await sourceGen.next();
-        if (done) return value;
+        const { value, done } = await sourceGen.next(n);
+        if (done) {
+            return Promise.resolve(value);
+        } else if (value) {
+            n = itemFunc?.(value);
+        }
     } while (true);
 }
 
