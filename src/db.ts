@@ -1,5 +1,5 @@
 import * as nodePath from "node:path";
-import { AnyBulkWriteOperation, BulkWriteOptions, BulkWriteResult, ChangeStreamOptions, ChangeStreamDocument, ChangeStreamInsertDocument, ChangeStreamUpdateDocument, Collection, CollectionOptions, CountOptions, Db, Filter, FindOneAndUpdateOptions, FindOptions, MongoClient, UpdateFilter, UpdateOptions, UpdateResult, IndexSpecification, CreateIndexesOptions, Condition, InsertOneModel, DeleteManyModel, DeleteOneModel, ReplaceOneModel, UpdateManyModel, UpdateOneModel, BSON, DeleteOptions, ReplaceOptions, InsertOneOptions, OptionalId, WithoutId } from "mongodb";
+import mongo, { AnyBulkWriteOperation, BulkWriteOptions, ChangeStreamOptions, ChangeStreamDocument, ChangeStreamInsertDocument, ChangeStreamUpdateDocument, Collection, CollectionOptions, CountOptions, Db, Filter, FindOneAndUpdateOptions, FindOptions, MongoClient, UpdateFilter, UpdateOptions, UpdateResult, IndexSpecification, CreateIndexesOptions, Condition, InsertOneModel, DeleteManyModel, DeleteOneModel, ReplaceOneModel, UpdateManyModel, UpdateOneModel, BSON, DeleteOptions, ReplaceOptions, InsertOneOptions, OptionalId, WithoutId } from "mongodb";
 import { Artefact, ArtefactQueryFn, hasId, isArtefact } from "./models/artefact";
 import { Aspect, DeepProps, Choose, Constructor, isConstructor, ValueUnion, makeDefaultOptions, isNonDateObject, ProgressOption } from "./models/";
 import { PipelineGeneratorStage, PipelineSink, batch, isIterable, makeAsyncGenerator } from "./pipeline";
@@ -210,7 +210,7 @@ export type BulkOperationStats<A extends Artefact> = {
     // ...
 };
 
-export interface BulkWriterSink<A extends Artefact> extends PipelineGeneratorStage<BulkOp<A>, BulkWriteResult, any, void> {}     //AsyncFunction<[AsyncGenerator<AnyBulkWriteOperation<A>/*  | ReadOperation<A> *//* , BulkOperationStats<A>, WithId<A> | number */>], BulkWriteResult>;
+export interface BulkWriterSink<A extends Artefact> extends PipelineGeneratorStage<BulkOp<A>, mongo.BulkWriteResult, any, void> {}     //AsyncFunction<[AsyncGenerator<AnyBulkWriteOperation<A>/*  | ReadOperation<A> *//* , BulkOperationStats<A>, WithId<A> | number */>], BulkWriteResult>;
 
 export type BulkWriterOptions = BulkWriteOptions & {
     maxBatchSize: number;
@@ -243,30 +243,12 @@ export type BulkOpModelMap<T extends BSON.Document = BSON.Document> = {
 };
 export type BulkOpNames = keyof BulkOpModelMap;
 export type BulkOpModels<T extends BSON.Document> = ValueUnion<BulkOpModelMap<T>>;
-export type BulkOp<T extends BSON.Document,
-    O extends keyof BulkOpModelMap<T> = keyof BulkOpModelMap<T>,// = keyof BulkOpModelMap<T>,
+export type BulkOp<T extends BSON.Document, O extends keyof BulkOpModelMap<T> = keyof BulkOpModelMap<T>, > = { [K in O]: BulkOpModelMap<T>[O]; };
 
-    // > = { [K in O]: BulkOpModelMap<T>[O]; };
-    // M extends BulkOpModelMap<T>[keyof BulkOpModelMap<T>] = BulkOpModelMap<T>[O],
-> = {
-    [K in O]: BulkOpModelMap<T>[O];
+export type BulkWriteSinkResult<A extends Artefact = Artefact> = {
+    ops: AnyBulkWriteOperation<A>[];
+    result: mongo.BulkWriteResult;
 };
-// may/probably won't go with this style?
-// export const makeBulkOp = <
-//     A extends Artefact,
-//     O extends keyof BulkOpModelMap<A>,
-//     M extends BulkOpModels<A> = BulkOpModelMap<A>[O]
-// >(op: O) => class implements BulkOp<A, O, M>{
-//     public get op() { return (this.constructor as Function & { readonly op: O; }).op; }
-//     constructor(public readonly data: M) {};
-//     execute() { return }
-// };
-// export const BulkOpInsertOne = makeBulkOp("insertOne");
-// export const BulkOpUpdateOne = makeBulkOp("updateOne");
-// export const BulkOpUpdateMany = makeBulkOp("updateMany");
-// export const BulkOpDeleteOne = makeBulkOp("deleteOne");
-// export const BulkOpDeleteMany = makeBulkOp("deleteMany");
-// export const BulkOpReplaceOne = makeBulkOp("replaceOne");
 
 export interface Store<A extends Artefact = Artefact> {
     createIndexes(...createIndexes: CreateIndexArgs[]): Promise<string[]>;
@@ -276,10 +258,10 @@ export interface Store<A extends Artefact = Artefact> {
     findOneOrCreate(query: Filter<A>, createFn: () => A | Promise<A>, options?: FindOptions): Promise<A>;
     findOneAndUpdate(query: Filter<A>, update: UpdateFilter<A>, options?: FindOneAndUpdateOptions): Promise<A | null>;
     updateOne(query: Filter<A>, update: UpdateFilter<A>, options?: UpdateOptions): Promise<UpdateResult<A> | null>;
-    bulkWrite(operations: AsyncIterable<AnyBulkWriteOperation<A>>, options?: BulkWriteOptions & ProgressOption): AsyncGenerator<BulkWriteResult[]>;
+    bulkWrite(operations: AsyncIterable<AnyBulkWriteOperation<A>>, options?: BulkWriteOptions & ProgressOption): AsyncGenerator<BulkWriteSinkResult<A>>;
     bulkWriterSink(options?: BulkWriterOptions & ProgressOption): PipelineSink<AnyBulkWriteOperation<A>>;
     bulkWriterStore(options?: BulkWriterOptions & ProgressOption): BulkWriterStore<A>;
-    watch(pipeline?: Filter<A>/* Document[] */, options?: ChangeStreamOptions & ProgressOption): AsyncGenerator<ChangeStreamDocument<A>>;
+    watch(pipeline?: Filter<A>, options?: ChangeStreamOptions & ProgressOption): AsyncGenerator<ChangeStreamDocument<A>>;
     ops: BulkOpFnMap<A | Aspect, A>;
 };
 
@@ -288,7 +270,6 @@ export class MongoStore<A extends Artefact> implements Store<A> {
     public readonly name: string;
     public readonly collection: Collection<A>;
     public readonly options: MongoStoreOptions<A>;
-    // public readonly artefactCtor?: Constructor<A>;
 
     constructor(
         storage: MongoStorage,
@@ -364,7 +345,7 @@ export class MongoStore<A extends Artefact> implements Store<A> {
         return this.collection.updateOne(query!, updates, options);
     }
 
-    async* bulkWrite(opsOrSource: AsyncIterable<AnyBulkWriteOperation<A>>, options: Partial<BulkWriterOptions & ProgressOption> = {}): AsyncGenerator<BulkWriteResult> {
+    async* bulkWrite(opsOrSource: AsyncIterable<AnyBulkWriteOperation<A>>, options: Partial<BulkWriterOptions & ProgressOption> = {}): AsyncGenerator<BulkWriteSinkResult<A>> {
         const _options = BulkWriterOptions.mergeDefaults(options);
         if (Array.isArray(opsOrSource)) {
             return [await this.collection.bulkWrite(opsOrSource as AnyBulkWriteOperation<A>[], _options)];
@@ -376,23 +357,13 @@ export class MongoStore<A extends Artefact> implements Store<A> {
     bulkWriterSink(options: BulkWriterOptions & BulkWriteOptions & ProgressOption = BulkWriterOptions.default) {//: PipelineSink<AnyBulkWriteOperation<A>, BulkWriteResult, BulkWriteResult[]> {
         const _this = this;
         BulkWriterOptions.applyDefaults(options);
-        return (async function* bulkWrite(source: AsyncIterable<AnyBulkWriteOperation<A>>): AsyncGenerator<BulkWriteResult, BulkWriteResult[]> {
-            let result: BulkWriteResult[] = [];
+        return (async function* bulkWriteSink(source: AsyncIterable<AnyBulkWriteOperation<A>>): AsyncGenerator<BulkWriteSinkResult<A>> {
             for await (const ops of batch({ maxSize: options.maxBatchSize, timeoutMs: options.timeoutMs }, source)) {
-                /* cargo(
-                options.maxBatchSize,
-                options.timeoutMs, */
-                // isIterable(source) ? makeAsyncIterable(source) : source
-                // isAsyncGeneratorFunction(source) ? source() : source
-            /* )) { */
-            // const ops = [op]; // TODO: Rewrite cargo so it works (generally, ideally, or at leat just with this) - Write it as a separate generator stage?
-                log(`bulkWrite(): ops=${inspect(ops, { depth: 6, })}`);//(${ops.length})
-                const r = await _this.collection.bulkWrite(ops as AnyBulkWriteOperation<A>[], options);
-                result.push(r);
+                log(`bulkWrite(): ops[${ops.length}]=${inspect(ops, { depth: 6, })}`);
+                const result = await _this.collection.bulkWrite(ops as AnyBulkWriteOperation<A>[], options);
                 log(`bulkWrite(): result=${inspect(result, { depth: 4, })}`);
-                yield r;
+                yield ({ ops, result });
             }
-            return result;
         });
     };
 

@@ -1,19 +1,16 @@
 import yargs from "yargs";
-import { globalOptions } from "../cli";
 import { Task } from "../task";
+import { DbCommandArgv } from "./db";
 import { BulkWriterOptions, MongoStorage, Store } from "../db";
-import * as Audio from "../models/audio";
-import * as nodePath from "node:path";
-import { BulkWriteResult, MongoError } from "mongodb";
+import { MongoError } from "mongodb";
+import { AsyncGeneratorFunction, pipe } from "../pipeline";
 import { Artefact, isArtefact } from "../models/artefact";
-import * as FS from "../models/file-system";
-
 import { Aspect, AsyncFunction } from "../models";
-import { AsyncGeneratorFunction, chain, execute, genChain, makeAsyncGenerator, pipe } from "../pipeline";
+import * as FS from "../models/file-system";
+import * as Audio from "../models/audio";
 
 import debug from "debug";
-import { DbCommandArgv } from "./db";
-import { inspect } from "node:util";
+import * as nodePath from "node:path";
 const log = debug(nodePath.basename(module.filename));
 
 export interface FileCommandArgv {
@@ -152,70 +149,32 @@ export const description = 'File commands';
 export const builder = (yargs: yargs.Argv<DbCommandArgv & FileCommandArgv>) => yargs
     // .options(globalOptions)
     .command('index <paths...>', 'Index file', yargs => yargs
-
         .positional('paths', {
             type: "string",
             description: 'Path(s) to file(s) or shell glob expression(s) that will get expanded',
             array: true,
-            demandOption: true
+            demandOption: true,
         }),
-
         async (argv: DbCommandArgv & FileCommandArgv) => {
-
             const storage = new MongoStorage(argv.dbUrl);
-            const store = await storage.store<FileSystemArtefact>("fileSystemEntries"/* , FileSystemArtefact */, {
+            const store = await storage.store<FileSystemArtefact>("fileSystemEntries", {
                 createIndexes: [{
                     index: { "File.path": 1, "Directory.path": 1, "Unknown.path": 1, "Partition.uuid": 1, "Disk.model": 1, "Disk.serial": 1, },
                     options: { unique: true, },
                 }],
-            });//.bulkWriterStore();
-
+            });
 
             await Task.start(
 
                 async function enumerateBlockDevices(task: Task) {
-                    const bulkWriter = store.bulkWriterSink({ ...BulkWriterOptions.default, progress: task.progress });
 
                     await Task.repeat({ postDelay: 15000 }, async task => {
-                        // for await (const bulkWriteResult of 
-                        const r = await pipe(
-                            (await FS.Disk.getAll() as (FS.Disk | FS.Partition)[]).concat(await FS.Partition.getAll()),
-                            // console.log,
-                            store.ops.updateOne,
-                            bulkWriter,//store.bulkWrite
-                        ).execute();
-
-                                log(`r=${inspect(r)}`);
-                    // ) {
-                    //         log(`enumerateBlockDevices(): bulkWriteResult=${inspect(bulkWriteResult)}`);
-                    //     }
-                    })
-                        // async() => {           // 15s
-                        // Task.pipe<FS.Disk | FS.Partition>(
-                            // (await FS.Disk.getAll() as (FS.Disk | FS.Partition)[]).concat(await FS.Partition.getAll()) as (FS.Disk | FS.Partition)[],
-                            // store.ops.updateOne,
-                            // store.bulkWrite);
-                        // await bulkWriter(
-                        //     (async function* enumerateBlockDevicesSource() {
-                        //         const disks = await FS.Disk.getAll();
-                        //         const partitions = await FS.Partition.getAll();
-                        //         // ops.push(...
-                        //         yield* disks.map(d => store.ops.updateOne(d));
-                        //         // 
-                        //         //     filter: { $and: [ { "Disk.model": { $eq: d.model } }, { "Disk.serial": { $eq: d.serial } }, ], },
-                        //         //     update: { $set: { "Disk": d } },
-                        //         //     upsert: true,
-                        //         // } }));
-                        //         // ops.push(...
-                        //         // yield* partitions.map(p => ({ "updateOne": {
-                        //         //     filter: { "Partition.uuid": { $eq: p.uuid } },
-                        //         //     update: { $set: { "Partition": p } },
-                        //         //     upsert: true,
-                        //         // } }));
-                        //         yield* partitions.map(p => store.ops.updateOne(p))
-                        //     })()
-                        // );
-                    //});
+                        await pipe([
+                            ...(await FS.Disk.getAll() as (FS.Disk | FS.Partition)[]),
+                            ...(await FS.Partition.getAll()),
+                        ],  store.ops.updateOne,
+                            store.bulkWriterSink({ ...BulkWriterOptions.default, progress: task.progress }) );
+                    });
                 },
 
                 // async function indexFileSystem(task: Task) {

@@ -90,7 +90,7 @@ export type DeepProps<
     > : U;
 
 // Use for ...rest parameters on functions, this type better handles both 0, 1, or more arguments, while using any[] sometimes fails with one parameter
-export type AnyParameters<T = any> = /* [] |  */[T] | T[];
+export type AnyParameters<T = any> = [] | /* [T] | */ T[];
 export type NonEmptyArray<T = any> = [T] | T[];
 
 const getUnorderedParameters = <P1, P2>(
