@@ -17,5 +17,7 @@
     ],
     "exclude": [
         "node_modules/**/",
+        "da_isolated/**/",
+        ".vscode",
     ]
 }

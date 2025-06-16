@@ -7,3 +7,5 @@ var-log-mongod-mongod-log
 etc-mongod-key
 .directory
 TODO.json
+da-isolated
+.vscode
