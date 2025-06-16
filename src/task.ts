@@ -1,8 +1,7 @@
 import * as nodePath from "node:path";
-import { Progress } from "./progress";
 
 import { makeDefaultOptions } from "./models";
-import { PipelineSource, PipelineStage, PipelineSink, PipelineSourceFunction, genChain } from "./pipeline";
+import { Progress } from "./progress";
 
 import debug from "debug";
 const log = debug(nodePath.basename(module.filename));

@@ -1,6 +1,6 @@
 import * as nodePath from "node:path";
-import { get, ObjectWithProperties } from "./prop-path";
 import { inspect } from "node:util";
+import { get, ObjectWithProperties } from "./prop-path";
 import { AnyParameters, Function, isFunction, MaybeAsyncFunction, makeDefaultOptions } from "./models";
 import { Task } from "./task";
 
@@ -44,11 +44,8 @@ export const makeAsyncGeneratorFunction = <I = any, O = any>(stage: PipelineItem
     };
 
 export const makeAsyncGenerator = <I = any, R = any, N = any>(source: Iterable<I, R, undefined> | AsyncIterable<I, R, undefined>) => 
-    isAsyncIterable(source) ? (async function* (asyncIterable: AsyncIterable<I, R, undefined>) {
-        for await (const item of asyncIterable) {
-            yield item;
-        }
-    })(source) : (async function* (syncIterable: Iterable<I, R, undefined>) {
+    isAsyncIterable(source) ? source : (
+    async function* (syncIterable: Iterable<I, R, undefined>) {
         for (const item of syncIterable) {
             yield item;
         }
@@ -67,14 +64,6 @@ export function chain<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any
     stage4?: PipelineItemFunctionStage<T4, T5>
 ): PipelineItemFunctionStage<T0, T1 | T2 | T3 | T4 | T5> {
     return (source: T0, ...args: AnyParameters) => [stage0, stage1, stage2, stage3, stage4].reduce<any>(async (r, s, i, a) => s ? s(...[await r]) : /* await */ r, source);
-}
-
-export function gen<I = any, O = any>(fn: PipelineItemFunctionStage<I, O>) {
-    return async function* (source: AsyncIterable<I>) {
-        for await (const item of source) {
-            yield await fn(item);
-        }
-    };
 }
 
 export function genChain<T0 = any, T1 = any, R = void>(stage0: PipelineStage<T0, T1, R>): PipelineFunction<T0, T1, R>;
