@@ -130,8 +130,8 @@ const getUnorderedParameterAndOption = <P1, P2>(
 // could be a class ? but then would always have to new () when passing options :/
 export type OptionsDefaultContainer<T extends {}> = {
     default: T;
-    mergeDefaults: (this: OptionsDefaultContainer<T>, defaultOptions: Partial<T>) => T;
-    applyDefaults: (this: OptionsDefaultContainer<T>, options: Partial<T>) => void;
+    mergeDefaults: (/* this: OptionsDefaultContainer<T>, */ defaultOptions?: Partial<T>) => T;
+    applyDefaults: (/* this: OptionsDefaultContainer<T>, */ options: Partial<T>) => void;
 };
 export function mergeOptions<T extends {}>(this: /* defaultOptionsContainer: */ OptionsDefaultContainer<T>, options?: Partial<T>): T { return ({ ...this.default, ...options, }); }
 export function applyDefaultOptions<T extends {}>(this: OptionsDefaultContainer<T>, options: Partial<T>): void { for (const name in this) { if (!(name in options)) { options[name as keyof T] = this.default[name as keyof T]; } } }

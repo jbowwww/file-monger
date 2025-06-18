@@ -173,7 +173,7 @@ export const builder = (yargs: yargs.Argv<DbCommandArgv & FileCommandArgv>) => y
                             ...(await FS.Disk.getAll() as (FS.Disk | FS.Partition)[]),
                             ...(await FS.Partition.getAll()),
                         ],  store.ops.updateOne,
-                            store.bulkWriterSink({ ...BulkWriterOptions.default, progress: task.progress }) );
+                            store.bulkWriterSink({ ...BulkWriterOptions.default, progress: task.progress }) ).execute();
                     });
                 },
 

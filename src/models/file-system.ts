@@ -53,11 +53,12 @@ export abstract class BlockDevice extends UniqueAspect {
         this.device = blockDevice.device;
     }
 
-    static async getAll(): Promise</* (si.Systeminformation.BlockDevicesData) */AspectParameters<BlockDevice>[]> {
-        return cache({
+    static getAll = cache(//(): Promise</* (si.Systeminformation.BlockDevicesData) */AspectParameters<BlockDevice>[]> {
+        // return cache(
+        {
             expiryAgeMs: BlockDevice.ExpiryAgeMs,
-        }, () => si.blockDevices())();//.then(bds => bds.map(bd => new ) as Promise<BlockDevice[]>)();
-    }
+        }, () => si.blockDevices() as Promise<AspectParameters<BlockDevice>[]>);//.then(bds => bds.map(bd => new ) as Promise<BlockDevice[]>)();
+    // }
 }
 
 export type GetDiskForPathOptions = {
