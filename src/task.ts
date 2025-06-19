@@ -1,10 +1,11 @@
 import * as nodePath from "node:path";
 
-import { makeDefaultOptions } from "./models";
+import { AnyParameters, getFunctionName, makeDefaultOptions } from "./models";
 import { Progress } from "./progress";
 
 import debug from "debug";
-import { genChain, makeAsyncGenerator, PipelineFunction, PipelineSink, PipelineSource as PipelineInput, PipelineStage, Pipeline, pipe } from "./pipeline";
+import { genChain, makeAsyncGenerator, PipelineFunction, PipelineSink, PipelineSource as PipelineInput, PipelineStage, Pipeline, pipe, isAsyncGenerator } from "./pipeline";
+import { inspect } from "node:util";
 const log = debug(nodePath.basename(module.filename));
 
 export type TaskFn<TArgs extends any[] = [], TResult = void> = (task: Task<TArgs, TResult>, ...args: TArgs) => Promise<TResult>;
@@ -37,7 +38,7 @@ export const TaskRepeatOptions = makeDefaultOptions<TaskRepeatOptions>({
 // export type 
 export const TaskPipeOptions = makeDefaultOptions<{}>({});
 
-export class Task<TArgs extends any[] = [], TResult = void> {
+export class Task<TArgs extends AnyParameters = [], TResult = void> {
 
     static #taskAnonIdNum = 0;
 
@@ -63,7 +64,7 @@ export class Task<TArgs extends any[] = [], TResult = void> {
     constructor(taskFn: TaskFn<TArgs, TResult>, options?: TaskOptions) {
         this.taskFn = taskFn;
         this.options = TaskOptions.mergeDefaults(options);
-        this.name = taskFn.name ?? `Task #${++Task.#taskAnonIdNum}`;
+        this.name = getFunctionName(taskFn);
         this.progress = this.options.progress ?? new Progress(this.name);
         this.errors = this.options.errors ?? [];
         this.warnings = this.options.warnings ?? [];
@@ -73,13 +74,25 @@ export class Task<TArgs extends any[] = [], TResult = void> {
     catch(...args: Parameters<typeof Promise.prototype.catch>) { return this.#taskPr?.catch(...args); }
     finally(...args: Parameters<typeof Promise.prototype.finally>) { return this.#taskPr?.finally(...args); }
 
-    public start(...args: TArgs) {
+    public run(...args: TArgs) {
         this.progress?.reset();
-        this.#taskPr = this.taskFn(this, ...args).then(result => this.#result = result ?? {} as TResult);
+        log(`Task.run(): name=\"${this.name}\" this=${inspect(this)}`);
+        this.#taskPr = this.taskFn(this, ...args).then(async result => {
+            this.#result = result ?? {} as TResult;
+            log(`Task.run(): name=\"${this.name}\" result=${inspect(result)}`);
+            if (isAsyncGenerator(this.#result)) {
+                // is this OK to use for await / async fn inside of a .then?
+                for await (const item of this.#result[Symbol.asyncIterator]()) {    // does this create a new AsyncGenerator instance? does that mean I can return this.#result and that is still usable (not iterated)?
+                    log(`Task.run(): name=\"${this.name}\" item=${inspect(item)}`);
+                }
+            }
+            return this.#result;
+        });
+        log(`Task.run(): name=\"${this.name}\" this.#taskPr=${this.#taskPr} returning sync flow...`);
         return this;
     }
-    public static start(...taskFns: TaskFn<[], void>[]) {
-        return Promise.all(taskFns.map(taskFn => new Task(taskFn).start()));
+    public static run(...taskFns: TaskFn<[], void>[]) {
+        return Promise.all(taskFns.map(taskFn => new Task(taskFn).run()));
     }
 
     public static async delay(ms: number) {
@@ -87,21 +100,22 @@ export class Task<TArgs extends any[] = [], TResult = void> {
     }
 
     // TODO: Make task's TReturn optionanlly a { value: any, done: boolean, } type of deal to break out of loop?
-    public async repeat<TReturn extends any>(options: TaskOptions & TaskRepeatOptions, ...args: TArgs) {
+    public async repeat(options: TaskOptions & TaskRepeatOptions, ...args: TArgs) {
         options = { ...TaskOptions.default, ...TaskRepeatOptions.default, ...options };
+        let r: TResult;
         while (options.abort ? options.abort.signal.aborted : true) {
             if (options.preDelay && options.preDelay > 0) {
                 await Task.delay(options.preDelay);
             }
-            await this.start(...args);
+            r = await this.run(...args);
             if (options.postDelay && options.postDelay > 0) {
                 await Task.delay(options.postDelay);
             };
         }
         return this;
     }
-    public static async repeat<TArgs extends any[], TReturn extends any>(options: TaskOptions & TaskRepeatOptions, taskFn: TaskFn<TArgs, TReturn>, ...args: TArgs) {
-       return new Task(taskFn, options).repeat(options, ...args);
+    public static async repeat<TArgs extends any[], TResult extends any>(options: TaskOptions & TaskRepeatOptions, taskFn: TaskFn<TArgs, TResult>, ...args: TArgs) {
+       return new Task<TArgs, TResult>(taskFn, options).repeat(options, ...args);
     }
 
     pipe<T0 = any, T1 = any, R = void>(source: PipelineInput<T0>, stage0: PipelineStage<T0, T1, R>): Pipeline<T0, T1, R>;

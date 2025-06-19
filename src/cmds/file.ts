@@ -164,17 +164,16 @@ export const builder = (yargs: yargs.Argv<DbCommandArgv & FileCommandArgv>) => y
                 }],
             });
 
-            await Task.start(
+            await Task.run(
 
                 async function enumerateBlockDevices(task: Task) {
 
-                    await Task.repeat({ postDelay: 15000 }, async task => {
-                        await pipe([
+                    await Task.repeat({ postDelay: 15000 }, async task =>
+                        /* await */ task.pipe([
                             ...(await FS.Disk.getAll() as (FS.Disk | FS.Partition)[]),
                             ...(await FS.Partition.getAll()),
                         ],  store.ops.updateOne,
-                            store.bulkWriterSink({ ...BulkWriterOptions.default, progress: task.progress }) ).execute();
-                    });
+                            store.bulkWriterSink({ ...BulkWriterOptions.default, progress: task.progress }) ));
                 },
 
                 // async function indexFileSystem(task: Task) {
