@@ -1,4 +1,5 @@
 
+export type ProgressFunction = ({ total, count }: { total?: number; count?: number; }) => void;
 export class Progress {
     // Expected total
     total = 1;   // so nothing gets divided by 0
@@ -18,5 +19,11 @@ export class Progress {
         this.total = 1;
         this.count = 0;
     }
+    callback({ total, count }: { total?: number; count?: number; }) {
+        this.total = total ?? this.total;
+        this.count = count ?? this.count;
+    }
+    setTotal(source: Iterable<any> | Array<any>) { this.total = Array.from(source).length; return source; }
+    setCount(source: Iterable<any> | Array<any>) { this.count = Array.from(source).length; return source; }
     toString() { return `${this.prefix ? this.prefix + ": " : ""}Progress ${this.count} / ${this.total} : ${this.progress.toFixed(2)}%` }
 };
