@@ -2,7 +2,7 @@ import * as nodeFs from "node:fs";
 import * as nodePath from "node:path";
 import { inspect }  from "node:util";
 import * as nodeCrypto from "node:crypto";
-import { Aspect, AspectParameters, PartiallyRequired, UniqueAspect, UniqueAspectInstanceQueries, throttle as cache } from ".";
+import { AspectParameters, PartiallyRequired, UniqueAspect, throttle as cache } from ".";
 import { Progress } from "../progress";
 import si from "systeminformation";
 
@@ -53,12 +53,9 @@ export abstract class BlockDevice extends UniqueAspect {
         this.device = blockDevice.device;
     }
 
-    static getAll = cache(//(): Promise</* (si.Systeminformation.BlockDevicesData) */AspectParameters<BlockDevice>[]> {
-        // return cache(
-        {
-            expiryAgeMs: BlockDevice.ExpiryAgeMs,
-        }, () => si.blockDevices() as Promise<AspectParameters<BlockDevice>[]>);//.then(bds => bds.map(bd => new ) as Promise<BlockDevice[]>)();
-    // }
+    static getAll = cache({
+        expiryAgeMs: BlockDevice.ExpiryAgeMs,
+    }, () => si.blockDevices() as Promise<AspectParameters<BlockDevice>[]>);
 }
 
 export type GetDiskForPathOptions = {

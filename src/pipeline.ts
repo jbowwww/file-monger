@@ -1,7 +1,7 @@
 import * as nodePath from "node:path";
 import { inspect } from "node:util";
 import { get, ObjectWithProperties } from "./prop-path";
-import { AnyParameters, Function, isFunction, MaybeAsyncFunction, makeDefaultOptions } from "./models";
+import { AnyParameters, Function, isFunction, MaybeAsyncFunction, makeDefaultOptions, getFunctionName } from "./models";
 import { Task } from "./task";
 
 import debug from "debug";
@@ -103,13 +103,12 @@ export function genChain<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = 
                 }
             }).reduce((r, s, i, a) => {
                 const innerR = s ? /* await */ s(r) : /* await */ r;
-                log(`s=${inspect(s)} s.toString()=${s?.toString()}\ninnerR=${inspect(innerR)} innerR.toString()=${innerR?.toString()}`);
+                // log(`s=${inspect(s)} s.toString()=${s?.toString()}\ninnerR=${inspect(innerR)} innerR.toString()=${innerR?.toString()}`);
                 return innerR;
             }, makeAsyncGenerator(source)) as AsyncGenerator<T1 | T2 | T3 | T4 | T5, R>;
-        log(`r=${inspect(r)} r.toString()=${r.toString()}`);
+        // log(`r=${inspect(r)} r.toString()=${r.toString()}`);
         yield* r;
     };
-    log(`r=${inspect(r)} r.toString()=${r.toString()}`);
     return r as PipelineFunction<T0, T1 | T2 | T3 | T4 | T5, R>;
 }
 export const pipeline = genChain;
@@ -152,7 +151,13 @@ export async function execute<I = any, O = any, R = void, N = any>(pipeline: Pip
     } while (true);
 }
 
-export const tap = <I = any>(fn: (input: I) => Promise<void>) => async (input: I) => { await fn(input); };
+export const tap = <I = any>(fn: (input: I) => Promise<void>) =>
+    async function* (source: AsyncIterable<I>) {
+        for await (const item of source) {
+            await fn(item);
+            yield item;
+        }
+    };
 export const iff = <I = any, O = any>(condition: MaybeAsyncFunction<[I], boolean>, stage: PipelineItemFunctionStage<I, O>) => makeAsyncGeneratorFunction(
     async (input: I, ...args: AnyParameters) => (await condition(input) ? stage(input/* , ...args */) : input));
 export const exists = <I = any>(propertyPath: string) => (input: I) => !!get(input as ObjectWithProperties, propertyPath);
@@ -162,6 +167,7 @@ export const exists = <I = any>(propertyPath: string) => (input: I) => !!get(inp
 // export function onFinishIteration(input: AsyncIterable<any>, onFinish: () => void): AsyncIterable<any>;
 // export function onFinishIteration<T extends AsyncIterator<any> | AsyncIterable<any>>(input: T, onFinish: () => void): T {
 export function onFinishIteration<T>(input: AsyncIterable<T>, onFinish: () => void): AsyncIterable<T> {
+    log(`onFinishIteration(): input=${input} onFinish=${getFunctionName(onFinish)}`);
     return ({
         [Symbol.asyncIterator]() {
             const it = input[Symbol.asyncIterator]();
@@ -170,9 +176,10 @@ export function onFinishIteration<T>(input: AsyncIterable<T>, onFinish: () => vo
                 async next(...args: [] | [any]) {
                     const value = await it.next(...args);
                     if (value.done) {
+                        log(`onFinishIteration(): input=${input} onFinish=${getFunctionName(onFinish)}`);
                         process.nextTick(onFinish);
                     }
-                    return value;
+                    return value;   // should i be returning this if value.done ??
                 },
             });
         },
@@ -204,25 +211,28 @@ export async function* merge<I = any>(sources: AsyncIterable<I>[], secondarySour
     const numSources = sources.length;
     let numSettled = 0, itemCount = 0;
     const its = sources.concat(...secondarySources).map(s => s[Symbol.asyncIterator]());
-    let prs = its.filter(it => it).map((it, i) => it.next().then(value => onResolve(value, i)));//.catch(err => { throw err; }));
-    log(`merge(): numSources=${numSources} its=${inspect(its)}\nprs=${inspect(prs)}`);
-    function onResolve(value: IteratorResult<I, any>, i: number) {
-        log(`merge(): onResolve(): value=${inspect(value)} i=${i} numSettled=${numSettled}`);
+    let prs = its.filter(it => it).map((it, i) => it.next().then(item => onResolve(item, i)));//.catch(err => { throw err; }));
+    // log(`merge(): numSources=${numSources} its=${inspect(its)}\nprs=${inspect(prs)}`);
+    function onResolve(item: IteratorResult<I, any>, i: number) {
+        // log(`merge(): onResolve(): value=${inspect(value)} i=${i} numSettled=${numSettled}`);
         let newPr: Promise<IteratorResult<I, any>>;
-        if (value.done) {
+        if (item.done) {
             if (++numSettled === numSources) {
                 done = true;
             }
             newPr = new Promise((resolve, reject) => {});  // that input has finished, set it's next promise to one that never resolves
         } else {
-            newPr = its[i].next().then(value => onResolve(value, i));
+            newPr = its[i].next().then(item => onResolve(item, i));
         }
         prs = [...prs.slice(0, i), newPr, ...prs.slice(i+1, numSources)];
-        return value;
+        return item;
     }
     while (!done) {
         const item = await Promise.race(prs);
-        log(`merge(): yielding #${++itemCount} item.value=${inspect(item.value)}`);
+        // log(`merge(): yielding #${++itemCount} item.value=${inspect(item.value)}`);
+        if (item.done) {
+            return item.value;
+        }
         yield item.value;
     }
 }
@@ -255,18 +265,19 @@ export async function* batch<I = any>(optionsOrSource: BatchOptions | AsyncItera
     )) {
         if (isIntervalYieldResult(item)) {
             if (batch.length > 0) {
+                log(`batch(): Yielding by timeout (batch=${inspect(batch)}) ...`);
                 yield batch;
                 batch = [];
             }
         } else {
             batch.push(item);
             if (batch.length === options.maxSize) {
+                log(`batch(): Yielding by size (batch=${inspect(batch)}) ...`);
                 yield batch;
                 batch = [];
             }
         }
     }
-    log(`batch(): Returning (batch=${inspect(batch)}) ...`);
 }
 
 // export const cargo = async function* <I = any>(maxBatchSize: number, timeoutMs: number, source: AsyncGenerator<I>) {

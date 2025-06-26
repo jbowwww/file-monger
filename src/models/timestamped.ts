@@ -1,49 +1,29 @@
 import { isDate } from "util/types";
-import { AbstractConstructor, Aspect } from ".";
+import { AbstractConstructor, Aspect, KeyValuePair, mapObject } from ".";
 import { ChangeTrackingProxy } from "../change-tracking-proxy";
 
 
-export class Timestamps {
-    isTimestamps: true = true;
-    static is = (value: any): value is Timestamps => value && value.isTimestamps;
-    created!: Date;
-    checked?: Date;
-    updated?: Date;
-    deleted?: Date;
-    constructor(data?: Timestamps | Date) {
-        this.init(data);
-    }
-    init(data?: Timestamps | Date) {
-        if (Timestamps.is(data)) {
-            this.created = data.created;
-            this.checked = data.checked;
-            this.updated = data.updated;
-            this.deleted = data.deleted;
-        } else {
-            this.created = isDate(data) ? data : new Date();
-        }
-    }
-    markChecked(checked?: Date) {
-        this.checked = checked ?? new Date();
-    }
-    markUpdated(updated?: Date) {
-        this.updated = updated ?? new Date();
-    }
-    markDeleted(deleted?: Date) {
-        this.deleted = deleted ?? new Date();
-    }
-}
+export type TimestampsInitializer = {
+    [K: string]: true | Date | undefined;
+};
 
-export function WithTimestamp(newTypeName: string, aspectType: AbstractConstructor): AbstractConstructor;
-export function WithTimestamp(aspectType: AbstractConstructor): AbstractConstructor;
-export function WithTimestamp(aspectTypeOrNewName: AbstractConstructor | string, aspectTypeOptional?: AbstractConstructor): AbstractConstructor {
-    let aspectType: AbstractConstructor<Aspect> = aspectTypeOptional ?? aspectTypeOrNewName as AbstractConstructor;
+export type Timestamps<T extends Record<string, boolean | Date | undefined>> = {
+    [P in keyof T]: T[P] extends undefined | false ? Date | undefined : T[P] extends true ? Date : Date | undefined;
+};
+export const Timestamps = <T extends Record<string, boolean | Date | undefined>>(init?: T): Timestamps<T> =>
+    mapObject<T, Timestamps<T>>(init ?? {} as T, ([K, V]) =>
+        ([K, !K ? undefined : typeof V === "boolean" && V === true ? new Date() : isDate(V) ? V : undefined ]) as KeyValuePair<keyof T, Timestamps<T>[keyof T]>);
+
+export const CrudTimestamps = <T extends Record<string, boolean | Date | undefined>>(timestamps?: T) => Timestamps<T>(timestamps);
+
+export function WithTimestamp(newTypeName: string, aspectType: AbstractConstructor, date?: Date): AbstractConstructor;
+export function WithTimestamp(aspectType: AbstractConstructor, date?: Date): AbstractConstructor;
+export function WithTimestamp(aspectTypeOrNewName: AbstractConstructor | string, aspectTypeOrDate?: AbstractConstructor | Date, date?: Date): AbstractConstructor {
+    let aspectType: AbstractConstructor<Aspect> = aspectTypeOrDate && !isDate(aspectTypeOrDate) ? aspectTypeOrDate : aspectTypeOrNewName as AbstractConstructor;
     let newTypeName = typeof aspectTypeOrNewName === "string" ? aspectTypeOrNewName : "Timestamped" + aspectType.name;
+    date = isDate(aspectTypeOrDate) && !date ? aspectTypeOrDate : date;
     const newType = class extends aspectType {
-        _ts: Timestamps = new Timestamps();
-        markChecked = this._ts.markChecked.bind(this._ts);
-        markUpdated = this._ts.markUpdated.bind(this._ts);
-        markDeleted = this._ts.markDeleted.bind(this._ts);
+        _ts = CrudTimestamps();
         constructor(...args: ConstructorParameters<typeof aspectType>) {
             super(...args);
             const notify = (path: string, oldValue: any, newValue: any, isModified: boolean) => {

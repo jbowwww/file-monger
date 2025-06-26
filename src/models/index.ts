@@ -21,7 +21,7 @@ export type PartiallyRequired<T extends {}, R extends keyof T> = Required<Pick<T
 
 export type Function<A extends AnyParameters = any[], R extends any = any> = (...args: A) => R;
 export const isFunction = (fn: any): fn is Function => typeof fn === "function";
-export const getFunctionName = (fn: Function, fallbackName: string = "(anon)") => (fn.name?.trim() ?? "") !== "" ? fn.name : fallbackName;
+export const getFunctionName = (fn: Function, ...fallbackNames: string[]) => (fn.name?.trim() ?? "").length > 0 ? fn.name : fallbackNames.length > 0 ? fallbackNames.reduce((setName, nextName) => setName?.trim() === "" ? nextName : setName) : "(anon)";
 
 export type TypeGuard<T> = (value: any) => value is T;
 
@@ -42,7 +42,7 @@ export type NonFunctionProperties<T> = Pick<T, NonFunctionPropertyNames<T>>;
 
 export type KeyValuePair<K extends PropertyKey = PropertyKey, V = unknown> = [K: K, V: V];
 export type FilterFn<T extends {}> = (kv: KeyValuePair<keyof T, T[keyof T]>) => boolean;
-export type MapFn<T extends {}, TOut extends {}> = (kv: KeyValuePair<keyof T, T[keyof T]>/* , obj: {} */) => KeyValuePair<keyof TOut, TOut[keyof TOut]>;
+export type MapFn<T extends {}, TOut extends {} = T> = (kv: KeyValuePair<keyof T, T[keyof T]>/* , obj: {} */) => KeyValuePair<keyof TOut, TOut[keyof TOut]>;
 function _mapObject<T extends { [K: string]: any; }, TOut extends { [K: string]: any; }>(o: T, map: MapFn<T, TOut>): TOut;
 function _mapObject<T extends { [K: string]: any; }, TOut extends { [K: string]: any; }>(o: T, filter: FilterFn<T> | MapFn<T, TOut>, map?: MapFn<T, TOut>): TOut;
 function _mapObject<T extends { [K: string]: any; }, TOut extends { [K: string]: any; }>(o: T, filterOrMap: FilterFn<T> | MapFn<T, TOut>, map?: MapFn<T, TOut>): TOut {

@@ -259,8 +259,8 @@ export interface Store<A extends Artefact = Artefact> {
     findOneAndUpdate(query: Filter<A>, update: UpdateFilter<A>, options?: FindOneAndUpdateOptions): Promise<A | null>;
     updateOne(query: Filter<A>, update: UpdateFilter<A>, options?: UpdateOptions): Promise<UpdateResult<A> | null>;
     bulkWrite(operations: AsyncIterable<AnyBulkWriteOperation<A>>, options?: BulkWriteOptions & ProgressOption): AsyncGenerator<BulkWriteSinkResult<A>>;
-    bulkWriterSink(options?: BulkWriterOptions & ProgressOption): PipelineSink<AnyBulkWriteOperation<A>>;
-    bulkWriterStore(options?: BulkWriterOptions & ProgressOption): BulkWriterStore<A>;
+    bulkWriterSink(options?: Partial<BulkWriterOptions & ProgressOption>): PipelineSink<AnyBulkWriteOperation<A>>;
+    bulkWriterStore(options?: Partial<BulkWriterOptions & ProgressOption>): BulkWriterStore<A>;
     watch(pipeline?: Filter<A>, options?: ChangeStreamOptions & ProgressOption): AsyncGenerator<ChangeStreamDocument<A>>;
     ops: BulkOpFnMap<A | Aspect, A>;
 };
@@ -354,11 +354,11 @@ export class MongoStore<A extends Artefact> implements Store<A> {
         }
     }
 
-    bulkWriterSink(options: BulkWriterOptions & BulkWriteOptions & ProgressOption = BulkWriterOptions.default) {//: PipelineSink<AnyBulkWriteOperation<A>, BulkWriteResult, BulkWriteResult[]> {
+    bulkWriterSink(options?: Partial<BulkWriterOptions & ProgressOption>) {//: PipelineSink<AnyBulkWriteOperation<A>, BulkWriteResult, BulkWriteResult[]> {
         const _this = this;
-        BulkWriterOptions.applyDefaults(options);
+        const _options = BulkWriterOptions.mergeDefaults(options);
         return (async function* bulkWriteSink(source: AsyncIterable<AnyBulkWriteOperation<A>>): AsyncGenerator<BulkWriteSinkResult<A>> {
-            for await (const ops of batch({ maxSize: options.maxBatchSize, timeoutMs: options.timeoutMs }, source)) {
+            for await (const ops of batch({ maxSize: _options.maxBatchSize, timeoutMs: _options.timeoutMs }, source)) {
                 log(`bulkWrite(): ops[${ops.length}]=${inspect(ops, { depth: 6, })}`);
                 const result = await _this.collection.bulkWrite(ops as AnyBulkWriteOperation<A>[], options);
                 log(`bulkWrite(): result=${inspect(result, { depth: 4, })}`);
