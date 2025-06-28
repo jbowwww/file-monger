@@ -77,8 +77,8 @@ export class Task<TArgs extends TaskFnParams = [], TResult = any> {
     public get complete() { return this.progress.total > 0 && this.progress.count >= this.progress.total; }
     public get hasStarted() { return this.#taskPr !== null; }
     public get hasFinished() { return this.#result !== null; }
-    private set repeatCount(value: number) { this.#repeatCount = value; }
-    public get repeatCount() { return this.#repeatCount; }
+    private set runCount(value: number) { this.#repeatCount = value; }
+    public get runCount() { return this.#repeatCount; }
 
     public log<T = any>(fn: Function<any[], any>, msg: T): void;
     public log<T = any>(msg: T): void;
@@ -116,10 +116,11 @@ export class Task<TArgs extends TaskFnParams = [], TResult = any> {
     #run(...args: TArgs) {
         const start = new Date();
         this.progress?.reset();
+        this.runCount++;
         this.#taskPr = this.taskFn(this/* , ...args */)
             .then(async result => {
                 this.#result = result ?? {} as TResult;
-                this.log(this.#run, `result=${inspect(result)}`);
+                this.log(this.#run, `result=${inspect(result)} isAsyncGenerator=${isAsyncGenerator(this.#result)}`);
                 if (isAsyncGenerator(this.#result)) {
                     // is this OK to use for await / async fn inside of a .then?
                     for await (const item of this.#result[Symbol.asyncIterator]()) {    // does this create a new AsyncGenerator instance? does that mean I can return this.#result and that is still usable (not iterated)?
@@ -208,7 +209,6 @@ export class Task<TArgs extends TaskFnParams = [], TResult = any> {
     ): Promise<Pipeline<T0, T1 | T2 | T3 | T4 | T5, R>> {
         log(`Task.pipe(): source=${inspect(source)} stages=${inspect([stage0, stage1, stage2, stage3, stage4])}`);
         return Task.#pipe(source, stage0, stage1, stage2, stage3, stage4);
-        // return new Task(async() => await pipeline).#run;
     }
     public async pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, R = void>(
         source: PipelineInput<T0>,

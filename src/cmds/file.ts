@@ -55,33 +55,28 @@ export const builder = (yargs: yargs.Argv<DbCommandArgv & FileCommandArgv>) => y
 
             await Task.run(
 
-                async function enumerateBlockDevices(task: Task) {
-
-                    task.repeat({ postDelay: 15000 }, async task =>
-                        task.pipe(
+                function enumerateBlockDevices(task: Task) {
+                    return task.repeat({ postDelay: 15000 },
+                        async task => task.pipe(
                             task.progress.setTotal([
                                 ...(await FS.Disk.getAll() as (FS.Disk | FS.Partition)[]),
                                 ...(await FS.Partition.getAll())]),
                             store.ops.updateOne,
                             task.pipeLogger(log),
                             store.bulkWriterSink(),
-                            tap(async () => task.progress.increment()),
-                        )
-                    );
-
+                            tap(async () => task.progress.increment())));
                 },
 
                 function indexFileSystem(task: Task) {
                     let indexTaskId = 0;
-                    return task.run(...(Array.isArray(argv.paths) ? argv.paths : argv.paths.split(" ")).map((path, searchId) => ([
-                        `indexFileSystem #${indexTaskId}`, async (task: Task) => task.repeat({ postDelay: 180000/*0*/, },
-                        async (task: Task) =>
-                            task.pipe(
-                                FS.walk({ path, progress: task.progress }),     // 3/*0*/ minutes
-                                (_: FS.Entry) => store.ops.updateOne(_, { upsert: true, }),
+                    const paths = Array.isArray(argv.paths) ? argv.paths : argv.paths.split(" ");
+                    return task.run(...paths.map((path, searchId) =>
+                        async (task: Task) => task.repeat({ postDelay: 180000, },
+                            async (task: Task) => task.pipe(
+                                FS.walk({ path, progress: task.progress }),
+                                store.ops.updateOne,
                                 store.bulkWriterSink({ progress: task.progress }),
-                            )
-                        ), ] as [string, TaskFn<TaskFnParams, any>])));
+                            ))));
                 },
 
                 function hashFiles(task: Task) {

@@ -86,6 +86,7 @@ export function genChain<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = 
     stage3?: PipelineStage<T3, T4, R | void>,
     stage4?: PipelineStage<T4, T5, R | void>,
 ): PipelineFunction<T0, T1 | T2 | T3 | T4 | T5, R> {
+    // TODO: Someway to reduce the stages to an asyncgeneratorfunction and then return a fn(source) that calls that fn with source, returning asynciterable
     const r = async function* (source: PipelineInput<T0>) {
         let isLastStage = false;
         const r = [stage0, stage1, stage2, stage3, stage4]
@@ -95,18 +96,16 @@ export function genChain<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = 
                         throw new TypeError(`genChain(): A stage was defined after an undefined or a PipelineSink stage at index ${i} (stages = ${inspect(a)})`);
                     } else if (isAsyncGeneratorFunction(stage)) {
                         return stage;
-                    } else if (isFunction(stage)) { // PipelineSink stage
+                    } else if (isFunction(stage)) {
                         return makeAsyncGeneratorFunction<any, any>(stage);
                     }
                 } else {
                     isLastStage = true;
                 }
             }).reduce((r, s, i, a) => {
-                const innerR = s ? /* await */ s(r) : /* await */ r;
-                // log(`s=${inspect(s)} s.toString()=${s?.toString()}\ninnerR=${inspect(innerR)} innerR.toString()=${innerR?.toString()}`);
-                return innerR;
+                return s ? s(r) : r;
+
             }, makeAsyncGenerator(source)) as AsyncGenerator<T1 | T2 | T3 | T4 | T5, R>;
-        // log(`r=${inspect(r)} r.toString()=${r.toString()}`);
         yield* r;
     };
     return r as PipelineFunction<T0, T1 | T2 | T3 | T4 | T5, R>;
@@ -139,7 +138,6 @@ export function pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any,
 }
 
 export async function execute<I = any, O = any, R = void, N = any>(pipeline: Pipeline<I, O, R, N>, itemFunc?: (item: O) => N | Promise<N>): Promise<R> {
-    // const sourceGen = pipeline[Symbol.asyncIterator]();
     let n: N | undefined = void undefined;
     do {
         const { value, done } = await pipeline.next(...n ? [n] : []);
@@ -211,10 +209,8 @@ export async function* merge<I = any>(sources: AsyncIterable<I>[], secondarySour
     const numSources = sources.length;
     let numSettled = 0, itemCount = 0;
     const its = sources.concat(...secondarySources).map(s => s[Symbol.asyncIterator]());
-    let prs = its.filter(it => it).map((it, i) => it.next().then(item => onResolve(item, i)));//.catch(err => { throw err; }));
-    // log(`merge(): numSources=${numSources} its=${inspect(its)}\nprs=${inspect(prs)}`);
+    let prs = its.filter(it => it).map((it, i) => it.next().then(item => onResolve(item, i)));
     function onResolve(item: IteratorResult<I, any>, i: number) {
-        // log(`merge(): onResolve(): value=${inspect(value)} i=${i} numSettled=${numSettled}`);
         let newPr: Promise<IteratorResult<I, any>>;
         if (item.done) {
             if (++numSettled === numSources) {
@@ -229,7 +225,6 @@ export async function* merge<I = any>(sources: AsyncIterable<I>[], secondarySour
     }
     while (!done) {
         const item = await Promise.race(prs);
-        // log(`merge(): yielding #${++itemCount} item.value=${inspect(item.value)}`);
         if (item.done) {
             return item.value;
         }
@@ -246,7 +241,6 @@ export const BatchOptions = makeDefaultOptions<BatchOptions>({
     timeoutMs: 200,
 });
 
-// This seems to cause my pipe() approach to loop infinitely??? TODO: Fix
 export async function* batch<I = any>(optionsOrSource: BatchOptions | AsyncIterable<I>, sourceOrOptions?: AsyncIterable<I> | BatchOptions) {
     let batch: I[] = [];
     let options: BatchOptions;
@@ -279,30 +273,6 @@ export async function* batch<I = any>(optionsOrSource: BatchOptions | AsyncItera
         }
     }
 }
-
-// export const cargo = async function* <I = any>(maxBatchSize: number, timeoutMs: number, source: AsyncGenerator<I>) {
-//     let batch: I[] = [];
-//     let intervalGen = interval(timeoutMs);
-//     let intervalPr = intervalGen.next();
-//     let sourceGen = source;
-//     let inputPr = sourceGen.next();
-//     let r = { done: false };
-//     while (!r.done) {
-//         const r = await Promise.race([intervalPr, inputPr]);
-//         if (r.value === interval.YieldResult && batch.length > 0) {
-//             yield batch;
-//             batch = [];
-//             intervalPr = intervalGen.next();
-//         } else {
-//             if (batch.length === maxBatchSize) {
-//                 yield batch;
-//                 batch = [];
-//                 intervalPr = intervalGen.next();
-//             }
-//             batch.push(r.value);
-//         }
-//     }
-// };
 
 export type GeneratorStats<T> = {
     inCount: number;    // items from source
