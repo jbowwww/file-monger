@@ -13,6 +13,8 @@ export const hasPrototype = (prototype: object, value: Constructor<any>): boolea
     value && (value === prototype || (prototype && hasPrototype(prototype, value.prototype)));
 export const isObject = (o: any): o is Object => o !== null && typeof o === "object";
 export const isNonDateObject = (o: any): o is Object => typeof o === "object" && !isDate(o) && !(o instanceof Date);
+export const isFalseOrEmptyString = (v: string): boolean => v === undefined || v === null || v.trim() === "";
+export const isString = (v: any): v is string => typeof v === "string";
 
 export type AnyParameters<T = any> = [] | [T] | T[];  // Use for ...rest parameters on functions, this type better handles both 0, 1, or more arguments, while using any[] sometimes fails with one parameter
 export type NonEmptyArray<T = any> = [T] | T[];
@@ -215,7 +217,7 @@ export function isAspect<A extends Aspect>(this: AspectType<A> | string | undefi
 
 export abstract class Aspect {
     isAspect: true = true;
-    get _T() { return this.constructor.name; }
+    readonly _T = this.constructor.name;
     constructor(...args: AnyParameters) { }
     getUpdates<A extends Aspect>(previous?: A) {
 
