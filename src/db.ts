@@ -2,12 +2,10 @@ import * as nodePath from "node:path";
 import mongo, { AnyBulkWriteOperation, BulkWriteOptions, ChangeStreamOptions, ChangeStreamDocument, ChangeStreamInsertDocument, ChangeStreamUpdateDocument, Collection, CollectionOptions, CountOptions, Db, Filter, FindOneAndUpdateOptions, FindOptions, MongoClient, UpdateFilter, UpdateOptions, UpdateResult, IndexSpecification, CreateIndexesOptions, Condition, InsertOneModel, DeleteManyModel, DeleteOneModel, ReplaceOneModel, UpdateManyModel, UpdateOneModel, BSON, DeleteOptions, ReplaceOptions, InsertOneOptions, OptionalId, WithoutId } from "mongodb";
 import { Artefact, ArtefactQueryFn, hasId, isArtefact } from "./models/artefact";
 import { Aspect, DeepProps, Choose, Constructor, isConstructor, ValueUnion, makeDefaultOptions, isNonDateObject, ProgressOption } from "./models/";
-import { PipelineGeneratorStage, PipelineSink, batch, isIterable, makeAsyncGenerator } from "./pipeline";
-import { Progress } from "./progress";
+import { PipelineGeneratorStage, PipelineSink, batch } from "./pipeline";
 
 import { inspect } from "node:util";
 import debug from "debug";
-import { PipelineSource } from "node:stream";
 const log = debug(nodePath.basename(module.filename));
 
 export interface Storage {

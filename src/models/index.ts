@@ -9,12 +9,14 @@ import { Progress } from "../progress";
 import debug from "debug";
 const log = debug(nodePath.basename(module.filename));
 
+export const isBoolean = (v: any): v is boolean => typeof v === "boolean";
+export const isNumber = (v: any): v is number => typeof v === "number";
+export const isString = (v: any): v is string => typeof v === "string";
+export const isFalseOrEmptyString = (v: string): boolean => v === undefined || v === null || v.trim() === "";
 export const hasPrototype = (prototype: object, value: Constructor<any>): boolean =>
     value && (value === prototype || (prototype && hasPrototype(prototype, value.prototype)));
 export const isObject = (o: any): o is Object => o !== null && typeof o === "object";
 export const isNonDateObject = (o: any): o is Object => typeof o === "object" && !isDate(o) && !(o instanceof Date);
-export const isFalseOrEmptyString = (v: string): boolean => v === undefined || v === null || v.trim() === "";
-export const isString = (v: any): v is string => typeof v === "string";
 
 export type AnyParameters<T = any> = [] | [T] | T[];  // Use for ...rest parameters on functions, this type better handles both 0, 1, or more arguments, while using any[] sometimes fails with one parameter
 export type NonEmptyArray<T = any> = [T] | T[];
@@ -22,8 +24,21 @@ export type Optional<T extends {}, K extends keyof T> = Omit<T, K> & { [P in K]?
 export type PartiallyRequired<T extends {}, R extends keyof T> = Required<Pick<T, R>> & Partial<Omit<T, R>>;
 
 export type Function<A extends AnyParameters = any[], R extends any = any> = (...args: A) => R;
+
 export const isFunction = (fn: any): fn is Function => typeof fn === "function";
+export const isPlainFunction = (fn: any): fn is Function => isFunction(fn) && !isAsyncGeneratorFunction(fn);
 export const getFunctionName = (fn: Function, ...fallbackNames: string[]) => (fn.name?.trim() ?? "").length > 0 ? fn.name : fallbackNames.length > 0 ? fallbackNames.reduce((setName, nextName) => setName?.trim() === "" ? nextName : setName) : "(anon)";
+
+export type AsyncGeneratorFunction<I = any, O = any, R = any, N = any, L extends number = 0 | 1> =
+    (...args:
+        L extends 1 ? [AsyncIterable<I>/* , ...extra: AnyParameters */] :
+        L extends 0 ? [/* ...extra: AnyParameters */] : [AsyncIterable<I>/* , ...extra: AnyParameters */]) => AsyncGenerator<O, R, N>;
+
+export const isIterable = <T extends any = any, R = any, N = any>(value: any): value is Iterable<T, R, N> => value && Symbol.iterator in value && typeof value[Symbol.iterator] === "function";
+export const isAsyncIterable = <T extends any = any, R = any, N = any>(value: any): value is AsyncIterable<T, R, N> => value && Symbol.asyncIterator in value && typeof value[Symbol.asyncIterator] === "function";
+export const isAsyncGenerator = <T = unknown, R = any, N = any>(value: any): value is AsyncGenerator<T, R, N> => value && isAsyncIterable(value) && "next" in value && typeof value.next === "function";
+export const isAsyncGeneratorFunction = <I = any, O = any, R = any, N = any, L extends 0 | 1 = 0 | 1>(value: any, argumentsLength?: L): value is AsyncGeneratorFunction<I, O, R, N, L> =>
+        value && typeof value === "function" && isAsyncGenerator<O, R, N>(value.prototype) && (!argumentsLength || value.length === argumentsLength);
 
 export type TypeGuard<T> = (value: any) => value is T;
 
