@@ -1,16 +1,16 @@
 import yargs from "yargs";
-import { Task, TaskFn, TaskFnParams } from "../task";
+import { Task } from "../task";
 import { DbCommandArgv } from "./db";
 import { BulkWriterOptions, MongoStorage, Store } from "../db";
 import { MongoError } from "mongodb";
-import { AsyncGeneratorFunction, tap } from "../pipeline";
+import { tap } from "../pipeline";
 import { Artefact, isArtefact } from "../models/artefact";
-import { Aspect, AsyncFunction } from "../models";
 import * as FS from "../models/file-system";
 import * as Audio from "../models/audio";
 
 import debug from "debug";
 import * as nodePath from "node:path";
+import { Progress } from "../progress";
 const log = debug(nodePath.basename(module.filename));
 
 export interface FileCommandArgv {
@@ -53,28 +53,30 @@ export const builder = (yargs: yargs.Argv<DbCommandArgv & FileCommandArgv>) => y
             //     indexFileSystem
             // };
 
-            await Task.run(
+            await Task.runAll(
 
                 function enumerateBlockDevices(task: Task) {
                     return task.repeat({ postDelay: 15000 },
                         async task => task.pipe(
-                            task.progress.setTotal([
+                            task.progress.setTotalFromSource([
                                 ...(await FS.Disk.getAll() as (FS.Disk | FS.Partition)[]),
-                                ...(await FS.Partition.getAll())]),
+                                ...(await FS.Partition.getAll())
+                            ], _ => _.length),
                             store.ops.updateOne,
                             task.pipeLogger(log),
                             store.bulkWriterSink(),
-                            tap(async () => task.progress.increment())));
+                            () => task.progress.incrementCount()));
                 },
 
                 function indexFileSystem(task: Task) {
                     let indexTaskId = 0;
                     const paths = Array.isArray(argv.paths) ? argv.paths : argv.paths.split(" ");
-                    return task.run(...paths.map((path, searchId) =>
+                    return task.runAll(...paths.map((path, searchId) =>
                         async (task: Task) => task.repeat({ postDelay: 180000, },
                             async (task: Task) => task.pipe(
-                                FS.walk({ path, progress: task.progress }),
+                                FS.walk({ path, progress: task.progress.connect.readWriteTotal }),
                                 store.ops.updateOne,
+                                task.progress.pipeCounter,
                                 store.bulkWriterSink({ progress: task.progress }),
                             ))));
                 },
@@ -84,10 +86,11 @@ export const builder = (yargs: yargs.Argv<DbCommandArgv & FileCommandArgv>) => y
                         store.find({ $and: [
                             { File: { _T: "File", } },
                             { $or: [ { Hash: { $exists: false } }, { $expr: { $lt: [ "$Hash._ts", "$File.stats.mtime", ] } } ]}, ],
-                        }, { progress: task.progress }),
-                        async (_: FileSystemArtefact) => await FS.Hash.create(_.File.path),
+                        }, { progress: task.progress.connect.readWriteTotal }),
+                        (_: FileSystemArtefact) => FS.Hash.create(_.File.path),
                         store.ops.updateOne,
-                        store.bulkWriterSink({ ...BulkWriterOptions.default, progress: task.progress })));     // 3 seconds
+                        task.progress.pipeCounter,
+                        store.bulkWriterSink()));     // 3 seconds
                 },
 
                 function analyzeAudioFiles(task: Task) {
@@ -96,9 +99,10 @@ export const builder = (yargs: yargs.Argv<DbCommandArgv & FileCommandArgv>) => y
                             { File: { $exists: true } },
                             { $or: Audio.fileExtensions.map(ext => ({ "File.path": { $regex: "\^.*\\." + ext + "$", $options: "i" } })) },
                             { $or: [ { Audio: { $exists: false } }, { "Audio._ts": { $lt: "$File.stats.mtime" } }, ]}, ],
-                        }, { progress: task.progress }),
+                        }, { progress: task.progress.connect.readWriteTotal }),
                         async (_: FileSystemArtefact) => await Audio.Audio.create(_.File!.path),
                         store.ops.updateOne,
+                        task.progress.pipeCounter,
                         store.bulkWriterSink({ ...BulkWriterOptions.default, progress: task.progress })));
                 }            
             );

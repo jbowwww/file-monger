@@ -2,31 +2,32 @@ import * as nodePath from "node:path";
 import { inspect } from "node:util";
 import { isAsyncFunction } from "node:util/types";
 
-import { Function, getFunctionName, isFunction, makeDefaultOptions } from "./models";
+import { AnyParameters, Function, getFunctionName, isAsyncGenerator, isFunction, makeDefaultOptions } from "./models";
 import { Progress } from "./progress";
-import { makeAsyncGenerator, PipelineSource as PipelineInput, PipelineStage, Pipeline, pipe, isAsyncGenerator, tap } from "./pipeline";
-import { Timestamps } from "./models/timestamped";
+import { PipelineInput, PipelineStage, Pipeline, pipe, tap } from "./pipeline";
 
 import debug from "debug";
 const log = debug(nodePath.basename(module.filename));
 
+export type TaskType = "run" | "repeat" | "pipe";
 export type TaskFn<TArgs extends TaskFnParams = [], TResult = void> = (task: Task<TArgs>/* , ...args: TArgs */) => Promise<TResult>;
-export type TaskFnParams = [] | [Task, ...any[]];
+export type TaskFnParams = AnyParameters;// [] | [Task, ...any[]];
 
 export type TaskError = Error | string | unknown;
 export type TaskWarning = Error | string | unknown;
 
-export type TaskOptions = Partial<{
-    parentTask: Task<any, any>;
+export type TaskOptions<TArgs extends TaskFnParams = [], TResult = any> = Partial<{
+    type: TaskType;    // corresponds to executions via one of these named functions in Task<>. May want separate discriminated types with specific fields eventually e.g. fn source, pipe stages source
     name?: string;
+    parentTask: Task<any, any>;
     progress: Progress;
-    history: TaskRunResult<any>[];
+    history: Task<TArgs, TResult>[];
     errors: Array<TaskError>;
     warnings: Array<TaskWarning>;
 }>;
-export const TaskOptions = makeDefaultOptions<TaskOptions>({
-    parentTask: undefined,
+export const TaskOptions = makeDefaultOptions<TaskOptions<TaskFnParams, any>>({
     name: undefined,
+    parentTask: undefined,
     progress: new Progress(),
     history: [],
     errors: [],
@@ -44,13 +45,25 @@ export const TaskRepeatOptions = makeDefaultOptions<TaskRepeatOptions>({
     abort: undefined,
 });
 
-export type TaskRunResult<T> = {
-    value?: T;
-} & Timestamps<{ start: false; finish: false; }>;
-
 export const TaskPipeOptions = makeDefaultOptions<{}>({});
 
 export type LogFunction<T = any> = (msg: T) => any;
+
+export class TaskExecution<TArgs extends TaskFnParams = [], TResult = any> {
+    constructor(
+        public readonly name: string,
+        public readonly type: "run" | "repeat" | "pipe",    // corresponds to executions via one of these named functions in Task<>. May want separate discriminated types with specific fields eventually e.g. fn source, pipe stages source
+        public readonly args: TArgs,
+        public readonly progress: Progress,
+        public readonly result: TResult | undefined,
+        public readonly errors: Array<TaskError>,
+        public readonly warnings: Array<TaskWarning>,
+        public readonly duration: number,
+        public readonly createTime: Date,
+        public readonly startTime?: Date,
+        public readonly finishTime?: Date | undefined,
+    ) {}
+}
 
 export class Task<TArgs extends TaskFnParams = [], TResult = any> {
 
@@ -58,28 +71,35 @@ export class Task<TArgs extends TaskFnParams = [], TResult = any> {
 
     #taskPr: Promise<TResult> | null = null;
     #result: TResult | null = null;
-    #repeatCount: number = 0;
 
     public readonly taskFn: TaskFn<TArgs, TResult>;
-    public readonly options: TaskOptions;
-    public readonly parentTask?: Task<any, any>;
+    // public readonly options: TaskOptions;
+    public readonly type?: TaskType; // undefined until run() repeat() or pipe() are called
     public readonly name: string;
+    public readonly parentTask?: Task<any, any>;
     public get nameOrParentName(): string { return this.name ?? (this.parentTask ? this.parentTask.nameOrParentName : this.name); }
     public get id(): string { return (this.parentTask ? this.parentTask.id + "." : "") + this.name; }
+    public readonly createdTime: Date;
+    #startedTime?: Date;
+    public get startedTime() { return this.#startedTime; }
+    public set startedTime(value: Date | undefined) { this.#startedTime = value; }
+    #finishTime?: Date;
+    public get finishTime() { return this.#finishTime; }
+    public set finishTime(value: Date | undefined) { this.#finishTime = value; }
     public readonly progress: Progress;
-    public readonly created: Date;
-    public readonly history: TaskRunResult<TResult>[];
     public readonly errors: Array<TaskError>;
     public readonly warnings: Array<TaskWarning>;
+    public readonly history: Task<TArgs, TResult>[];// TaskExecution[] = [];
 
     public get hasResult() { return this.#taskPr !== null && this.#result !== null; }
     public get result() { return this.#taskPr; }
-    public get complete() { return this.progress.total > 0 && this.progress.count >= this.progress.total; }
+    public get isComplete() { return this.progress.total && this.progress.count && this.progress.total > 0 ? this.progress.count >= this.progress.total : false; }
     public get hasStarted() { return this.#taskPr !== null; }
     public get hasFinished() { return this.#result !== null; }
-    private set runCount(value: number) { this.#repeatCount = value; }
-    public get runCount() { return this.#repeatCount; }
-
+    public get runCount() { return this.history.filter(t => t.type === "run").length; }
+    public get repeatCount() { return this.history.filter(t => t.type === "repeat").length; }
+    public get pipeCount() { return this.history.filter(t => t.type === "pipe").length; }
+    
     public log<T = any>(fn: Function<any[], any>, msg: T): void;
     public log<T = any>(msg: T): void;
     public log<T = any>(fnOrMsg: Function<any[], any> | T, msg?: T): void {
@@ -89,37 +109,48 @@ export class Task<TArgs extends TaskFnParams = [], TResult = any> {
         return tap(async (msg: any) => logger(`Task(id=\"${this.nameOrParentName}\").pipe: ${inspect(msg)}`));
     }
     
-    constructor(taskFn: TaskFn<TArgs, TResult> | [string, TaskFn<TArgs, TResult>], options?: TaskOptions) {
-        this.options = TaskOptions.mergeDefaults(options);
+    constructor(taskFn: TaskFn<TArgs, TResult> | [string, TaskFn<TArgs, TResult>], options?: TaskOptions<TArgs, TResult>) {
+        options = TaskOptions.mergeDefaults(options);
         if (Array.isArray(taskFn)) {
             if (taskFn.length !== 2) {
                 throw new Error(`new Task(): taskFn can be an array but must have length 2 and consist of [string, taskFn]: taskFn=${inspect(taskFn)}`);
             }
-            this.taskFn = Object.defineProperty(taskFn[1], "name", { value: this.options.name ?? taskFn[0] });
+            this.taskFn = Object.defineProperty(taskFn[1], "name", { value: options.name ?? taskFn[0] });
         } else {
             this.taskFn = taskFn;
         }
-        this.parentTask = this.options.parentTask;
+        this.parentTask = options.parentTask;
+        if (this.parentTask) {
+            this.progress = this.parentTask?.progress;
+        }
         this.name = getFunctionName(this.taskFn, this.nameOrParentName + `#${++this.#taskAnonIdNum}`, "(anon)");
-        log(`new Task(taskFn.name=\"${this.taskFn.name}\" options=${inspect(options)} this.options=${inspect(this.options)})`);
-        this.progress = this.options.progress ?? new Progress(this.name);
-        this.history = this.options.history ?? [];
-        this.errors = this.options.errors ?? [];
-        this.warnings = this.options.warnings ?? [];
-        this.created = new Date();
+        log(`new Task(taskFn.name=\"${this.taskFn.name}\" options=${inspect(options)})`);
+        this.progress = options.progress ?? new Progress(this.name);
+        this.history = options.history ?? [];
+        this.errors = options.errors ?? [];
+        this.warnings = options.warnings ?? [];
+        this.createdTime = new Date();
     }
 
     then(...args: Parameters<typeof Promise.prototype.then>) { return this.#taskPr?.then(...args); }
     catch(...args: Parameters<typeof Promise.prototype.catch>) { return this.#taskPr?.catch(...args); }
     finally(...args: Parameters<typeof Promise.prototype.finally>) { return this.#taskPr?.finally(...args); }
 
-    #run(...args: TArgs) {
-        const start = new Date();
+    #startExecution() {
+        this.startedTime = new Date();
         this.progress?.reset();
-        this.runCount++;
+        this.history.push({ ...this });
+    }
+    #finishExecution() {
+        this.finishTime = new Date();   // should be the same referenced value in this.history too ?
+    }
+
+    #run(...args: TArgs) {
+        this.#startExecution();
         this.#taskPr = this.taskFn(this/* , ...args */)
             .then(async result => {
                 this.#result = result ?? {} as TResult;
+                this.#finishExecution();
                 this.log(this.#run, `result=${inspect(result)} isAsyncGenerator=${isAsyncGenerator(this.#result)}`);
                 if (isAsyncGenerator(this.#result)) {
                     // is this OK to use for await / async fn inside of a .then?
@@ -127,13 +158,12 @@ export class Task<TArgs extends TaskFnParams = [], TResult = any> {
                         this.log(this.#run, `item=${inspect(item)}`);
                     }
                 }
-                this.history.push({ value: result, start, finish: new Date(), });
                 return this.#result;
             });
         this.log(this.#run, `this.#taskPr=${this.#taskPr} returning sync flow...`);
         return this;
     }
-    public run(...taskFns: (TaskFn<TaskFnParams, any> | [string, TaskFn<TaskFnParams, any>])[]) {
+    public runAll(...taskFns: (TaskFn<[], any> | [string, TaskFn<[], any>])[]) {
         return Promise.all(taskFns.map(taskFn => {
             let _taskFn: TaskFn<[], void>;
             if (Array.isArray(taskFn)) {
@@ -144,10 +174,10 @@ export class Task<TArgs extends TaskFnParams = [], TResult = any> {
             } else {
                 _taskFn = taskFn;
             }
-            return new Task(taskFn, { ...this.options, parentTask: this }).#run();
+            return new Task(_taskFn, { ...this as TaskOptions, parentTask: this }).#run();
         }));
     }
-    public static run(...taskFns: (TaskFn<TaskFnParams, any> | [string, TaskFn<TaskFnParams, any>])[]) {
+    public static runAll(...taskFns: (TaskFn<[], any> | [string, TaskFn<[], any>])[]) {
         return Promise.all(taskFns.map(taskFn => new Task(taskFn).#run()));
     }
 
@@ -161,8 +191,8 @@ export class Task<TArgs extends TaskFnParams = [], TResult = any> {
     }
 
     // TODO: Make task's TReturn optionanlly a { value: any, done: boolean, } type of deal to break out of loop?
-    async #repeat(options: TaskOptions & TaskRepeatOptions, ...args: TArgs) {
-        options = { ...TaskOptions.default, ...TaskRepeatOptions.default, ...options };
+    async #repeat(options: TaskOptions<TArgs, TResult> & TaskRepeatOptions, ...args: TArgs) {
+        TaskRepeatOptions.applyDefaults(options);
         log(this.#repeat, `options=${inspect(options)} args=${inspect(args)}`);
         let result: TResult;
         while (options.abort ? options.abort.signal.aborted : true) {
@@ -176,29 +206,35 @@ export class Task<TArgs extends TaskFnParams = [], TResult = any> {
         }
         return this;
     }
-    public async repeat<TArgs extends TaskFnParams, TResult extends any>(options: TaskOptions & TaskRepeatOptions, taskFn: TaskFn<TArgs, TResult>, ...args: TArgs) {
+    public async repeat<TArgs extends TaskFnParams, TResult extends any>(options: TaskOptions<TArgs, TResult> & TaskRepeatOptions, taskFn: TaskFn<TArgs, TResult>, ...args: TArgs) {
         return new Task<TArgs, TResult>(taskFn, { ...options, parentTask: this, }).#repeat(options, ...args);
     }
 
-    public static async repeat<TArgs extends TaskFnParams, TResult extends any>(options: TaskOptions & TaskRepeatOptions, taskFn: TaskFn<TArgs, TResult>, ...args: TArgs) {
+    public static async repeat<TArgs extends TaskFnParams, TResult extends any>(options: TaskOptions<TArgs, TResult> & TaskRepeatOptions, taskFn: TaskFn<TArgs, TResult>, ...args: TArgs) {
        return new Task<TArgs, TResult>(taskFn, options).#repeat(options, ...args);
     }
 
-    static async #pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, R = void>(
+    async #pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, T6 = any, T7 = any, T8 = any, R = void>(
         source: PipelineInput<T0>,
         stage0: PipelineStage<T0, T1, any>,
         stage1?: PipelineStage<T1, T2, any>,
         stage2?: PipelineStage<T2, T3, any>,
         stage3?: PipelineStage<T3, T4, any>,
         stage4?: PipelineStage<T4, T5, any>,
-    ): Promise<Pipeline<T0, T1 | T2 | T3 | T4 | T5, R>> {
-        return pipe(makeAsyncGenerator(source), stage0, stage1!, stage2!, stage3!, stage4!);
+        stage5?: PipelineStage<T5, T6, any>,
+        stage6?: PipelineStage<T6, T7, any>,
+        stage7?: PipelineStage<T7, T8, any>,
+    ): Promise<Pipeline<T0, T1 | T2 | T3 | T4 | T5 | T6 | T7 | T8, R>> {
+        this.#startExecution();
+        const result = pipe(source, stage0, stage1, stage2, stage3, stage4, stage5, stage6, stage7);
+        this.#finishExecution();
+        return result;
     }
-    static async pipe<T0 = any, T1 = any, R = void>(source: PipelineInput<T0>, stage0: PipelineStage<T0, T1, R>): Promise<Pipeline<T0, T1, R>>;
-    static async pipe<T0 = any, T1 = any, T2 = any, R = void>(source: PipelineInput<T0>, stage0: PipelineStage<T0, T1>, stage1: PipelineStage<T1, T2, R>): Promise<Pipeline<T0, T2, R>>;
-    static async pipe<T0 = any, T1 = any, T2 = any, T3 = any, R = void>(source: PipelineInput<T0>, stage0: PipelineStage<T0, T1>, stage1: PipelineStage<T1, T2>, stage2: PipelineStage<T2, T3, R>): Promise<Pipeline<T0, T3, R>>;
-    static async pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, R = void>(source: PipelineInput<T0>, stage0: PipelineStage<T0, T1>, stage1: PipelineStage<T1, T2>, stage2: PipelineStage<T2, T3>, stage3: PipelineStage<T3, T4, R>): Promise<Pipeline<T0, T4, R>>;
-    static async pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, R = void>(source: PipelineInput<T0>, stage0: PipelineStage<T0, T1>, stage1?: PipelineStage<T1, T2>, stage2?: PipelineStage<T2, T3>, stage3?: PipelineStage<T3, T4>, stage4?: PipelineStage<T4, T5, R>): Promise<Pipeline<T0, T5, R>>;
+    public static async pipe<T0 = any, T1 = any, R = void>(source: PipelineInput<T0>, stage0: PipelineStage<T0, T1, R>): Promise<Pipeline<T0, T1, R>>;
+    public static async pipe<T0 = any, T1 = any, T2 = any, R = void>(source: PipelineInput<T0>, stage0: PipelineStage<T0, T1>, stage1: PipelineStage<T1, T2, R>): Promise<Pipeline<T0, T2, R>>;
+    public static async pipe<T0 = any, T1 = any, T2 = any, T3 = any, R = void>(source: PipelineInput<T0>, stage0: PipelineStage<T0, T1>, stage1: PipelineStage<T1, T2>, stage2: PipelineStage<T2, T3, R>): Promise<Pipeline<T0, T3, R>>;
+    public static async pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, R = void>(source: PipelineInput<T0>, stage0: PipelineStage<T0, T1>, stage1: PipelineStage<T1, T2>, stage2: PipelineStage<T2, T3>, stage3: PipelineStage<T3, T4, R>): Promise<Pipeline<T0, T4, R>>;
+    public static async pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, R = void>(source: PipelineInput<T0>, stage0: PipelineStage<T0, T1>, stage1?: PipelineStage<T1, T2>, stage2?: PipelineStage<T2, T3>, stage3?: PipelineStage<T3, T4>, stage4?: PipelineStage<T4, T5, R>): Promise<Pipeline<T0, T5, R>>;
     public static async pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, R = void>(
         source: PipelineInput<T0>,
         stage0: PipelineStage<T0, T1, any>,
@@ -208,8 +244,13 @@ export class Task<TArgs extends TaskFnParams = [], TResult = any> {
         stage4?: PipelineStage<T4, T5, any>,
     ): Promise<Pipeline<T0, T1 | T2 | T3 | T4 | T5, R>> {
         log(`Task.pipe(): source=${inspect(source)} stages=${inspect([stage0, stage1, stage2, stage3, stage4])}`);
-        return Task.#pipe(source, stage0, stage1, stage2, stage3, stage4);
+        return new Task(async () => {}).#pipe(source, stage0, stage1, stage2, stage3, stage4);
     }
+    public async pipe<T0 = any, T1 = any, R = void>(source: PipelineInput<T0>/*  | PipelineCountedInput<T0> */, stage0: PipelineStage<T0, T1, R>): Promise<Pipeline<T0, T1, R>>;
+    public async pipe<T0 = any, T1 = any, T2 = any, R = void>(source: PipelineInput<T0>/*  | PipelineCountedInput<T0> */, stage0: PipelineStage<T0, T1>, stage1: PipelineStage<T1, T2, R>): Promise<Pipeline<T0, T2, R>>;
+    public async pipe<T0 = any, T1 = any, T2 = any, T3 = any, R = void>(source: PipelineInput<T0>/*  | PipelineCountedInput<T0> */, stage0: PipelineStage<T0, T1>, stage1: PipelineStage<T1, T2>, stage2: PipelineStage<T2, T3, R>): Promise<Pipeline<T0, T3, R>>;
+    public async pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, R = void>(source: PipelineInput<T0>/*  | PipelineCountedInput<T0> */, stage0: PipelineStage<T0, T1>, stage1: PipelineStage<T1, T2>, stage2: PipelineStage<T2, T3>, stage3: PipelineStage<T3, T4, R>): Promise<Pipeline<T0, T4, R>>;
+    public async pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, R = void>(source: PipelineInput<T0>/*  | PipelineCountedInput<T0> */, stage0: PipelineStage<T0, T1>, stage1?: PipelineStage<T1, T2>, stage2?: PipelineStage<T2, T3>, stage3?: PipelineStage<T3, T4>, stage4?: PipelineStage<T4, T5, R>): Promise<Pipeline<T0, T5, R>>;
     public async pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, R = void>(
         source: PipelineInput<T0>,
         stage0: PipelineStage<T0, T1, any>,
@@ -217,8 +258,17 @@ export class Task<TArgs extends TaskFnParams = [], TResult = any> {
         stage2?: PipelineStage<T2, T3, any>,
         stage3?: PipelineStage<T3, T4, any>,
         stage4?: PipelineStage<T4, T5, any>,
-    ): Promise<Pipeline<T0, T1 | T2 | T3 | T4 | T5, R>> {
-        this.log(this.pipe, `source=${inspect(source)} stages=${inspect([stage0, stage1, stage2, stage3, stage4])}`);
-        return Task.#pipe(source, stage0, stage1, stage2, stage3, stage4);
+    ) {
+        this.log(this.pipe, `source=${inspect(source)} progress=${this.progress} stages=${inspect([stage0, stage1, stage2, stage3, stage4])}`);
+        return this.#pipe(
+            source,
+            // tap(_ => this.progress.incrementTotal()),
+            stage0,
+            stage1,
+            stage2,
+            stage3,
+            stage4,
+            // tap(_ => this.progress.incrementCount()),
+        );
     }
 }

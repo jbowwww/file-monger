@@ -77,6 +77,14 @@ export function filterObject<T extends {}>(o: T, filter: FilterFn<T>): Partial<T
     return Object.fromEntries((Object.entries(o) as KeyValuePair<keyof T, T[keyof T]>[]).filter(filter)) as Partial<T>;
 }
 
+export function partialObject<T extends {}>(o: T, ...keys: (keyof T)[]): Partial<T> {
+    const result: Partial<T> = {};
+    for (const K of keys) {
+        result[K] = o[K];
+    }
+    return result;
+}
+
 export type ValueUnion<T extends {}> = T[keyof T];
 export type DiscriminateUnion<T, K extends keyof T, V extends T[K]> = Extract<T, Record<K, V>>;
 export type DiscriminatedModel<T extends Record<K, T[K]>, K extends PropertyKey = "_T"> = { [V in T[K]]: DiscriminateUnion<T, K, V> };
@@ -145,7 +153,7 @@ export function mergeOptions<T extends {}>(this: /* defaultOptionsContainer: */ 
 export function applyDefaultOptions<T extends {}>(this: OptionsDefaultContainer<T>, options: Partial<T>): void { for (const name in this) { if (!(name in options)) { options[name as keyof T] = this.default[name as keyof T]; } } }
 export function makeDefaultOptions<T extends {}>(defaultOptions: T): OptionsDefaultContainer<T> { return ({ default: defaultOptions, mergeDefaults: mergeOptions, applyDefaults: applyDefaultOptions, }); }
 
-export type ProgressOption = { progress?: Progress; };
+export type ProgressOption = { progress?: Partial<Progress>; };
 
 export type ThrottleOptions = {
     expiryAgeMs: number;

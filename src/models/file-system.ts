@@ -2,7 +2,7 @@ import * as nodeFs from "node:fs";
 import * as nodePath from "node:path";
 import { inspect }  from "node:util";
 import * as nodeCrypto from "node:crypto";
-import { AspectParameters, PartiallyRequired, UniqueAspect, throttle as cache } from ".";
+import { AspectParameters, PartiallyRequired, UniqueAspect, throttle as cache, } from ".";
 import { Progress } from "../progress";
 import si from "systeminformation";
 
@@ -97,6 +97,7 @@ export class Disk extends BlockDevice {
 export type GetPartitionForPathOptions = {
     path: string;
     partitions?: Iterable<Partition>;
+    partitionOfParent?: Partition;
 };
 
 export class Partition extends BlockDevice {
@@ -172,39 +173,53 @@ export class Directory extends Entry { constructor(directory: AspectParameters<D
 export class Unknown extends Entry { constructor(unknown: AspectParameters<Unknown>) { super({ ...unknown, }); }}
 
 export type WalkCallbackFn = (entry: Entry, depth: number) => { emit: boolean, recurse?: boolean };
+
+export type WalkOptions = {
+    // path: string;
+    maxDepth?: number;
+    callback?: WalkCallbackFn;
+    emitError?: boolean;
+    depth?: number;
+    partition?: Partition;
+    partitions?: Iterable<Partition>;
+    progress?: Partial<Progress>;
+};
+// TODO: Take a better look at this whole options pattern and assess how useful , generally, and right here
+// export const WalkOptions = makeDefaultOptions<WalkOptions>({
+
+//     callback: (e, d) => ({ emit: true, recurse: !maxDepth || d <= maxDepth }),
+// })
+
 export const walk = async function *walk({
     path,
     maxDepth,
     callback = (e, d) => ({ emit: true, recurse: !maxDepth || d <= maxDepth }),
     emitError = true,
     depth = 0,
+    partition,
     partitions,
     progress,
-}: {
-    path: string,
-    maxDepth?: number,
-    callback?: WalkCallbackFn,
-    emitError?: boolean,
-    depth?: number,
-    partitions?: Iterable<Partition>,
-    progress?: Progress,
-}): AsyncGenerator<Entry> {
+}: { path: string } & WalkOptions): AsyncGenerator<Entry> {
     try {
+        progress ??= new Progress(`walk(${inspect({ path, maxDepth, emitError })})`);
+        if (depth === 0) {
+            progress?.reset?.();
+        }
         partitions ??= await Partition.getAll();
-        const partition = await Partition.getForPath({ path, partitions });
+        partition = await Partition.getForPath({ path, partitions, partitionOfParent: partition });
         const entry = await Entry.create({ path, partition, partitions }); // TODO: eventually find a way to avoid finding the containing drive for every path - find a way to know when the path crosses under any of the stored mountpoints
         const { emit, recurse } = callback(entry, depth);
-        if (progress) progress.count++;
         if (emit) {
-            yield entry;
+            yield progress?.wrapYield?.(entry);
         }
+        progress.incrementCount?.();    // TODO: Might not need to use ProgressOptions type to pass in a progress parameter - if yielding objects with [ProgressUpdate] symbol
         if (entry instanceof Directory && recurse && (!maxDepth || maxDepth === 0 || depth < maxDepth)) {
             try {
                 const entries = await nodeFs.promises.readdir(path, { encoding: "utf-8", recursive: false });
-                if (progress) progress.total += entries.length;
-                for await (const dirEntry of entries) {
-                    if (![".", ".."].includes(dirEntry)) {
-                        yield* walk({ path: nodePath.join(path, dirEntry), maxDepth, callback, emitError, depth: depth + 1, partitions, progress });
+                progress?.incrementTotal?.(entries.length);
+                for await (const entry of entries) {
+                    if (![".", ".."].includes(entry)) {
+                        yield* walk({ path: nodePath.join(path, entry), maxDepth, callback, emitError, depth: depth + 1, partitions, progress });
                     }
                 }
             } catch (err) {

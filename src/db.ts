@@ -1,7 +1,7 @@
 import * as nodePath from "node:path";
-import mongo, { AnyBulkWriteOperation, BulkWriteOptions, ChangeStreamOptions, ChangeStreamDocument, ChangeStreamInsertDocument, ChangeStreamUpdateDocument, Collection, CollectionOptions, CountOptions, Db, Filter, FindOneAndUpdateOptions, FindOptions, MongoClient, UpdateFilter, UpdateOptions, UpdateResult, IndexSpecification, CreateIndexesOptions, Condition, InsertOneModel, DeleteManyModel, DeleteOneModel, ReplaceOneModel, UpdateManyModel, UpdateOneModel, BSON, DeleteOptions, ReplaceOptions, InsertOneOptions, OptionalId, WithoutId } from "mongodb";
+import mongo, { AnyBulkWriteOperation, BulkWriteOptions, ChangeStreamOptions, ChangeStreamDocument, ChangeStreamInsertDocument, ChangeStreamUpdateDocument, Collection, CollectionOptions, CountOptions, Db, Filter, FindOneAndUpdateOptions, FindOptions, MongoClient, UpdateFilter, UpdateOptions, UpdateResult, IndexSpecification, CreateIndexesOptions, Condition, InsertOneModel, DeleteManyModel, DeleteOneModel, ReplaceOneModel, UpdateManyModel, UpdateOneModel, BSON, DeleteOptions, ReplaceOptions, InsertOneOptions, OptionalId, WithoutId, FindCursor } from "mongodb";
 import { Artefact, ArtefactQueryFn, hasId, isArtefact } from "./models/artefact";
-import { Aspect, DeepProps, Choose, Constructor, isConstructor, ValueUnion, makeDefaultOptions, isNonDateObject, ProgressOption } from "./models/";
+import { Aspect, DeepProps, Choose, Constructor, isConstructor, ValueUnion, makeDefaultOptions, isNonDateObject, ProgressOption, AsyncGeneratorFunction } from "./models/";
 import { PipelineGeneratorStage, PipelineSink, batch } from "./pipeline";
 
 import { inspect } from "node:util";
@@ -302,11 +302,11 @@ export class MongoStore<A extends Artefact> implements Store<A> {
         // for await (const item of this._collection.find(query))
         //     yield item;
         if (options.progress) {
-            options.progress.total = await this.collection.countDocuments(query);
+            options.progress?.setTotal?.(await this.collection.countDocuments(query));
         }
         yield* this.collection.find(query, options).map(r => {
             if (options.progress) {
-                options.progress.count++;
+                options.progress?.incrementCount?.();
             }
             log(`find(): r = ${inspect(r)}`);
             return r as A;
@@ -376,7 +376,7 @@ export class MongoStore<A extends Artefact> implements Store<A> {
 
     async* watch(query: Filter<A>, options: ChangeStreamOptions & ProgressOption = {}) {
         if (options.progress) {
-            options.progress.count = await this.collection.countDocuments(query);
+            options.progress?.setCount?.(await this.collection.countDocuments(query));
         }
         yield* this.collection.watch([{ $match: query }], options)
             .stream({ transform: r => {
