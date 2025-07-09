@@ -150,7 +150,7 @@ export type OptionsDefaultContainer<T extends {}> = {
     applyDefaults: (/* this: OptionsDefaultContainer<T>, */ options: Partial<T>) => void;
 };
 export function mergeOptions<T extends {}>(this: /* defaultOptionsContainer: */ OptionsDefaultContainer<T>, options?: Partial<T>): T { return ({ ...this.default, ...options, }); }
-export function applyDefaultOptions<T extends {}>(this: OptionsDefaultContainer<T>, options: Partial<T>): void { for (const name in this) { if (!(name in options)) { options[name as keyof T] = this.default[name as keyof T]; } } }
+export function applyDefaultOptions<T extends {}>(this: OptionsDefaultContainer<T>, options: Partial<T>): void { for (const name in this.default) { if (!(name in options)) { options[name as keyof T] = this.default[name as keyof T]; } } }
 export function makeDefaultOptions<T extends {}>(defaultOptions: T): OptionsDefaultContainer<T> { return ({ default: defaultOptions, mergeDefaults: mergeOptions, applyDefaults: applyDefaultOptions, }); }
 
 export type ProgressOption = { progress?: Partial<Progress>; };
