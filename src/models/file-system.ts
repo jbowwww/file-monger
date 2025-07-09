@@ -117,17 +117,22 @@ export class Partition extends BlockDevice {
     static async getAll(): Promise<Partition[]> {
         return BlockDevice.getAll().then(blockDevices => blockDevices
             .filter(bd => bd.type === "part")
-            .map(bd => new Partition(bd)));
+            .map(bd => new Partition(bd))
+            .sort((p1, p2) => p1.mount.length - p2.mount.length));
     }
 
     static async getForPath(pathOrOptions: string | GetPartitionForPathOptions) {
         const options: GetPartitionForPathOptions = typeof pathOrOptions === "string" ? { path: pathOrOptions } : pathOrOptions;
         options.partitions ??= await Partition.getAll();
-
         const path = nodePath.resolve(options.path);
-        const r = Array.from(options.partitions).filter(p => p.mount !== "" && path.startsWith(p.mount)).at(0);
-        log(`getForPath("${inspect(pathOrOptions)}"): r = ${inspect(r)}`);
-        return r;
+        const partitions = Array.from(options.partitions);
+        const partition = partitions.find(p => p.mount === path) ??
+            options.partitionOfParent ??
+            partitions.filter(p => p.mount !== "" && path.startsWith(p.mount)).at(0);
+        if (partition !== options.partitionOfParent) {
+            log(`getForPath("${inspect(pathOrOptions)}"): updated partition=${inspect(partition)}`);
+        }
+        return partition;
     };
 }
 
