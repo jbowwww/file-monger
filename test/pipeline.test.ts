@@ -1,5 +1,5 @@
 import { batch, merge, interval } from '../src/pipeline';
-import { delay } from '../src/task'; // Assuming Task.delay is available or use setTimeout
+import { Task } from '../src/task'; // Assuming Task.delay is available or use setTimeout
 
 describe('batch function', () => {
   it('should emit all items including leftovers in final batch', async () => {
@@ -7,7 +7,7 @@ describe('batch function', () => {
     const source = async function* () {
       for (let i = 1; i <= 5; i++) {
         yield i;
-        await delay(10); // Small delay to simulate async
+        await Task.delay(10); // Small Task.delay to simulate async
       }
     };
 
@@ -33,7 +33,7 @@ describe('batch function', () => {
   it('should emit on timeout even with partial batch', async () => {
     const source = async function* () {
       yield 1; // Only one item, then timeout should trigger
-      await delay(150); // Longer than timeoutMs
+      await Task.delay(150); // Longer than timeoutMs
     };
 
     const batches = [];
@@ -49,14 +49,14 @@ describe('batch function', () => {
 describe('merge function', () => {
   it('should merge multiple async iterables correctly', async () => {
     const source1 = async function* () {
-      yield 1; await delay(50); yield 2;
+      yield 1; await Task.delay(50); yield 2;
     };
     const source2 = async function* () {
-      yield 'a'; await delay(30); yield 'b';
+      yield 'a'; await Task.delay(30); yield 'b';
     };
 
     const result = [];
-    for await (const item of merge([source1(), source2()])) {
+    for await (const item of merge<number | string>([source1(), source2()])) {
       result.push(item);
     }
 
