@@ -9,3 +9,4 @@ etc-mongod-key
 TODO.json
 da-isolated
 .vscode
+*.zip
