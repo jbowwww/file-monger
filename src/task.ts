@@ -2,9 +2,9 @@ import * as nodePath from "node:path";
 import { inspect } from "node:util";
 import { isAsyncFunction } from "node:util/types";
 
-import { AnyParameters, Function, getFunctionName, isAsyncGenerator, isFunction, makeDefaultOptions } from "./models";
+import { AnyParameters, Function, getFunctionName, isAsyncGenerator, isFalseOrEmptyString, isFunction, makeDefaultOptions } from "./models";
 import { Progress } from "./progress";
-import { PipelineInput, PipelineStage, Pipeline, pipe, tap } from "./pipeline";
+import { PipelineInput, PipelineStage, Pipeline, pipe, tap, PipelineSource, PipelineSourceLengthWrapped } from "./pipeline";
 
 import debug from "debug";
 const log = debug(nodePath.basename(module.filename));
@@ -28,10 +28,10 @@ export type TaskOptions<TArgs extends TaskFnParams = [], TResult = any> = Partia
 export const TaskOptions = makeDefaultOptions<TaskOptions<TaskFnParams, any>>({
     name: undefined,
     parentTask: undefined,
-    progress: new Progress(),
-    history: [],
-    errors: [],
-    warnings: [],
+    get progress() { return new Progress(); },
+    get history() { return []; },   // needs to be a getter so the same array isn't shared by any task using default options.history
+    get errors() { return []; },                    // needs to be a getter so the same array isn't shared by any task using default options.errors
+    get warnings() { return []; },                  // needs to be a getter so the same array isn't shared by any task using default options.warnings
 });
 
 export type TaskRepeatOptions = Partial<{
@@ -77,7 +77,8 @@ export class Task<TArgs extends TaskFnParams = [], TResult = any> {
     public readonly type?: TaskType; // undefined until run() repeat() or pipe() are called
     public readonly name: string;
     public readonly parentTask?: Task<any, any>;
-    public get nameOrParentName(): string { return this.name ?? (this.parentTask ? this.parentTask.nameOrParentName : this.name); }
+    public readonly childTasks: Task<any, any>[] = [];
+    public get nameOrParentName(): string { return this.name ?? this.parentTask?.nameOrParentName ?? "((anon))"; }
     public get id(): string { return (this.parentTask ? this.parentTask.id + "." : "") + this.name; }
     public readonly createdTime: Date;
     #startedTime?: Date;
@@ -117,11 +118,12 @@ export class Task<TArgs extends TaskFnParams = [], TResult = any> {
             }
             this.taskFn = Object.defineProperty(taskFn[1], "name", { value: options.name ?? taskFn[0] });
         } else {
-            this.taskFn = taskFn;
+            this.taskFn = taskFn;//isFalseOrEmptyString(taskFn.name) ? Object.defineProperty(taskFn, "name", { value: options.name ?? "(anon)" }) : taskFn;
         }
         this.parentTask = options.parentTask;
         if (this.parentTask) {
-            this.progress = this.parentTask?.progress;
+            this.progress = this.parentTask?.progress.shared();
+            this.parentTask.childTasks.push(this);
         }
         this.name = getFunctionName(this.taskFn, this.nameOrParentName + `#${++this.#taskAnonIdNum}`, "(anon)");
         log(`new Task(taskFn.name=\"${this.taskFn.name}\" options=${inspect(options)})`);
@@ -136,12 +138,14 @@ export class Task<TArgs extends TaskFnParams = [], TResult = any> {
     catch(...args: Parameters<typeof Promise.prototype.catch>) { return this.#taskPr?.catch(...args); }
     finally(...args: Parameters<typeof Promise.prototype.finally>) { return this.#taskPr?.finally(...args); }
 
-    #startExecution() {
+    #startExecution(pipeSource?: PipelineSourceLengthWrapped<any>) {
         this.startedTime = new Date();
-        this.progress?.reset();
+        this.progress?.reset(pipeSource);//this.progress?.reset();
+            
         this.history.push({ ...this });
     }
     #finishExecution() {
+        this.progress?.reset(undefined);
         this.finishTime = new Date();   // should be the same referenced value in this.history too ?
     }
 
@@ -155,6 +159,7 @@ export class Task<TArgs extends TaskFnParams = [], TResult = any> {
                 if (isAsyncGenerator(this.#result)) {
                     // is this OK to use for await / async fn inside of a .then?
                     for await (const item of this.#result[Symbol.asyncIterator]()) {    // does this create a new AsyncGenerator instance? does that mean I can return this.#result and that is still usable (not iterated)?
+                        this.progress?.incrementCount();
                         this.log(this.#run, `item=${inspect(item)}`);
                     }
                 }
@@ -214,8 +219,8 @@ export class Task<TArgs extends TaskFnParams = [], TResult = any> {
        return new Task<TArgs, TResult>(taskFn, options).#repeat(options, ...args);
     }
 
-    async #pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, T6 = any, T7 = any, T8 = any, R = void>(
-        source: PipelineInput<T0>,
+    async #pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, T6 = any, T7 = any, T8 = any, R = void, P extends AnyParameters = AnyParameters>(
+        source: PipelineInput<T0, any, any, P>,
         stage0: PipelineStage<T0, T1, any>,
         stage1?: PipelineStage<T1, T2, any>,
         stage2?: PipelineStage<T2, T3, any>,
@@ -225,18 +230,23 @@ export class Task<TArgs extends TaskFnParams = [], TResult = any> {
         stage6?: PipelineStage<T6, T7, any>,
         stage7?: PipelineStage<T7, T8, any>,
     ): Promise<Pipeline<T0, T1 | T2 | T3 | T4 | T5 | T6 | T7 | T8, R>> {
-        this.#startExecution();
-        const result = pipe(source, stage0, stage1, stage2, stage3, stage4, stage5, stage6, stage7);
+        const innerSource: PipelineSourceLengthWrapped<T0, any, any> = Array.isArray(source) && source.length >= 1 &&
+        isFunction(source[0]) && Array.isArray(source[1]) &&
+        source[0].length === source[1].length ? source[0](...[{ ...(source[1].at(0) ?? {}), progress: this.progress.connect.readWrite }, ...source[1].slice(1)] as P) :
+        isFunction(source) ? source(...[]) : source as PipelineSource<T0, any, any>;
+        this.#startExecution(innerSource as PipelineSourceLengthWrapped<T0>);
+        const stages = [stage0, stage1, stage2, stage3, stage4] as [PipelineStage<T0, T1, any>, PipelineStage<T1, T2, any>, PipelineStage<T2, T3, any>, PipelineStage<T3, T4, any>, PipelineStage<T4, T5, any>];//(stage => !!stage).concat();
+        const result = pipe(innerSource, ...stages);//, tap((_: any) => this.progress.setCount(this.progress?.count ?? 0 + 1))]);//stage5, stage6, stage7);
         this.#finishExecution();
         return result;
     }
-    public static async pipe<T0 = any, T1 = any, R = void>(source: PipelineInput<T0>, stage0: PipelineStage<T0, T1, R>): Promise<Pipeline<T0, T1, R>>;
-    public static async pipe<T0 = any, T1 = any, T2 = any, R = void>(source: PipelineInput<T0>, stage0: PipelineStage<T0, T1>, stage1: PipelineStage<T1, T2, R>): Promise<Pipeline<T0, T2, R>>;
-    public static async pipe<T0 = any, T1 = any, T2 = any, T3 = any, R = void>(source: PipelineInput<T0>, stage0: PipelineStage<T0, T1>, stage1: PipelineStage<T1, T2>, stage2: PipelineStage<T2, T3, R>): Promise<Pipeline<T0, T3, R>>;
-    public static async pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, R = void>(source: PipelineInput<T0>, stage0: PipelineStage<T0, T1>, stage1: PipelineStage<T1, T2>, stage2: PipelineStage<T2, T3>, stage3: PipelineStage<T3, T4, R>): Promise<Pipeline<T0, T4, R>>;
-    public static async pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, R = void>(source: PipelineInput<T0>, stage0: PipelineStage<T0, T1>, stage1?: PipelineStage<T1, T2>, stage2?: PipelineStage<T2, T3>, stage3?: PipelineStage<T3, T4>, stage4?: PipelineStage<T4, T5, R>): Promise<Pipeline<T0, T5, R>>;
-    public static async pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, R = void>(
-        source: PipelineInput<T0>,
+    public static async pipe<T0 = any, T1 = any, R = void, P extends [any] | any[] = [any] | any[]>(source: PipelineInput<T0, void, any, P>, stage0: PipelineStage<T0, T1, R>): Promise<Pipeline<T0, T1, R>>;
+    public static async pipe<T0 = any, T1 = any, T2 = any, R = void, P extends [any] | any[] = [any] | any[]>(source: PipelineInput<T0, void, any, P>, stage0: PipelineStage<T0, T1>, stage1: PipelineStage<T1, T2, R>): Promise<Pipeline<T0, T2, R>>;
+    public static async pipe<T0 = any, T1 = any, T2 = any, T3 = any, R = void, P extends [any] | any[] = [any] | any[]>(source: PipelineInput<T0, void, any, P>, stage0: PipelineStage<T0, T1>, stage1: PipelineStage<T1, T2>, stage2: PipelineStage<T2, T3, R>): Promise<Pipeline<T0, T3, R>>;
+    public static async pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, R = void, P extends [any] | any[] = [any] | any[]>(source: PipelineInput<T0, void, any, P>, stage0: PipelineStage<T0, T1>, stage1: PipelineStage<T1, T2>, stage2: PipelineStage<T2, T3>, stage3: PipelineStage<T3, T4, R>): Promise<Pipeline<T0, T4, R>>;
+    public static async pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, R = void, P extends [any] | any[] = [any] | any[]>(source: PipelineInput<T0, void, any, P>, stage0: PipelineStage<T0, T1>, stage1?: PipelineStage<T1, T2>, stage2?: PipelineStage<T2, T3>, stage3?: PipelineStage<T3, T4>, stage4?: PipelineStage<T4, T5, R>): Promise<Pipeline<T0, T5, R>>;
+    public static async pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, R = void, P extends [any] | any[] = [any] | any[]>(
+        source: PipelineInput<T0, any, any, P>,
         stage0: PipelineStage<T0, T1, any>,
         stage1?: PipelineStage<T1, T2, any>,
         stage2?: PipelineStage<T2, T3, any>,
@@ -246,13 +256,13 @@ export class Task<TArgs extends TaskFnParams = [], TResult = any> {
         log(`Task.pipe(): source=${inspect(source)} stages=${inspect([stage0, stage1, stage2, stage3, stage4])}`);
         return new Task(async () => {}).#pipe(source, stage0, stage1, stage2, stage3, stage4);
     }
-    public async pipe<T0 = any, T1 = any, R = void>(source: PipelineInput<T0>/*  | PipelineCountedInput<T0> */, stage0: PipelineStage<T0, T1, R>): Promise<Pipeline<T0, T1, R>>;
-    public async pipe<T0 = any, T1 = any, T2 = any, R = void>(source: PipelineInput<T0>/*  | PipelineCountedInput<T0> */, stage0: PipelineStage<T0, T1>, stage1: PipelineStage<T1, T2, R>): Promise<Pipeline<T0, T2, R>>;
-    public async pipe<T0 = any, T1 = any, T2 = any, T3 = any, R = void>(source: PipelineInput<T0>/*  | PipelineCountedInput<T0> */, stage0: PipelineStage<T0, T1>, stage1: PipelineStage<T1, T2>, stage2: PipelineStage<T2, T3, R>): Promise<Pipeline<T0, T3, R>>;
-    public async pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, R = void>(source: PipelineInput<T0>/*  | PipelineCountedInput<T0> */, stage0: PipelineStage<T0, T1>, stage1: PipelineStage<T1, T2>, stage2: PipelineStage<T2, T3>, stage3: PipelineStage<T3, T4, R>): Promise<Pipeline<T0, T4, R>>;
-    public async pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, R = void>(source: PipelineInput<T0>/*  | PipelineCountedInput<T0> */, stage0: PipelineStage<T0, T1>, stage1?: PipelineStage<T1, T2>, stage2?: PipelineStage<T2, T3>, stage3?: PipelineStage<T3, T4>, stage4?: PipelineStage<T4, T5, R>): Promise<Pipeline<T0, T5, R>>;
-    public async pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, R = void>(
-        source: PipelineInput<T0>,
+    public async pipe<T0 = any, T1 = any, R = void, P extends [any] | any[] = [any] | any[]>(source: PipelineInput<T0, void, any, P>/*  | PipelineCountedInput<T0> */, stage0: PipelineStage<T0, T1, R>): Promise<Pipeline<T0, T1, R>>;
+    public async pipe<T0 = any, T1 = any, T2 = any, R = void, P extends [any] | any[] = [any] | any[]>(source: PipelineInput<T0, void, any, P>/*  | PipelineCountedInput<T0> */, stage0: PipelineStage<T0, T1>, stage1: PipelineStage<T1, T2, R>): Promise<Pipeline<T0, T2, R>>;
+    public async pipe<T0 = any, T1 = any, T2 = any, T3 = any, R = void, P extends [any] | any[] = [any] | any[]>(source: PipelineInput<T0, void, any, P>/*  | PipelineCountedInput<T0> */, stage0: PipelineStage<T0, T1>, stage1: PipelineStage<T1, T2>, stage2: PipelineStage<T2, T3, R>): Promise<Pipeline<T0, T3, R>>;
+    public async pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, R = void, P extends [any] | any[] = [any] | any[]>(source: PipelineInput<T0, void, any, P>/*  | PipelineCountedInput<T0> */, stage0: PipelineStage<T0, T1>, stage1: PipelineStage<T1, T2>, stage2: PipelineStage<T2, T3>, stage3: PipelineStage<T3, T4, R>): Promise<Pipeline<T0, T4, R>>;
+    public async pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, R = void, P extends [any] | any[] = [any] | any[]>(source: PipelineInput<T0, void, any, P>/*  | PipelineCountedInput<T0> */, stage0: PipelineStage<T0, T1>, stage1?: PipelineStage<T1, T2>, stage2?: PipelineStage<T2, T3>, stage3?: PipelineStage<T3, T4>, stage4?: PipelineStage<T4, T5, R>): Promise<Pipeline<T0, T5, R>>;
+    public async pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, R = void, P extends [any] | any[] = [any] | any[]>(
+        source: PipelineInput<T0, any, any, P>,
         stage0: PipelineStage<T0, T1, any>,
         stage1?: PipelineStage<T1, T2, any>,
         stage2?: PipelineStage<T2, T3, any>,

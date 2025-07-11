@@ -64,8 +64,8 @@ export const builder = (yargs: yargs.Argv<DbCommandArgv & FileCommandArgv>) => y
                             ], _ => _.length),
                             store.ops.updateOne,
                             task.pipeLogger(log),
-                            store.bulkWriterSink(),
-                            () => task.progress.incrementCount()));
+                            task.progress.pipeCounter,
+                            store.bulkWriterSink()));
                 },
 
                 function indexFileSystem(task: Task) {
@@ -74,7 +74,7 @@ export const builder = (yargs: yargs.Argv<DbCommandArgv & FileCommandArgv>) => y
                     return task.runAll(...paths.map((path, searchId) =>
                         async (task: Task) => task.repeat({ postDelay: 180000, },
                             async (task: Task) => task.pipe(
-                                FS.walk({ path, progress: task.progress.connect.readWriteTotal }),
+                                FS.walk({ path, progress: task.progress.connect.readWriteTotal }),//[FS.walk, { path }],
                                 store.ops.updateOne,
                                 task.progress.pipeCounter,
                                 store.bulkWriterSink({ progress: task.progress }),

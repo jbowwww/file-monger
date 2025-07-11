@@ -1,19 +1,31 @@
 import * as nodePath from "node:path";
 import { inspect } from "node:util";
 import { get, ObjectWithProperties } from "./prop-path";
-import { makeDefaultOptions, AnyParameters, Function, isFunction, getFunctionName, MaybeAsyncFunction, isAsyncIterable, AsyncGeneratorFunction, isAsyncGeneratorFunction } from "./models";
+import { makeDefaultOptions, AnyParameters, Function, isFunction, getFunctionName, MaybeAsyncFunction, isAsyncIterable, AsyncGeneratorFunction, isAsyncGeneratorFunction, isNumber } from "./models";
 import { Task } from "./task";
+import { Progress } from "./progress";
 
 import debug from "debug";
 const log = debug(nodePath.basename(module.filename));
 
-export type AsyncGeneratorSourceFunction<O = any, R = any, N = any> = AsyncGeneratorFunction<never, O, R, N, 0>;
+// export type PipelineSourceSourceFunction<O = any, R = any, N = any> = PipelineSourceFunction<never, O, R, N, 0>;
 
-export type AsyncGeneratorTransformFunction<I = any, O = any, R = any, N = any> = AsyncGeneratorFunction<I, O, R, N, 1>;
+// export type PipelineSourceTransformFunction<I = any, O = any, R = any, N = any> = PipelineSourceFunction<I, O, R, N, 1>;
+
+export type PipelineSourceLengthWrappedProperty = number | Function<[], number>;
+export type PipelineSourceLengthWrapped<T, R = void, N = any, L extends PipelineSourceLengthWrappedProperty = PipelineSourceLengthWrappedProperty> = PipelineSource<T, R, N> & { length?: L; };
+export type PipelineSourceLengthWrappingFn<T, R = void, N = any, L extends PipelineSourceLengthWrappedProperty = PipelineSourceLengthWrappedProperty> = ({ length }: { length?: L }) => PipelineSource<T, R, N>;
+export const wrapPipelineSourceWithLength = <T, R = void, N = any, L extends PipelineSourceLengthWrappedProperty = PipelineSourceLengthWrappedProperty>(
+    wrappingFn: PipelineSourceLengthWrappingFn<T, R, N, L>
+): PipelineSourceLengthWrapped<T, R, N> => {
+    let length: L | undefined = undefined;
+    const wrappedGen = wrappingFn({ length });
+    return Object.assign(wrappedGen, !length ? {} : isNumber(length) ? { length } : { get length() { return (length as Function<[], number>)(); } });
+};
 
 export type PipelineSource<I = any, R = any, N = any> = Iterable<I, R, N> | AsyncIterable<I, R, N>;
-export type PipelineSourceFunction<I = any, R = any, N = any> = Function<AnyParameters, PipelineSource<I, R, N>>;
-export type PipelineInput<I = any, R = any, N = any> = PipelineSource<I, R, N> | PipelineSourceFunction<I, R, N>;
+export type PipelineSourceFunction<I = any, R = any, N = any, P extends AnyParameters = AnyParameters> = Function<P, PipelineSource<I, R, N>>;
+export type PipelineInput<I = any, R = any, N = any, P extends [any] | any[] = [any] | any[]> = PipelineSource<I, R, N> | PipelineSourceFunction<I, R, N> | [PipelineSourceFunction<I, R, N, P>, ...args: P];
 export type PipelineItemFunctionStage<I = any, O = any> = MaybeAsyncFunction<[I/* , ...AnyParameters */], O>;
 export type PipelineFunctionStage<I = any, O = any, R = any, N = any> = AsyncGeneratorFunction<I, O, R, N, 0>;//(source: AsyncIterable<I>, ) => AsyncIterable<O, R, N>;
 export type PipelineGeneratorStage<I = any, O = any, R = any, N = any> = AsyncGeneratorFunction<I, O, R, N, 1>;
@@ -35,18 +47,21 @@ export const makeAsyncGeneratorFunction = <I = any, O = any>(stage: PipelineItem
     };
 
 export const makeAsyncGenerator = <I = any, R = any, N = any>(source: PipelineInput<I, R, undefined>): AsyncGenerator<I, any, N> => {
-    source = isFunction(source) ? source() : source;
-    return isAsyncIterable(source) ?
+    const innerSource: PipelineSource<I, R, undefined> = Array.isArray(source) && source.length === 2 &&
+        isFunction(source[0]) && Array.isArray(source[1]) &&
+        source[0].length === source[1].length ? source[0](...source[1]) :
+        isFunction(source) && source.length > 0 ?  source() : source as PipelineSource<I, R, undefined>;
+    return isAsyncIterable(innerSource) ?
         (async function* (asyncIterable: AsyncIterable<I, R, undefined>) {
             for await (const item of asyncIterable) {
                 yield item;
             }
-        })(source) :
+        })(innerSource) :
         (async function* (syncIterable: Iterable<I, R, undefined>) {
             for (const item of syncIterable) {
                 yield item;
             }
-        })(source);
+        })(innerSource);
 };
 
 export function chain<T0 = any, T1 = any>(stage0: PipelineItemFunctionStage<T0, T1>): PipelineItemFunctionStage<T0, T1>;
@@ -89,7 +104,7 @@ export function genChain<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = 
     stage7?: PipelineStage<T7, T8, R>
 ): PipelineFunction<T0, T1 | T2 | T3 | T4 | T5 | T6 | T7 | T8, R> {
     // TODO: Someway to reduce the stages to an asyncgeneratorfunction and then return a fn(source) that calls that fn with source, returning asynciterable
-    const r = async function* (source: PipelineInput<T0>) {
+    const r = async function* (source: PipelineSource<T0, any, any>) {
         let isLastStage = false;
         const r = [stage0, stage1, stage2, stage3, stage4, stage5, stage6, stage7]
             .map((stage, i, a) => {
@@ -118,12 +133,12 @@ export function pipe<T0 = any, T1 = any, R = any>(source: PipelineSource<T0>, st
 export function pipe<T0 = any, T1 = any, T2 = any, R = any>(source: PipelineSource<T0>, stage0: PipelineStage<T0, T1>, stage1: PipelineStage<T1, T2, R>): Pipeline<T0, T2, R>;
 export function pipe<T0 = any, T1 = any, T2 = any, T3 = any, R = any>(source: PipelineSource<T0>, stage0: PipelineStage<T0, T1>, stage1: PipelineStage<T1, T2>, stage2: PipelineStage<T2, T3, R>): Pipeline<T0, T3, R>;
 export function pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, R = any>(source: PipelineSource<T0>, stage0: PipelineStage<T0, T1>, stage1: PipelineStage<T1, T2>, stage2: PipelineStage<T2, T3>, stage3: PipelineStage<T3, T4, R>): Pipeline<T0, T4, R>;
-export function pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, R = any>(source: PipelineInput<T0>, stage0: PipelineStage<T0, T1, R >, stage1?: PipelineStage<T1, T2, R>, stage2?: PipelineStage<T2, T3, R>, stage3?: PipelineStage<T3, T4, R>, stage4?: PipelineStage<T4, T5, R>): Pipeline<T0, T5, R>;
-export function pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, T6 = any, R = any>(source: PipelineInput<T0>, stage0: PipelineStage<T0, T1, R>, stage1?: PipelineStage<T1, T2, R>, stage2?: PipelineStage<T2, T3, R>, stage3?: PipelineStage<T3, T4, R>, stage4?: PipelineStage<T4, T5, R>, stage5?: PipelineStage<T5, T6, R>): Pipeline<T0, T6, R>;
-export function pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, T6 = any, T7 = any, R = any>(source: PipelineInput<T0>, stage0: PipelineStage<T0, T1, R>, stage1?: PipelineStage<T1, T2, R>, stage2?: PipelineStage<T2, T3, R>, stage3?: PipelineStage<T3, T4, R>, stage4?: PipelineStage<T4, T5, R>, stage5?: PipelineStage<T5, T6, R>, stage6?: PipelineStage<T6, T7, R>): Pipeline<T0, T7, R>;
-export function pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, T6 = any, T7 = any, T8 = any, R = any>(source: PipelineInput<T0>, stage0: PipelineStage<T0, T1, R>, stage1?: PipelineStage<T1, T2, R>, stage2?: PipelineStage<T2, T3, R>, stage3?: PipelineStage<T3, T4, R>, stage4?: PipelineStage<T4, T5, R>, stage5?: PipelineStage<T5, T6, R>, stage6?: PipelineStage<T6, T7, R>, stage7?: PipelineStage<T7, T8, R>): Pipeline<T0, T8, R>;
+export function pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, R = any>(source: PipelineSource<T0>, stage0: PipelineStage<T0, T1, R >, stage1?: PipelineStage<T1, T2, R>, stage2?: PipelineStage<T2, T3, R>, stage3?: PipelineStage<T3, T4, R>, stage4?: PipelineStage<T4, T5, R>): Pipeline<T0, T5, R>;
+export function pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, T6 = any, R = any>(source: PipelineSource<T0>, stage0: PipelineStage<T0, T1, R>, stage1?: PipelineStage<T1, T2, R>, stage2?: PipelineStage<T2, T3, R>, stage3?: PipelineStage<T3, T4, R>, stage4?: PipelineStage<T4, T5, R>, stage5?: PipelineStage<T5, T6, R>): Pipeline<T0, T6, R>;
+export function pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, T6 = any, T7 = any, R = any>(source: PipelineSource<T0>, stage0: PipelineStage<T0, T1, R>, stage1?: PipelineStage<T1, T2, R>, stage2?: PipelineStage<T2, T3, R>, stage3?: PipelineStage<T3, T4, R>, stage4?: PipelineStage<T4, T5, R>, stage5?: PipelineStage<T5, T6, R>, stage6?: PipelineStage<T6, T7, R>): Pipeline<T0, T7, R>;
+export function pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, T6 = any, T7 = any, T8 = any, R = any>(source: PipelineSource<T0>, stage0: PipelineStage<T0, T1, R>, stage1?: PipelineStage<T1, T2, R>, stage2?: PipelineStage<T2, T3, R>, stage3?: PipelineStage<T3, T4, R>, stage4?: PipelineStage<T4, T5, R>, stage5?: PipelineStage<T5, T6, R>, stage6?: PipelineStage<T6, T7, R>, stage7?: PipelineStage<T7, T8, R>): Pipeline<T0, T8, R>;
 export function pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, T6 = any, T7 = any, T8 = any, R = any>(
-    source: PipelineInput<T0>, 
+    source: PipelineSource<T0, any, any>, 
     stage0: PipelineStage<T0, T1, R>,
     stage1?: PipelineStage<T1, T2, R>,
     stage2?: PipelineStage<T2, T3, R>,
@@ -134,7 +149,7 @@ export function pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any,
     stage7?: PipelineStage<T7, T8, R>
 ): Pipeline<T0, T1 | T2 | T3 | T4 | T5 | T6 | T7 | T8, R> {
     const iterable = Object.assign(
-        pipeline<T0, T1, T2, T3, T4, T5, T6, T7, T8, R>(stage0, stage1, stage2, stage3, stage4, stage5, stage6, stage7)(makeAsyncGenerator<T0, R, never>(source)), {
+        pipeline<T0, T1, T2, T3, T4, T5, T6, T7, T8, R>(stage0, stage1, stage2, stage3, stage4, stage5, stage6, stage7)(makeAsyncGenerator<T0, any, any>(source)), {
             execute(sinkFn?: (source: AsyncIterable<T8, R, never>) => R | Promise<R>) {
                 return (
                     sinkFn?.(iterable) ??
@@ -157,13 +172,23 @@ export async function execute<I = any, O = any, R = any, N = any>(pipeline: Pipe
     } while (true);
 }
 
-export const tap = <I = any>(fn: (input: I) => void | Promise<void>) =>
-    async function* (source: AsyncIterable<I>) {
-        for await (const item of source) {
-            await fn(item);
-            yield item;
-        }
+export function tap<I = any>(fn: (input: I) => void | Promise<void>) {
+    return async (input: I) => {
+        await fn(input);
+        return input;
     };
+}
+
+// export function tap<I = any>(this: any, fn: (input: I) => void | Promise<void>) {
+//     const _this = this;
+//     return async function* (source: AsyncIterable<I>) {
+//         for await (const item of source) {
+//             await fn.apply(_this, [item]);
+//             yield item;
+//         }
+//     };
+// };
+
 export const iff = <I = any, O = any>(condition: MaybeAsyncFunction<[I], boolean>, stage: PipelineItemFunctionStage<I, O>) => makeAsyncGeneratorFunction(
     async (input: I, ...args: AnyParameters) => (await condition(input) ? stage(input/* , ...args */) : input));
 export const exists = <I = any>(propertyPath: string) => (input: I) => !!get(input as ObjectWithProperties, propertyPath);
@@ -173,7 +198,7 @@ export const exists = <I = any>(propertyPath: string) => (input: I) => !!get(inp
 // export function onFinishIteration(input: AsyncIterable<any>, onFinish: () => void): AsyncIterable<any>;
 // export function onFinishIteration<T extends AsyncIterator<any> | AsyncIterable<any>>(input: T, onFinish: () => void): T {
 export function onFinishIteration<T>(input: AsyncIterable<T>, onFinish: () => void): AsyncIterable<T> {
-    log(`onFinishIteration(): input=${input} onFinish=${getFunctionName(onFinish)}`);
+    log(`onFinishIteration(): wrapping input=${input} onFinish=${/* getFunctionName */(onFinish)}`);
     return ({
         [Symbol.asyncIterator]() {
             const it = input[Symbol.asyncIterator]();
@@ -182,7 +207,7 @@ export function onFinishIteration<T>(input: AsyncIterable<T>, onFinish: () => vo
                 async next(...args: [] | [any]) {
                     const value = await it.next(...args);
                     if (value.done) {
-                        log(`onFinishIteration(): input=${input} onFinish=${getFunctionName(onFinish)}`);
+                        log(`onFinishIteration(): onFinishing input=${input} onFinish=${getFunctionName(onFinish)}`);
                         process.nextTick(onFinish);
                     }
                     return value;   // should i be returning this if value.done ??
@@ -214,17 +239,16 @@ const MergeOptions = makeDefaultOptions<MergeOptions>({
 
 export async function* merge<I = any>(sources: AsyncIterable<I>[], secondarySources: AsyncIterable<I>[] = []): AsyncGenerator<I, any, undefined> {
     let done = false;
-    const numSources = sources.length;
     let numSettled = 0, itemCount = 0;
     const its = sources.concat(...secondarySources).map(s => s[Symbol.asyncIterator]());
-    let prs = its.filter(it => it).map((it, i) => it.next().then(item => onResolve(item, i)));
+    const numSources = sources.length;//its.length;
+    let prs: (Promise<IteratorYieldResult<I> | IteratorReturnResult<I>> | undefined)[] = its
+        .filter(it => it)
+        .map((it, i) => it.next().then(item => onResolve(item, i)));
     function onResolve(item: IteratorResult<I, any>, i: number) {
-        let newPr: Promise<IteratorResult<I, any>>;
-        if (item.done) {
-            if (++numSettled === numSources) {
-                done = true;
-            }
-            newPr = new Promise((resolve, reject) => {});  // that input has finished, set it's next promise to one that never resolves
+        let newPr: Promise<IteratorResult<I, any>> | undefined = undefined;
+        if (item.done && i < sources.length && ++numSettled === numSources) {
+            newPr = undefined;//new Promise((resolve, reject) => {});  // that input has finished, set it's next promise to one that never resolves
         } else {
             newPr = its[i].next().then(item => onResolve(item, i));
         }
@@ -232,10 +256,17 @@ export async function* merge<I = any>(sources: AsyncIterable<I>[], secondarySour
         return item;
     }
     while (!done) {
-        const item = await Promise.race(prs);
-        if (item.done) {
-            return item.value;
-        }
+        const item = await Promise.race(prs.filter(p => !!p));
+        log(`merge(): done=${done} item=${inspect(item)} numSettled=${numSettled} numSources=${numSources} prs=${inspect(prs)}`);
+        // return item.value;if (item.done) {
+            if (item.done/*  && ++numSettled === numSources */) {
+                log(`merge(): No non-undefined prs promises left, exiting merge() loop...`);
+                done = true;
+            } else {
+                log(`merge(): prs[].length=${prs.length}`);
+            }
+            
+        // }
         yield item.value;
     }
 }

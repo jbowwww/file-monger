@@ -1,5 +1,5 @@
-import { makeAsyncGenerator, PipelineInput, PipelineSource, tap } from "./pipeline";
-import { isBoolean, isFunction, isNumber, isPlainFunction, MaybeAsyncFunction } from "./models";
+import { PipelineSourceLengthWrapped, makeAsyncGenerator, PipelineInput, PipelineSource, tap } from "./pipeline";
+import { isAsyncGenerator, isBoolean, isFunction, isNumber, MaybeAsyncFunction } from "./models";
 
 export const ProgressUpdate: unique symbol = Symbol("Progress update");
 export type ProgressUpdate = { total: number; count: number; };
@@ -23,6 +23,9 @@ export type ShouldRecountParameters<TI, S extends PipelineSource<TI>> = [S, Prog
 export class Progress<T = any> {
     #total: number | undefined = undefined;      // Expected total
     get total(): number | undefined {
+        if (this.#pipeSource) {
+            this.#total = isFunction(this.#pipeSource.length) ? this.#pipeSource.length() : this.#pipeSource.length;
+        }
         if (this.#shared.length > 0) { 
             this.#total = this.#shared.reduce((r, p) => r += p.total ?? 0, 0);
         }
@@ -41,6 +44,8 @@ export class Progress<T = any> {
 
     constructor(private prefix: string = "") { }
 
+    #pipeSource: PipelineSourceLengthWrapped<T, any, any> | undefined = undefined;
+
     #shared: Progress[] = [];
     shared(): Progress {
         const progress = new Progress(this.prefix + "#shared#" + this.#shared.length + 1);
@@ -48,7 +53,7 @@ export class Progress<T = any> {
         return progress;
     }
 
-    setTotal(total: number | undefined) { this.#total = total; }
+    setTotal = (total: number | undefined) => { this.#total = total; }
     // setTotal<S extends PipelineInput<T>>(source: S, getTotal: (source: S) => number): S;
     setTotalFromSource<S extends PipelineInput<T>>(source: S, getTotal: (source: S) => number): S {
         this.#total = getTotal(source);
@@ -65,9 +70,13 @@ export class Progress<T = any> {
 
     pipeCounter = tap(_ => this.incrementCount());
     
-    reset(total: number | undefined = undefined, count: number = 0) {
-        if (total) { this.#total = total; }
-        if (count) { this.#count = count; }
+    reset(totalOrPipeSource: number | PipelineSourceLengthWrapped<T> | undefined = undefined, count: number = 0) {
+        if (isAsyncGenerator<T>(totalOrPipeSource) || totalOrPipeSource === undefined) {
+            this.#pipeSource = totalOrPipeSource;
+        } else {
+            if (totalOrPipeSource) { this.#total = totalOrPipeSource as number; }
+            if (count) { this.#count = count; }
+        }
     }
 
     get connect() {
