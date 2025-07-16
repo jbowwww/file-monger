@@ -238,36 +238,51 @@ const MergeOptions = makeDefaultOptions<MergeOptions>({
 });
 
 export async function* merge<I = any>(sources: AsyncIterable<I>[], secondarySources: AsyncIterable<I>[] = []): AsyncGenerator<I, any, undefined> {
-    let done = false;
-    let numSettled = 0, itemCount = 0;
-    const its = sources.concat(...secondarySources).map(s => s[Symbol.asyncIterator]());
-    const numSources = sources.length;//its.length;
-    let prs: (Promise<IteratorYieldResult<I> | IteratorReturnResult<I>> | undefined)[] = its
-        .filter(it => it)
-        .map((it, i) => it.next().then(item => onResolve(item, i)));
-    function onResolve(item: IteratorResult<I, any>, i: number) {
-        let newPr: Promise<IteratorResult<I, any>> | undefined = undefined;
-        if (item.done && i < sources.length && ++numSettled === numSources) {
-            newPr = undefined;//new Promise((resolve, reject) => {});  // that input has finished, set it's next promise to one that never resolves
-        } else {
-            newPr = its[i].next().then(item => onResolve(item, i));
-        }
-        prs = [...prs.slice(0, i), newPr, ...prs.slice(i+1, numSources)];
-        return item;
-    }
-    while (!done) {
-        const item = await Promise.race(prs.filter(p => !!p));
-        log(`merge(): done=${done} item=${inspect(item)} numSettled=${numSettled} numSources=${numSources} prs=${inspect(prs)}`);
-        // return item.value;if (item.done) {
-            if (item.done/*  && ++numSettled === numSources */) {
-                log(`merge(): No non-undefined prs promises left, exiting merge() loop...`);
-                done = true;
+    let numPrimarySettled = 0;
+    let numSecondarySettled = 0;
+    const numPrimarySources = sources.length;
+    const numSecondarySources = secondarySources.length;
+    const its = sources.concat(secondarySources).map(s => s[Symbol.asyncIterator]());
+    const makeOnResolve = (i: number) => (item: { value: I; done?: boolean }) => {
+        // prs[i] = item.done ? undefined : its[i].next().then(makeOnResolve(i));
+        return ({ ...item, i });
+    };
+    let prs: (Promise<{ i: number; value?: I; done?: boolean; }> | undefined)[] = its
+        .map((it, i) => it.next().then(_ => ({ ..._, i/* makeOnResolve(i) */ })));
+    let awaitPrs: (NonNullable<typeof prs[0]>)[] = prs as (NonNullable<typeof prs[0]>)[];
+    let msg: string;
+    
+    while (awaitPrs.length > numSecondarySources && numPrimarySettled < numPrimarySources) {
+        log(`merge(): awaitPrs=${inspect(awaitPrs)} numPrimarySettled=${numPrimarySettled} numSecondarySources=${numSecondarySources} prs=${inspect(prs)}`);
+        const { value, done, i } = await Promise.race(awaitPrs);
+        log(`merge(): value=${inspect(value)} done=${done} i=${i} numPrimarySettled=${numPrimarySettled} numSecondarySources=${numSecondarySources} prs=${inspect(prs)}`);
+        
+        if (done) {
+            msg = `Source #${i} is done, setting prs[${i}] = undefined`;
+            prs[i] = undefined;
+            
+            // Track which type of source finished
+            if (i < numPrimarySources) {
+                numPrimarySettled++;
+                msg += `\nPrimary source finished. numPrimarySettled=${numPrimarySettled}/${numPrimarySources}`;
             } else {
-                log(`merge(): prs[].length=${prs.length}`);
+                numSecondarySettled++;
+                msg += `\nSecondary source finished. numSecondarySettled=${numSecondarySettled}/${numSecondarySources}`;
             }
             
-        // }
-        yield item.value;
+            // Stop when all primary sources are done (regardless of secondary sources)
+            if (numPrimarySettled >= numPrimarySources) {
+                msg += `\nAll primary sources finished, stopping merge`;
+                break;
+            }
+        } else {
+            msg = `Source #${i} yielded value=${value}, setting prs[${i}] to next promise`;
+            prs[i] = its[i].next().then(_ => ({ ..._, i }));
+            yield value!;
+        }
+        
+        awaitPrs = prs.filter(p => !!p);
+        log(`${msg}\nprs=${inspect(prs)} awaitPrs=${inspect(awaitPrs)}`);   
     }
 }
 
@@ -310,6 +325,12 @@ export async function* batch<I = any>(optionsOrSource: BatchOptions | AsyncItera
                 batch = [];
             }
         }
+    }
+    
+    // Emit final batch if there are remaining items
+    if (batch.length > 0) {
+        log(`batch(): Yielding final batch (batch=${inspect(batch)}) ...`);
+        yield batch;
     }
 }
 

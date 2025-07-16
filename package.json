@@ -9,7 +9,7 @@
     "debug": "npm run build ; node --enable-source-maps --inspect-brk ./dist/cli.js",
     "dev": "node --enable-source-maps ./dist/cli.js",
     "help": "node dist/cli.js --help",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "jest"
   },
   "repository": {
     "type": "git",
@@ -38,13 +38,20 @@
     "mongodb": "^6.5.0",
     "music-metadata": "^7.13.3",
     "systeminformation": "^5.25.11",
+    "ts-node": "^10.9.2",
     "yargs": "^17.7.2"
   },
   "devDependencies": {
+    "@babel/core": "^7.28.0",
+    "@babel/preset-env": "^7.28.0",
+    "@babel/preset-typescript": "^7.27.1",
     "@types/async-exit-hook": "^2.0.2",
     "@types/debug": "^4.1.12",
+    "@types/jest": "^30.0.0",
     "@types/node": "^22.0.0",
     "@types/yargs": "^17.0.32",
+    "babel-jest": "^30.0.4",
+    "jest": "^30.0.4",
     "typescript": "^5.4.5"
   }
 }

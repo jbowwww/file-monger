@@ -6,6 +6,6 @@ SLN_NAME=`basename "$(dirname "$SCRIPT_DIR")"`
 echo
 
 ZIP_FILE="${SLN_NAME}_${1:-preedit}.zip"
-zip -rv $ZIP_FILE package.json tsconfig.json README.md docker-compose.yaml .gitignore src docker/NOTES.md docker/etc-mongod-conf.yaml
+zip -rv $ZIP_FILE package.json tsconfig.json README.md docker-compose.yaml .gitignore src docker/NOTES.md docker/etc-mongod-conf.yaml "${@:2}"
 
 echo -e "\nOutput: $ZIP_FILE\n"
