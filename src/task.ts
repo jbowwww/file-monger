@@ -139,14 +139,16 @@ export class Task<TArgs extends TaskFnParams = [], TResult = any> {
     finally(...args: Parameters<typeof Promise.prototype.finally>) { return this.#taskPr?.finally(...args); }
 
     #startExecution(pipeSource?: PipelineSourceLengthWrapped<any>) {
+        this.#taskPr = null;
+        this.#result = null;
         this.startedTime = new Date();
         this.progress?.reset(pipeSource);//this.progress?.reset();
-            
-        this.history.push({ ...this });
+        this.history.push({ ...this }); // might need a deep clone ?
+        this.log(this.#run, `starting execution, this=${inspect(this)}`);
     }
     #finishExecution() {
-        this.progress?.reset(undefined);
         this.finishTime = new Date();   // should be the same referenced value in this.history too ?
+        this.log(this.#run, `finished execution, this=${inspect(this)}`);
     }
 
     #run(...args: TArgs) {
@@ -155,10 +157,10 @@ export class Task<TArgs extends TaskFnParams = [], TResult = any> {
             .then(async result => {
                 this.#result = result ?? {} as TResult;
                 this.#finishExecution();
-                this.log(this.#run, `result=${inspect(result)} isAsyncGenerator=${isAsyncGenerator(this.#result)}`);
+                // this.log(this.#run, `result=${inspect(result)} isAsyncGenerator=${isAsyncGenerator(this.#result)}`);
                 if (isAsyncGenerator(this.#result)) {
                     // is this OK to use for await / async fn inside of a .then?
-                    for await (const item of this.#result[Symbol.asyncIterator]()) {    // does this create a new AsyncGenerator instance? does that mean I can return this.#result and that is still usable (not iterated)?
+                    for await (const item of this.#result[Symbol.asyncIterator]()) {    // does this create a new AsyncGenerator/AsyncIterator instance? does that mean I can return this.#result and that is still usable (not iterated)?
                         this.progress?.incrementCount();
                         this.log(this.#run, `item=${inspect(item)}`);
                     }

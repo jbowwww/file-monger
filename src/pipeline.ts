@@ -6,6 +6,7 @@ import { Task } from "./task";
 import { Progress } from "./progress";
 
 import debug from "debug";
+import { isAsyncFunction } from "node:util/types";
 const log = debug(nodePath.basename(module.filename));
 
 // export type PipelineSourceSourceFunction<O = any, R = any, N = any> = PipelineSourceFunction<never, O, R, N, 0>;
@@ -35,6 +36,9 @@ export type PipelineFunction<I = any, O = any, R = any, N = any> = (source: Pipe
 export type Pipeline<I = any, O = any, R = any, N = any> = AsyncGenerator<O, R, N> & {
     execute: (sinkFn?: (source: AsyncIterable<O, R, never>) => R | Promise<R>) => R | Promise<R>;
 };
+
+export const inspectStage = (stage: PipelineStage<any, any> | undefined): string => !stage ? "(undefined)" : ((isAsyncFunction(stage) ? "[AsyncFunction: " : isFunction(stage) ? "[Function: " : "") + (stage.name ?? stage?.toString()));
+export const inspectStages = (stages: (PipelineStage<any, any> | undefined)[]): string => stages.map(inspectStage).join(",\n\t");
 
 export const isAsyncGeneratorSourceFunction = <O = any, R = any, N = any>(value: any): value is AsyncGeneratorFunction<never, O, R, N, 0> => isAsyncGeneratorFunction<never, O, R, N, 0>(value, 0)
 export const isAsyncGeneratorTransformFunction = <I = any, O = unknown, R = any, N = any>(value: any): value is AsyncGeneratorFunction<I, O, R, N, 1> => isAsyncGeneratorFunction<I, O, R, N, 1>(value, 1);

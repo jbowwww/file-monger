@@ -170,7 +170,10 @@ export abstract class Entry extends UniqueAspect {
 }
 
 export class File extends Entry { constructor(file: AspectParameters<File>) { super({ ...file, }); }}
-export class Directory extends Entry { constructor(directory: AspectParameters<Directory>) { super({ ...directory, }); }}
+export class Directory extends Entry {
+    constructor(directory: AspectParameters<Directory>) { super({ ...directory, }); }
+    walk = walk;//(...args: Parameters<typeof walk>) => walk.call(this, { ...args, path: this.path, });
+}
 export class Unknown extends Entry { constructor(unknown: AspectParameters<Unknown>) { super({ ...unknown, }); }}
 
 export type WalkCallbackFn = (entry: Entry, depth: number) => { emit: boolean, recurse?: boolean };
@@ -191,7 +194,7 @@ export type WalkOptions = {
 //     callback: (e, d) => ({ emit: true, recurse: !maxDepth || d <= maxDepth }),
 // })
 
-export const walk = ({
+export function walk({
     path,
     maxDepth,
     callback = (e, d) => ({ emit: true, recurse: !maxDepth || d <= maxDepth }),
@@ -200,51 +203,53 @@ export const walk = ({
     partition,
     partitions,
     progress,
-}: { path: string } & WalkOptions) => wrapPipelineSourceWithLength(({ length }: { length?: number }) =>
-    (async function *walk({
-        path,
-        maxDepth,
-        callback = (e, d) => ({ emit: true, recurse: !maxDepth || d <= maxDepth }),
-        emitError = true,
-        depth = 0,
-        partition,
-        partitions,
-        progress,
-    }: { path: string } & WalkOptions): AsyncGenerator<Entry> {
-        try {
-            progress ??= new Progress(`walk(${inspect({ path, maxDepth, emitError })})`);
-            if (!length) {
-                length = 1;
-            };//progress?.reset?.();
-            partitions ??= await Partition.getAll();
-            partition = await Partition.getForPath({ path, partitions, partitionOfParent: partition });
-            const entry = await Entry.create({ path, partition, partitions }); // TODO: eventually find a way to avoid finding the containing drive for every path - find a way to know when the path crosses under any of the stored mountpoints
-            const { emit, recurse } = callback(entry, depth);
-            if (emit) {
-                yield progress?.wrapYield?.(entry);
-            }
-            progress.incrementCount?.();    // TODO: Might not need to use ProgressOptions type to pass in a progress parameter - if yielding objects with [ProgressUpdate] symbol
-            if (entry instanceof Directory && recurse && (!maxDepth || maxDepth === 0 || depth < maxDepth)) {
-                try {
-                    const entries = await nodeFs.promises.readdir(path, { encoding: "utf-8", recursive: false });
-                    length += entries.length;//progress?.incrementTotal?.(entries.length);
-                    for await (const entry of entries) {
-                        if (![".", ".."].includes(entry)) {
-                            yield* walk({ path: nodePath.join(path, entry), maxDepth, callback, emitError, depth: depth + 1, partitions, progress });
+}: { path: string } & WalkOptions) {
+    return wrapPipelineSourceWithLength(({ length }: { length?: number }) =>
+        (async function *walk({
+            path,
+            maxDepth,
+            callback = (e, d) => ({ emit: true, recurse: !maxDepth || d <= maxDepth }),
+            emitError = true,
+            depth = 0,
+            partition,
+            partitions,
+            progress,
+        }: { path: string } & WalkOptions): AsyncGenerator<Entry> {
+            try {
+                progress ??= new Progress(`walk(${inspect({ path, maxDepth, emitError })})`);
+                if (!length) {
+                    length = 1;
+                };//progress?.reset?.();
+                partitions ??= await Partition.getAll();
+                partition = await Partition.getForPath({ path, partitions, partitionOfParent: partition });
+                const entry = await Entry.create({ path, partition, partitions }); // TODO: eventually find a way to avoid finding the containing drive for every path - find a way to know when the path crosses under any of the stored mountpoints
+                const { emit, recurse } = callback(entry, depth);
+                if (emit) {
+                    yield progress?.wrapYield?.(entry);
+                }
+                progress.incrementCount?.();    // TODO: Might not need to use ProgressOptions type to pass in a progress parameter - if yielding objects with [ProgressUpdate] symbol
+                if (entry instanceof Directory && recurse && (!maxDepth || maxDepth === 0 || depth < maxDepth)) {
+                    try {
+                        const entries = await nodeFs.promises.readdir(path, { encoding: "utf-8", recursive: false });
+                        length += entries.length;//progress?.incrementTotal?.(entries.length);
+                        for await (const entry of entries) {
+                            if (![".", ".."].includes(entry)) {
+                                yield* walk({ path: nodePath.join(path, entry), maxDepth, callback, emitError, depth: depth + 1, partitions, progress });
+                            }
+                        }
+                    } catch (err) {
+                        if (emitError) {
+                            log(err);
                         }
                     }
-                } catch (err) {
-                    if (emitError) {
-                        log(err);
-                    }
+                }
+            } catch (err) {
+                if (emitError) {
+                    log(err);
                 }
             }
-        } catch (err) {
-            if (emitError) {
-                log(err);
-            }
-        }
-    })({ path, maxDepth, callback, emitError, depth: 0, partition, partitions, progress }));
+        })({ path, maxDepth, callback, emitError, depth: 0, partition, partitions, progress }));
+}
 
 export class Hash extends UniqueAspect {
     constructor(public sha256: string) { super(); }
