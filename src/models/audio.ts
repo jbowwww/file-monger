@@ -6,6 +6,13 @@ import debug from "debug";
 import { INativeTags, IQualityInformation } from "music-metadata/lib/type";
 const log = debug(nodePath.basename(module.filename));
 
+
+declare module "./artefact" {
+    export interface ArtefactSchema {
+        Audio: Audio;
+    }
+}
+
 export const fileExtensions = [ "mp3", "wav", "au", "aiff", "flac" ];
 
 export class Audio extends Aspect {

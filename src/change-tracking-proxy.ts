@@ -1,10 +1,10 @@
 import * as nodePath from "node:path";
 
-import { isDate, isProxy } from "util/types";
+import { isProxy } from "util/types";
+import { isNonDateObject } from "./models";
 import { Artefact } from "./models/artefact";
 
 import debug from "debug";
-import { isNonDateObject } from "./models";
 const log = debug(nodePath.basename(module.filename));
 
 export const logProxy = log.extend("Proxy");

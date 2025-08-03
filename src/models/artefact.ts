@@ -1,16 +1,46 @@
 import * as nodePath from "node:path";
 import { Filter, ObjectId } from "mongodb";
+import { KeyValuePair, mapObject } from ".";
+// import { get } from "../prop-path";
+// import { ChangeTrackingProxy } from "../change-tracking-proxy";
 
 import debug from "debug";
 const log = debug(nodePath.basename(module.filename));
 
-export type TimestampTree<T> = (T extends {} ? {
+export interface ArtefactSchema extends Artefact {
+    /* model modules should use interface merging to add types to this interface */
+}
+
+export type Tree<T> = {
+    [K in keyof T]: TimestampTree<T[K]>;
+};
+
+export type TimestampTree<T> = (T extends { [K: string]: any; } ? {
     [K in keyof T]: TimestampTree<T[K]>;
 } : {}) & {
     _created: Date;
     _checked: Date;
     _updated: Date;
     _deleted?: Date;
+};
+
+// Create a TimestampTree with the same prop name heirarcy as data, if supplied
+export const makeTimestampTree = <T extends { [K: string]: any; }>(data?: T) => {
+    // const _created = data?._created ?? new Date();
+    // const _checked = data?._checked ?? _created;
+    // const _updated = data?._updated ?? _created;
+    // const _deleted = data?._deleted;
+    const _created = new Date();
+    const tree: TimestampTree<T> = Object.assign(
+        Object.create(null), 
+        mapObject<T, TimestampTree<T>>(
+            data ?? {} as any,
+            ([K, V]) => typeof K === "string" && !K.startsWith("_"),
+            ([K, V]) => ([K as string, makeTimestampTree(data![K as string])]) as KeyValuePair<string, any>), {
+        _created,
+        // _checked: _created,
+    });
+    return tree;
 };
 
 export class Timestamps<T extends {} = {}> {
@@ -20,12 +50,21 @@ export class Timestamps<T extends {} = {}> {
     _deleted?: Date;
     public constructor(data: Partial<Timestamps<T>> = {}) {
         const { _created, _checked, _updated, _deleted, ...d } = data;
-        this._created = _created ?? new Date();
-        this._checked = _checked ?? this._created;
-        this._updated = _updated ?? this._created;
-        this._deleted = _deleted;
+        this._created = data._created ?? new Date();
+        this._checked = data._checked ?? this._created;
+        this._updated = data._updated ?? this._created;
+        this._deleted = data._deleted;
     }
 }
+
+// export class TimestampTree<T extends {}> extends Timestamps {
+
+//     constructor(data: TimestampTree<T>) {
+//         super(data);
+
+//     }
+
+// }
 
 export const hasId = <A extends Artefact = Artefact>(_: any): _ is A => "_id" in _;
 
@@ -41,11 +80,8 @@ export type Artefact = {
 
 export type ArtefactQueryFn<A extends Artefact> = (_: A) => Filter<A>;
 
-// export const Artefact = {
-//     async create<A extends Artefact>(data: A): Promise<A> {
-
-//     }
-// }    constructor(data?: Partial<Artefact>, enableTimestamps: boolean = false) {
+// export class Artefact {
+//     constructor(data?: Partial<Artefact>, enableTimestamps: boolean = false) {
 //         log("new Artefact(): data=%O enableTimestamps=%b", data, enableTimestamps);
 //         Object.assign(this, data);
 //         this._v ??= 1;
@@ -62,6 +98,10 @@ export type ArtefactQueryFn<A extends Artefact> = (_: A) => Filter<A>;
 //         };
 //         const r = enableTimestamps ? ChangeTrackingProxy(this, notifyChangeCallback) as Artefact : this;    // possibly needs a ignoreProps array parameter for ArtefactProxy - pass , ["_id", "_ts", "_E"]
 //         return r;
+//     }
+
+//     static async create<A extends Artefact>(data: A): Promise<A> {
+//         throw new Error(`Artefact.create not implemented`);
 //     }
 
 //     enableTimestamps(enableTimestamps: boolean = true) { }

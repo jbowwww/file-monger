@@ -45,7 +45,8 @@ export const TaskRepeatOptions = makeDefaultOptions<TaskRepeatOptions>({
     abort: undefined,
 });
 
-export const TaskPipeOptions = makeDefaultOptions<{}>({});
+export type TaskPipeOptions = Partial<{}>;
+export const TaskPipeOptions = makeDefaultOptions<TaskPipeOptions>({});
 
 export type LogFunction<T = any> = (msg: T) => any;
 

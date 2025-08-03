@@ -19,6 +19,18 @@ export const switchStream = <I extends {}>(iterable: Iterable<I>, ...tests: Test
     return returns;
 };
 
+declare module "./artefact" {
+    export interface ArtefactSchema {
+        Disk: Disk;
+        Partition: Partition;
+        File: File;
+        Directory: Directory;
+        Unknown: Unknown;
+        Hash: Hash;
+    }
+}
+
+
 export abstract class BlockDevice extends UniqueAspect {
     static ExpiryAgeMs = 15000;
     name: string;

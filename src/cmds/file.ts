@@ -1,35 +1,87 @@
 import yargs from "yargs";
 import { Task } from "../task";
 import { DbCommandArgv } from "./db";
-import { BulkWriterOptions, MongoStorage, Store } from "../db";
-import { MongoError } from "mongodb";
-import { tap } from "../pipeline";
-import { Artefact, isArtefact } from "../models/artefact";
+import { TaskFn } from "../task";
+import { BulkOp, BulkOpNames, BulkWriterOptions, MongoStorage, Query as Q, Store } from "../db";
+import { MongoError, ObjectId } from "mongodb";
+import { PipelineSourceLengthWrapped, tap } from "../pipeline";
+import { Artefact, isArtefact, TimestampTree } from "../models/artefact";
 import * as FS from "../models/file-system";
 import * as Audio from "../models/audio";
 
 import debug from "debug";
 import * as nodePath from "node:path";
 import { Progress } from "../progress";
+import { AspectParameters, DataProperties, DiscriminatedModel } from "../models";
 const log = debug(nodePath.basename(module.filename));
 
 export interface FileCommandArgv {
     paths: string | string[];
 }
 
-export type FileSystemArtefact = Artefact & {
+export type FileArtefact = {
     File: FS.File;
-    Directory: FS.Directory;
-
-    Unknown: FS.Unknown;
-
-    // Only iff !!this.File
-    Hash: FS.Hash;
+    Hash: FS.Hash;  // Only iff !!this.File
     Audio: Audio.Audio;
+};
+export type DiskArtefact = {
     Disk: FS.Disk;
+};
+export type PartitionArtefact = {
     Partition: FS.Partition;
+}
+// export type FileSystemArtefact = Artefact & ( |  | 
+export type DirectoryArtefact = {
+    Directory: FS.Directory;
+};
+export type UnknownArtefact = {
+    Unknown: FS.Unknown;
 };
 
+export class FSArtefact<T extends {}> implements Artefact {
+    isArtefact: true = true;
+    _id?: ObjectId | undefined;
+    _v: number = 0;
+    _ts: TimestampTree<T> = new ;
+    _e?: Error[] | undefined;
+    constructor(data: DataProperties<FSArtefact>) {
+
+    }
+
+}
+
+export type TaskFnConfig<A extends Artefact, K extends keyof A = keyof A> = {
+    store: Store<A>;
+    input: PipelineSourceLengthWrapped<A>;//[K];
+    op: BulkOpNames;
+    task: TaskFn<[A], A[keyof A]>;
+    repeatPreDelay?: number;
+    repeatPostDelay?: number;
+}
+
+export type TaskFnConfigs<A extends Artefact> = {
+    [K in keyof A]: TaskFnConfig<A, K>;
+};
+
+const Artefact = {
+    Tasks: <A extends Artefact>(...taskFns: TaskFnConfig<A>[]) => Task.runAll(
+        ...taskFns.map(taskConfig => (task: Task) => task.repeat({
+            preDelay: taskConfig.repeatPreDelay,
+            postDelay: taskConfig.repeatPostDelay,
+        }, task => task.pipe(
+            taskConfig.input,
+            taskConfig.store.ops["insertOne"],//taskConfig.op],
+            task.progress.pipeCounter,
+            taskConfig.store.bulkWriterSink()
+        ))),
+};
+
+// export function ArtefactSchema() {}
+
+// export const FsSchema = new ArtefactSchema(FS.EntryFS.File, FS.Hash, Audio.Audio);    // First is primary/required, following args are optional?
+// S.Directory, FS.Unknown] {
+//         type: FS.File
+// }
 export const command = 'file';
 export const description = 'File commands';
 export const builder = (yargs: yargs.Argv<DbCommandArgv & FileCommandArgv>) => yargs
@@ -80,14 +132,21 @@ export const builder = (yargs: yargs.Argv<DbCommandArgv & FileCommandArgv>) => y
                                 store.bulkWriterSink({ progress: task.progress }),
                             ))));
                 },
-
+                
+                // different syntax ideas
+                // ({ exists, and, or, lt, lte, gt, gte }) => and(exists(FS.File), or(exists(FS.Hash), lt("$Hash._ts", "$File.stats.mtime")))
+                // Q => Q.and(Q.exists(FS.File), Q.or(Q.exists(FS.Hash), Q.lt("$Hash._ts", "$File.stats.mtime")))
+                // Q.exists(FS.File).and(Q.exists(FS.Hash).or(Q.lt("$Hash._ts", "$File.stats.mtime"))))
+                // Q.and(Q(FS.File).exists(), Q.or(Q(FS.Hash).exists(false), Q.expr.lt("$Hash._ts", "$File.stats.mtime"))
+                // Q(FS.File).exists().and(Q(FS.Hash).exists(false).or(Q.expr.lt("$Hash._ts", "$File.stats.mtime"))
+                
                 function hashFiles(task: Task) {
                     return task.repeat({ preDelay: 3000, }, async task => task.pipe(
-                        store.find({ $and: [
-                            { File: { _T: "File", } },
-                            { $or: [ { Hash: { $exists: false } }, { $expr: { $lt: [ "$Hash._ts", "$File.stats.mtime", ] } } ]}, ],
-                        }, { progress: task.progress.connect.readWriteTotal }),
-                        (_: FileSystemArtefact) => FS.Hash.create(_.File.path),
+                        store.find( Q.and(
+                            Q(FS.File).exists(),
+                            Q.or( Q(FS.Hash).exists(false), Q.expr.lt("$Hash._ts", "$File.stats.mtime"))
+                        ), {  progress: task.progress.connect.readWriteTotal }),
+                        ({ File, Hash }: FileSystemArtefact) => ({ Hash: FS.Hash.create(File.path),
                         store.ops.updateOne,
                         task.progress.pipeCounter,
                         store.bulkWriterSink()));     // 3 seconds

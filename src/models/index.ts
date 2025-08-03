@@ -28,6 +28,7 @@ export type Function<A extends AnyParameters = any[], R extends any = any> = (..
 export const isFunction = (fn: any): fn is Function => typeof fn === "function";
 export const isPlainFunction = (fn: any): fn is Function => isFunction(fn) && !isAsyncGeneratorFunction(fn);
 export const getFunctionName = (fn: Function, ...fallbackNames: string[]) => (fn.name?.trim() ?? "").length > 0 ? fn.name : fallbackNames.length > 0 ? fallbackNames.reduce((setName, nextName) => setName?.trim() === "" ? nextName : setName) : "(anon)";
+export const makeFunction = <P extends AnyParameters, R extends any>(name: string, fn: Function<P, R>) => Object.defineProperty(fn, "name", name);
 
 export type AsyncGeneratorFunction<I = any, O = any, R = any, N = any, L extends number = 0 | 1> =
     (...args:
@@ -55,7 +56,7 @@ export type MaybeAsyncFunction<A extends AnyParameters = [], R extends any = voi
 export type FunctionPropertyNames<T> = { [K in keyof T]: T[K] extends Function ? K : never; }[keyof T];
 export type FunctionProperties<T> = Pick<T, FunctionPropertyNames<T>>;
 export type NonFunctionPropertyNames<T> = { [K in keyof T]: T[K] extends Function ? never : K; }[keyof T];
-export type NonFunctionProperties<T> = Pick<T, NonFunctionPropertyNames<T>>;
+export type DataProperties<T> = Pick<T, NonFunctionPropertyNames<T>>;
 
 export type KeyValuePair<K extends PropertyKey = PropertyKey, V = unknown> = [K: K, V: V];
 export type FilterFn<T extends {}> = (kv: KeyValuePair<keyof T, T[keyof T]>) => boolean;
@@ -224,31 +225,51 @@ export type AspectInstanceExtensionQueries<A extends Aspect = Aspect> = {
     [K: string]: AspectInstanceQuery<A>;
 };
 
-export type AspectParameters<A extends Aspect> = NonFunctionProperties<Omit<A, "_T" | "Query" | "uniqueQuery" | "isAspect" | "ops">>;
+export type AspectParameters<A extends Aspect> = DataProperties<Omit<A, "_T" | "Query" | "uniqueQuery" | "isAspect" | "ops">>;
 
-export type AspectType<A extends Aspect = Aspect> = string | AbstractConstructor<Document>;
+export type AspectType<A extends Aspect = Aspect> = AbstractConstructor<A>/*  & { name: string; } */ & { _T: string; };
+export type AspectTypeOrName<A extends Aspect = Aspect> = AspectType<A> | string;
 
 export type NamespacedAspect<T> = { [K: string]: T; };
 
-export function isAspect<A extends Aspect>(this: AspectType<A> | string | undefined, value: any): value is A {
-    return "_T" in value && (this ? (
-        typeof this === "function" ?
-            value._T === this.name :
-            value._T === this) :
-        typeof value._T === "string");
+export function isAspect<A extends Aspect>(this: Aspect | AbstractConstructor<A> | undefined, value: any): value is A {
+    return (this && typeof this === "function" && "_T" in this && typeof this._T === "string" &&
+        value && typeof value === "object" && "_T" in value && value._T === this._T) ||
+        (!this && value && typeof value === "object" && "_T" in value && typeof value._T === "string");//
+    // && //typeof this?._T === "string" : (/* "_T" in value */typeof this === "string" && (this ? (
+        // typeof this === "function" ?
+        //     value._T === this.name :
+        //     value._T === this;//) :
+        // typeof value._T === "string") : );
 };
+// might still need to handle case where this===null && value is AspectType<A> (ths might even be the most common usage)
+
+export const isAspectType = <A extends Aspect>(/* this: AspectType<A> | string | void, */ value: any): value is AspectType<A> =>
+    value && (typeof value === "function" && "_T" in value && typeof value._T === "string");
+export const isAspectTypeOrName = <A extends Aspect>(/* this: AspectType<A> | string | void, */ value: any): value is AspectTypeOrName<A> =>
+    value && (typeof value === "string" || (typeof value === "function" && "_T" in value && typeof value._T === "string"));
+        // _T(value ? (
+    //     typeof this === "function" ?
+    //         value._T === this.name :
+    //         value._T === this) :
+    //     typeof value._T === "string");
+// };
 
 export abstract class Aspect {
+
+    static readonly _T = this.constructor.name;
+
+    static is<A extends Aspect>(this: AbstractConstructor<A>, value: any): value is A { return isAspect.call(this, value); }
+    static async create(this: typeof Aspect, ...args: any): Promise<Aspect> {
+        // return new this(...args);
+        throw new TypeError();
+    }
+
     isAspect: true = true;
     readonly _T = this.constructor.name;
     constructor(...args: AnyParameters) { }
     getUpdates<A extends Aspect>(previous?: A) {
 
-    }
-    static is<A extends Aspect>(this: AbstractConstructor<A>, value: any): value is A { return isAspect.call(this, value); }
-    static async create(this: typeof Aspect, ...args: any): Promise<Aspect> {
-        // return new this(...args);
-        throw new TypeError();
     }
     // flatten/* <A extends Aspect> */(/* this: A, *//*  obj?: A | Filter<Document> | UpdateFilter<Document> | Document, */ prefix = `${this._T}`): Record<string, any> {
     //     const flattened: Record<string, any> = {};

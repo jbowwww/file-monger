@@ -1,8 +1,8 @@
 import * as nodePath from "node:path";
-import mongo, { AnyBulkWriteOperation, BulkWriteOptions, ChangeStreamOptions, ChangeStreamDocument, ChangeStreamInsertDocument, ChangeStreamUpdateDocument, Collection, CollectionOptions, CountOptions, Db, Filter, FindOneAndUpdateOptions, FindOptions, MongoClient, UpdateFilter, UpdateOptions, UpdateResult, IndexSpecification, CreateIndexesOptions, Condition, InsertOneModel, DeleteManyModel, DeleteOneModel, ReplaceOneModel, UpdateManyModel, UpdateOneModel, BSON, DeleteOptions, ReplaceOptions, InsertOneOptions, OptionalId, WithoutId, FindCursor } from "mongodb";
+import mongo, { AnyBulkWriteOperation, BulkWriteOptions, ChangeStreamOptions, ChangeStreamDocument, ChangeStreamInsertDocument, ChangeStreamUpdateDocument, Collection, CollectionOptions, CountOptions, Db, Filter, FindOneAndUpdateOptions, FindOptions, MongoClient, UpdateFilter, UpdateOptions, UpdateResult, IndexSpecification, CreateIndexesOptions, Condition, InsertOneModel, DeleteManyModel, DeleteOneModel, ReplaceOneModel, UpdateManyModel, UpdateOneModel, BSON, DeleteOptions, ReplaceOptions, InsertOneOptions, OptionalId, WithoutId, FindCursor, FilterOperators } from "mongodb";
 import { Artefact, ArtefactQueryFn, hasId, isArtefact } from "./models/artefact";
-import { Aspect, DeepProps, Choose, Constructor, isConstructor, ValueUnion, makeDefaultOptions, isNonDateObject, ProgressOption, AsyncGeneratorFunction } from "./models/";
-import { PipelineGeneratorStage, PipelineSink, batch } from "./pipeline";
+import { Aspect, DeepProps, Choose, Constructor, isConstructor, ValueUnion, makeDefaultOptions, isNonDateObject, ProgressOption, AsyncGeneratorFunction, Function, makeFunction, AnyParameters, isString, isAspectTypeOrName, AspectTypeOrName, isAspectType } from "./models/";
+import { PipelineGeneratorStage, PipelineSink, PipelineSourceLengthWrapped, batch, wrapPipelineSourceWithLength } from "./pipeline";
 
 import { inspect } from "node:util";
 import debug from "debug";
@@ -95,41 +95,39 @@ export type CreateIndexArgs = {
     options?: CreateIndexesOptions;
 };
 
+export type QueryExpression = `\$${string}`;
 
-export const Query = <
-    TArtefact extends Artefact,
-    TAspect extends Aspect = Aspect,
-    PArtefact extends DeepProps<TArtefact> = DeepProps<TArtefact>,
-    PAspect extends DeepProps<TAspect> = DeepProps<TAspect>,
->(
-    aspectOrTypeOrName?: string | TAspect | Constructor<TAspect> /* AspectType<TAspect> *//* Constructor<TAspect> */ /* | DeepProps<WithId<TArtefact>> */,
-    propertyPathOrValue?: /* DeepProps<WithId<TAspect>> */ string | Condition<Choose<Artefact, PArtefact>> | Condition<Choose<TAspect, PAspect>>,// | Partial<TAspect>,
-    value?: unknown, //Condition<Choose<TArtefact, PArtefact>>,
-    // options?: OperationOptions
-): Filter<TArtefact> => {
-    if (!aspectOrTypeOrName) {
-        // No arguments - return POJO with basic queries whose fn's require arguments
-        throw new TypeError(`Artefact.Query(): Must at least supply first parameter: aspectOrTypeOrName='${aspectOrTypeOrName}, propertyPath='${propertyPathOrValue}', valueOrOptions=${value}}, value=${value}}`);
-    } else {
-        let propPath!: string;
-        if (typeof aspectOrTypeOrName === "string") {
-            if (value) {
-                throw new TypeError(`Artefact.Query(): aspectTypeOrName is a property path string, next parameter should be value to match and third parameter undefined`);
-            }
-            // Simple string property path for the Artefact given for aspectTypeOrName (dot notation for nested props) 
-            propPath = aspectOrTypeOrName;
-            value = propertyPathOrValue;
-        } else if (isConstructor<TAspect>(aspectOrTypeOrName)) {
-            // Only aspect type or aspect type class name or prefix (prop path from root of Artefact) specified -
-            // Return queries POJO with byUnique hardwired for that aspect type
-            propPath = aspectOrTypeOrName.name + typeof propertyPathOrValue === "string" ? "." + propertyPathOrValue : "";
-        } else if (Aspect.is(aspectOrTypeOrName)) {
-            propPath = aspectOrTypeOrName._T;
-            value = aspectOrTypeOrName;
-        }
-        return ({ filter: { [propPath]: value, } });
-    }
-}
+export namespace Query { export type Expression = QueryExpression; };
+
+export const Query = Object.assign(
+    <A extends Aspect, P extends DeepProps<A>/* , T extends Choose<A, P> = Choose<A, P> */>(aspectTypeOrPrefix: AspectTypeOrName<A>/* | string */, propPath?: P) => {
+        const fqPropPath = aspectTypeOrPrefix &&
+            (isString(aspectTypeOrPrefix) ? (aspectTypeOrPrefix + (propPath ? "." + propPath : "")) :
+                (/* isAspectType(aspectTypeOrPrefix) ? */ (aspectTypeOrPrefix._T ?? aspectTypeOrPrefix.name) + (propPath ? "." + propPath : "")));
+        const op = <T extends Choose<A, P> = Choose<A, P>>(op: keyof FilterOperators<A>) =>
+                (value: T) => ({ [fqPropPath]: { [op/* `\$${op}` */]: value } });
+        return ({
+            exists: (exists: boolean = true) => ({ [fqPropPath]: { _T: isAspectType(aspectTypeOrPrefix) ? aspectTypeOrPrefix._T : aspectTypeOrPrefix, } }),//{ $exists: exists } }),
+            equals: op("$eq"),//(value: Choose<A, typeof fqPropPath>) => ({ [fqPropPath]: { $eq: value } }),
+            gt: op("$gt"),//(value: Choose<A, typeof fqPropPath>) => ({ [fqPropPath]: { $gt: value } }),
+            gte: op("$gte"),//(value: Choose<A, typeof fqPropPath>) => ({ [fqPropPath]: { $gte: value } }),
+            lt: op("$lt"),//(value: Choose<A, typeof fqPropPath>) => ({ [fqPropPath]: { $lt: value } }),
+            lte: op("$lte"),//(value: Choose<A, typeof fqPropPath>) => ({ [fqPropPath]: { $lte: value } }),
+            in: op("$in"),//(value: Choose<A, typeof fqPropPath>[]) => ({ [fqPropPath]: { $in: value } }),
+            nin: op("$nin"),//(value: Choose<A, typeof fqPropPath>[]) => ({ [fqPropPath]: { $nin: value } }),
+        });
+    }, {
+        and: <A extends Aspect, P extends DeepProps<A>>(...conditions: { [K: string]: Filter<A> }[]) => ({ $and: conditions }),
+        or: <A extends Aspect, P extends DeepProps<A>>(...conditions: { [K: string]: Filter<A> }[]) => ({ $or: conditions }),
+        expr: {
+            gt: (operand1: Query.Expression, operand2: Query.Expression) => ({ $expr: { $gt: [ operand1, operand2 ] } }),
+            gte: (operand1: Query.Expression, operand2: Query.Expression) => ({ $expr: { $gte: [ operand1, operand2 ] } }),
+            lt: (operand1: Query.Expression, operand2: Query.Expression) => ({ $expr: { $lt: [ operand1, operand2 ] } }),
+            lte: (operand1: Query.Expression, operand2: Query.Expression) => ({ $expr: { $lte: [ operand1, operand2 ] } }),
+            // in: (operand1: Query.Expression, operand2: Query.Expression) => ({ $expr: { $in: [ operand1, operand2 ] } }),
+            // nin: (operand1: Query.Expression, operand2: Query.Expression) => ({ $expr: { $gt: [ operand1, operand2 ] } }),
+        },
+    });
 
 export const updateResultToString = (result: UpdateResult | null | undefined) =>
     result === null ? "(null)" : result === undefined ? "(undef)" :
@@ -224,12 +222,12 @@ export type BulkOpFnMap<T extends BSON.Document = BSON.Document, TOut extends BS
     // i want functions that make the code more concise e.g.'s: updateOne(Query(FS.Disk, "path", "./file.txt"), fsDisk) , updateOne(Query(fsDisk, "path"), fsDisk)
     // [K in BulkOpNames]: 
     // TODO: Should do the above and integrate it with these same 6 operations defined on MongoStore as well, including the function arguments as a tuple? as a func type? some way to not type it 1600 times each
-    insertOne(_: T, options: InsertOneOptions): BulkOp<TOut, "insertOne">;
+    insertOne(_: T, options?: InsertOneOptions): BulkOp<TOut, "insertOne">;
     updateOne(_: T, options?: UpdateOptions): BulkOp<TOut, "updateOne">;
-    updateMany(_: Filter<T>, update: UpdateFilter<TOut>, options: UpdateOptions): BulkOp<TOut, "updateMany">;
-    deleteOne(_: T, update: UpdateFilter<TOut>, options: DeleteOptions): BulkOp<TOut, "deleteOne">;
-    deleteMany(_: Filter<T>, update: UpdateFilter<TOut>, options: DeleteOptions): BulkOp<TOut, "deleteMany">;
-    replaceOne(_: T, replacement: WithoutId<TOut>, options: ReplaceOptions): BulkOp<TOut, "replaceOne">;
+    updateMany(_: T, options?: UpdateOptions): BulkOp<TOut, "updateMany">;
+    deleteOne(_: T, options?: DeleteOptions): BulkOp<TOut, "deleteOne">;
+    deleteMany(_: T, options?: DeleteOptions): BulkOp<TOut, "deleteMany">;
+    replaceOne(_: T, options?: ReplaceOptions): BulkOp<TOut, "replaceOne">;
 };
 export type BulkOpModelMap<T extends BSON.Document = BSON.Document> = {
     insertOne: InsertOneModel<T>;
@@ -251,7 +249,7 @@ export type BulkWriteSinkResult<A extends Artefact = Artefact> = {
 export interface Store<A extends Artefact = Artefact> {
     createIndexes(...createIndexes: CreateIndexArgs[]): Promise<string[]>;
     count(query: Filter<A>, options?: CountOptions): Promise<number>;
-    find(query: Filter<A>, options?: FindOptions & ProgressOption): AsyncGenerator<A>;
+    find(query: Filter<A>, options?: FindOptions & ProgressOption): PipelineSourceLengthWrapped<A>;
     findOne(query: Filter<A>, options?: FindOptions): Promise<A | null>;
     findOneOrCreate(query: Filter<A>, createFn: () => A | Promise<A>, options?: FindOptions): Promise<A>;
     findOneAndUpdate(query: Filter<A>, update: UpdateFilter<A>, options?: FindOneAndUpdateOptions): Promise<A | null>;
@@ -298,19 +296,23 @@ export class MongoStore<A extends Artefact> implements Store<A> {
         return this.collection.countDocuments(query, options);
     }
 
-    async* find(query: Filter<A>, options: FindOptions & ProgressOption = {}) {
-        // for await (const item of this._collection.find(query))
-        //     yield item;
-        if (options.progress) {
-            options.progress?.setTotal?.(await this.collection.countDocuments(query));
-        }
-        yield* this.collection.find(query, options).map(r => {
-            if (options.progress) {
-                options.progress?.incrementCount?.();
-            }
-            log(`find(): r = ${inspect(r)}`);
-            return r as A;
-        });
+    async* find<F extends A = A>(query: Filter<A>, options: FindOptions & ProgressOption = {}): PipelineSourceLengthWrapped<F> {
+        const _this = this;
+        yield* wrapPipelineSourceWithLength(({ length }: { length?: number; }) =>
+            (async function*() {
+                if (options.progress || length) {
+                    const count = await _this.collection.countDocuments(query);
+                    options.progress?.setTotal?.(count);
+                    length = count;
+                }
+                yield* _this.collection.find<F>(query, options).map(r => {
+                    if (options.progress) {
+                        options.progress?.incrementCount?.();
+                    }
+                    log(`find(): r = ${inspect(r)}`);
+                    return r as F;
+                });                
+            })());
     }
 
     findOne(query: Filter<A>, options: FindOptions = {}) {
@@ -363,7 +365,7 @@ export class MongoStore<A extends Artefact> implements Store<A> {
                 yield ({ ops, result });
             }
         });
-    };
+    }
 
     bulkWriterStore(options: BulkWriterOptions & BulkWriteOptions & ProgressOption): BulkWriterStore<A> {
         return ({
@@ -385,16 +387,37 @@ export class MongoStore<A extends Artefact> implements Store<A> {
             } });
     }
 
+
+    // Returns a wrapper function that passes the 'options' argument given to withOptions(), as the last argument to fn, optionally overlaying
+    // with the now optional last 'options' argument to the returned function
+    makeOp<P extends any[], O extends {}, R extends any/* , O = P extends [...any[], infer O] ? O : never */>(op: BulkOpNames, fn: Function<[...P, O], R>) {
+        return Object.assign(makeFunction(op, fn), {
+            withOptions(options: O) {
+                return makeFunction(
+                    op,
+                    (...args: [...headArgs: P, overlayedOptions: O]) => fn(...([...args.slice(0, -1) as P, { ...options, ...args.slice(-1), }]))
+                );
+            }
+        });
+    }
+
     ops: BulkOpFnMap<A | Aspect, A> = {
-        insertOne: (_, options?) => ({ "insertOne": { document: (isArtefact(_) ? _ : { [_._T]: _ }) as OptionalId<A>, ...options } }),
-        updateOne: (_, options = { upsert: true, }) => ({ "updateOne": {
+        insertOne: this.makeOp("insertOne", (_: A | Aspect, options: InsertOneOptions = {}) => ({ "insertOne": { document: (isArtefact(_) ? _ : { [_._T]: _ }) as OptionalId<A> , ...options } })),
+        updateOne: this.makeOp("updateOne", (_: A | Aspect, options: UpdateOptions = { upsert: true, }) => ({ "updateOne": {
             filter: (hasId(_) ? ({ _id: _._id, }) : _.Query.byUnique()) as Filter<A>,
             update: { $set: !Aspect.is(_) ? _ : _.asArtefact() } as UpdateFilter<A>,
             ...options,
-        } }),
-        updateMany: (_, update, options = { upsert: true, }) => ({ "updateMany": { filter: _ as Filter<A>, update, ...options } }),
-        deleteOne: (_, update, options) => ({ "deleteOne": { filter: _ as Filter<A>, update, ...options } }),
-        deleteMany: (_, update, options) => ({ "deleteMany": { filter: _ as Filter<A>, update, ...options } }),
-        replaceOne: (_, replacement, options) => ({ "replaceOne": { filter: _ as Filter<A>, replacement, ...options } }),
-    };
+        } })),
+        updateMany: this.makeOp("updateMany", (_: A | Aspect, options: UpdateOptions = { upsert: true, }) => ({ "updateMany": {
+            filter: (hasId(_) ? ({ _id: _._id, }) : _.Query.byUnique()) as Filter<A>,
+            update: { $set: !Aspect.is(_) ? _ : _.asArtefact() } as UpdateFilter<A>,
+            ...options,
+        } })),
+        deleteOne: this.makeOp("deleteOne", (_: A | Aspect, options: DeleteOptions) => ({ "deleteOne": { filter: _ as Filter<A>, ...options } })),
+        deleteMany: this.makeOp("deleteMany", (_: A | Aspect, options: DeleteOptions) => ({ "deleteMany": { filter: _ as Filter<A>, ...options } })),
+        replaceOne: this.makeOp("replaceOne", (_: A | Aspect, options: ReplaceOptions) => ({ "replaceOne": hasId(_) ?
+            ({ filter: ({ _id: _._id, }) as Filter<A>, replacement: _ as WithoutId<A>, ...options }) :
+            ({ filter: _.Query.byUnique() as Filter<A>, replacement: (!Aspect.is(_) ? _ : _.asArtefact()) as WithoutId<A>, ...options }),
+         }))
+    }
 }
