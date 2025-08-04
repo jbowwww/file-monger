@@ -20,7 +20,7 @@ export const switchStream = <I extends {}>(iterable: Iterable<I>, ...tests: Test
 };
 
 declare module "./artefact" {
-    export interface ArtefactSchema {
+    export interface ArtefactSchemaMaster {
         Disk: Disk;
         Partition: Partition;
         File: File;

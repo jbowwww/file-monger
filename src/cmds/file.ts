@@ -1,20 +1,21 @@
 import yargs from "yargs";
-import { Task } from "../task";
+import { Task, TaskOptions, TaskPipeOptions, TaskRepeatOptions } from "../task";
 import { DbCommandArgv } from "./db";
 import { TaskFn } from "../task";
-import { BulkOp, BulkOpNames, BulkWriterOptions, MongoStorage, Query as Q, Store } from "../db";
-import { MongoError, ObjectId } from "mongodb";
-import { PipelineSourceLengthWrapped, tap } from "../pipeline";
-import { Artefact, isArtefact, TimestampTree } from "../models/artefact";
+import { BulkOp, BulkOpFnMap, BulkOpNames, BulkWriterOptions, MongoStorage, Query as Q, Store } from "../db";
+import { AnyBulkWriteOperation, MongoError } from "mongodb";
+import { merge, PipelineInput, PipelineSink, PipelineSourceLengthWrapped } from "../pipeline";
+import { Artefact, isArtefact } from "../models/artefact";
+// import { ArtefactSchema } from "../models/file-system";
 import * as FS from "../models/file-system";
 import * as Audio from "../models/audio";
+import { Aspect, AspectClass, AspectClassOrName } from "../models";
 
 import debug from "debug";
 import * as nodePath from "node:path";
-import { Progress } from "../progress";
-import { AspectParameters, DataProperties, DiscriminatedModel } from "../models";
 const log = debug(nodePath.basename(module.filename));
 
+// /* export */ interface ArtefactSchema {}
 export interface FileCommandArgv {
     paths: string | string[];
 }
@@ -24,13 +25,14 @@ export type FileArtefact = {
     Hash: FS.Hash;  // Only iff !!this.File
     Audio: Audio.Audio;
 };
+export const isFileArtefact = (value: any): value is FileArtefact => value?.File?._T === FS.File._T;
 export type DiskArtefact = {
     Disk: FS.Disk;
 };
 export type PartitionArtefact = {
     Partition: FS.Partition;
 }
-// export type FileSystemArtefact = Artefact & ( |  | 
+export type FileSystemArtefact = Artefact & (DiskArtefact | PartitionArtefact | FileArtefact | DirectoryArtefact | UnknownArtefact)
 export type DirectoryArtefact = {
     Directory: FS.Directory;
 };
@@ -38,43 +40,73 @@ export type UnknownArtefact = {
     Unknown: FS.Unknown;
 };
 
-export class FSArtefact<T extends {}> implements Artefact {
-    isArtefact: true = true;
-    _id?: ObjectId | undefined;
-    _v: number = 0;
-    _ts: TimestampTree<T> = new ;
-    _e?: Error[] | undefined;
-    constructor(data: DataProperties<FSArtefact>) {
-
+const FSArtefact = {
+    constructor(data: Partial<FSArtefact>) {
+        super();
     }
-
 }
 
-export type TaskFnConfig<A extends Artefact, K extends keyof A = keyof A> = {
-    store: Store<A>;
-    input: PipelineSourceLengthWrapped<A>;//[K];
+// export type FSArtefactSchema<T extends {}, P extends Aspect> = FS.File | FS.Directory | FS.Unknown> = {
+//     Entry: FS.Entry;
+    
+// };
+
+// might still use this if POJO's with methods that use "this." to access other model data
+// export type ModelResolveFn = <A extends Aspect>(aspectTypeOrName: AspectTypeOrName<A>) => A;
+
+// export type Model = Record<PropertyKey, 
+// export type ModelDefinitionFn<I, A> = (input: I) => A;
+
+// export type ArtefactDbOpsStream<M extends ArtefactModel> = (store: Store<Artefact & M>) => AsyncGenerator<BulkOp<M>>;
+// export type ArtefactData<M extends ArtefactModel, A extends Artefact> = (data: Partial<A>) => A;
+// export const ArtefactModel = <M extends ArtefactModel, A extends Artefact>(model: M): ArtefactData<M, A> => new Artefact;//ArtefactDbOpsStream<M> => merge());
+
+// withOUT usinig a ModelResolveFn like above, i think i either need to separately & explicitly define dependencies between members,
+// or dependencies can be determined automagically if each data function member of a model is called passing a "this" that is
+// either a carefully constructed dummy object (needs to know what other members exist) or failing that, a proxy, that returns
+// (optionally a Promise but still synchronously returned) a dummy piece of data, but stores the dependencies referenced
+// by each data function member
+
+// export const FSArtefactModel = ArtefactModel({     //(data: FS.Entry) => ({ [data._T]: data, })
+//     File: FS.File,
+//     Hash: (_: typeof FSArtefactModel) => await FS.Hash.create(_.File.path) //("File", FS.File)
+//         // ._ => FS.calculateHash(_(FS.File).
+//         // depends: ["File"],
+
+//     }
+// );
+
+// export type ArtefactSchema<T extends {}> = {
+//     [K in keyof T]: T[K] extends Function ? ReturnType<T[K]> : 
+// };
+
+export type TaskFnConfig<A extends Artefact, I extends A | Aspect = A> = {
+    name: string;
+    input: PipelineInput<I>;
     op: BulkOpNames;
-    task: TaskFn<[A], A[keyof A]>;
+    store: Store<A>;
+    writer: PipelineSink<AnyBulkWriteOperation<A>>,
     repeatPreDelay?: number;
     repeatPostDelay?: number;
 }
 
-export type TaskFnConfigs<A extends Artefact> = {
-    [K in keyof A]: TaskFnConfig<A, K>;
-};
-
-const Artefact = {
-    Tasks: <A extends Artefact>(...taskFns: TaskFnConfig<A>[]) => Task.runAll(
-        ...taskFns.map(taskConfig => (task: Task) => task.repeat({
-            preDelay: taskConfig.repeatPreDelay,
-            postDelay: taskConfig.repeatPostDelay,
-        }, task => task.pipe(
-            taskConfig.input,
-            taskConfig.store.ops["insertOne"],//taskConfig.op],
-            task.progress.pipeCounter,
-            taskConfig.store.bulkWriterSink()
-        ))),
-};
+export const Artefact = <A extends Artefact, I extends Aspect | A = A>
+    (commonOptions: Partial<Omit<TaskFnConfig<A, I>, "task">>) =>
+        (_: A) => ({
+            Slice: (...taskFns: Partial<TaskFnConfig<A, I>>[]) => Task.runAll(
+                ...taskFns  // TODO: Check between commonOptions and options, required parameters are present
+                    .map(taskConfig => ({ ...commonOptions, ...taskConfig } as TaskFnConfig<A, I>))
+                    .map(taskConfig => (task: Task<[A]>) =>
+                        task.repeat({
+                            preDelay: taskConfig.repeatPreDelay,
+                            postDelay: taskConfig.repeatPostDelay,
+                        }, task => task.pipe(
+                            taskConfig.input,
+                            taskConfig.store.ops[taskConfig.op],
+                            task.progress.pipeCounter,
+                            taskConfig.store.bulkWriterSink()
+                        )))),
+});
 
 // export function ArtefactSchema() {}
 
@@ -94,86 +126,63 @@ export const builder = (yargs: yargs.Argv<DbCommandArgv & FileCommandArgv>) => y
         }),
         async (argv: DbCommandArgv & FileCommandArgv) => {
             const storage = new MongoStorage(argv.dbUrl);
-            const store = await storage.store<FileSystemArtefact>("fileSystemEntries", {
+            const store = await storage.store<Artefact>/* FileSystemArtefact */("fileSystemEntries", {
                 createIndexes: [{
                     index: { "File.path": 1, "Directory.path": 1, "Unknown.path": 1, "Partition.uuid": 1, "Disk.model": 1, "Disk.serial": 1, },
                     options: { unique: true, },
                 }],
             });
 
+            const makeSlice = <A extends Artefact>({ taskOptions, source, op, writer }: {
+                taskOptions: TaskOptions & TaskPipeOptions & TaskRepeatOptions;
+                source: PipelineInput<A>;
+                op: BulkOpFnMap[keyof BulkOpFnMap];
+                writer: PipelineSink<BulkOp<A>>;
+            }) => (task: Task) => task.repeat(taskOptions, task => task.pipe(
+                source, op, task.pipeLogger(log), task.progress.pipeCounter, writer
+            ));
+
             // const FsArtefactDesign = (entry: FS.File | FS.Directory | FS.Unknown) => ({ [entry._T]: entry, });
             //     indexFileSystem
             // };
+            Artefact({ store, op: "updateOne", writer: store.bulkWriterSink() }).Slice({ 
+                name: "enumerateBlockDevices",
+                repeatPostDelay: 15000,
+                input: [
+                    ...(await FS.Disk.getAll() as (FS.Disk | FS.Partition)[]),
+                    ...(await FS.Partition.getAll())
+                ],
+            });
 
-            await Task.runAll(
-
-                function enumerateBlockDevices(task: Task) {
-                    return task.repeat({ postDelay: 15000 },
-                        async task => task.pipe(
-                            task.progress.setTotalFromSource([
-                                ...(await FS.Disk.getAll() as (FS.Disk | FS.Partition)[]),
-                                ...(await FS.Partition.getAll())
-                            ], _ => _.length),
-                            store.ops.updateOne,
-                            task.pipeLogger(log),
-                            task.progress.pipeCounter,
-                            store.bulkWriterSink()));
-                },
-
-                function indexFileSystem(task: Task) {
-                    let indexTaskId = 0;
-                    const paths = Array.isArray(argv.paths) ? argv.paths : argv.paths.split(" ");
-                    return task.runAll(...paths.map((path, searchId) =>
-                        async (task: Task) => task.repeat({ postDelay: 180000, },
-                            async (task: Task) => task.pipe(
-                                FS.walk({ path, progress: task.progress.connect.readWriteTotal }),//[FS.walk, { path }],
-                                store.ops.updateOne,
-                                task.progress.pipeCounter,
-                                store.bulkWriterSink({ progress: task.progress }),
-                            ))));
-                },
-                
-                // different syntax ideas
-                // ({ exists, and, or, lt, lte, gt, gte }) => and(exists(FS.File), or(exists(FS.Hash), lt("$Hash._ts", "$File.stats.mtime")))
-                // Q => Q.and(Q.exists(FS.File), Q.or(Q.exists(FS.Hash), Q.lt("$Hash._ts", "$File.stats.mtime")))
-                // Q.exists(FS.File).and(Q.exists(FS.Hash).or(Q.lt("$Hash._ts", "$File.stats.mtime"))))
-                // Q.and(Q(FS.File).exists(), Q.or(Q(FS.Hash).exists(false), Q.expr.lt("$Hash._ts", "$File.stats.mtime"))
-                // Q(FS.File).exists().and(Q(FS.Hash).exists(false).or(Q.expr.lt("$Hash._ts", "$File.stats.mtime"))
-                
-                function hashFiles(task: Task) {
-                    return task.repeat({ preDelay: 3000, }, async task => task.pipe(
-                        store.find( Q.and(
-                            Q(FS.File).exists(),
-                            Q.or( Q(FS.Hash).exists(false), Q.expr.lt("$Hash._ts", "$File.stats.mtime"))
-                        ), {  progress: task.progress.connect.readWriteTotal }),
-                        ({ File, Hash }: FileSystemArtefact) => ({ Hash: FS.Hash.create(File.path),
-                        store.ops.updateOne,
-                        task.progress.pipeCounter,
-                        store.bulkWriterSink()));     // 3 seconds
-                },
-
-                function analyzeAudioFiles(task: Task) {
-                    return task.repeat({ preDelay: 3000, }, async task => task.pipe(
-                        store.find({ $and: [
-                            { File: { $exists: true } },
-                            { $or: Audio.fileExtensions.map(ext => ({ "File.path": { $regex: "\^.*\\." + ext + "$", $options: "i" } })) },
-                            { $or: [ { Audio: { $exists: false } }, { "Audio._ts": { $lt: "$File.stats.mtime" } }, ]}, ],
-                        }, { progress: task.progress.connect.readWriteTotal }),
-                        async (_: FileSystemArtefact) => await Audio.Audio.create(_.File!.path),
-                        store.ops.updateOne,
-                        task.progress.pipeCounter,
-                        store.bulkWriterSink({ ...BulkWriterOptions.default, progress: task.progress })));
+            Artefact({ store, op: "updateOne", writer: store.bulkWriterSink() }).Slice(
+                ...(Array.isArray(argv.paths) ? argv.paths : argv.paths.split(" ")).map((path, searchId) => ({
+                    name: `indexFileSystem#${searchId}`,
+                    input: FS.walk({ path }),//[FS.walk, { path }],
+                })), {
+                    name: `hashFiles`,
+                    input: store.find( Q.and(
+                        Q(FS.File).exists(),
+                        Q.or( Q(FS.Hash).exists(false), Q.expr.lt("$Hash._ts", "$File.stats.mtime"))
+                    )),
+                }, {
+                    name: "analyzeAudioFiles",
+                    repeatPreDelay: 3000,
+                    input: store.find({ $and: [
+                        { File: { $exists: true } },
+                        { $or: Audio.fileExtensions.map(ext => ({ "File.path": { $regex: "\^.*\\." + ext + "$", $options: "i" } })) },
+                        { $or: [ { Audio: { $exists: false } }, { "Audio._ts": { $lt: "$File.stats.mtime" } }, ]}, ],
+                    }),
                 }            
             );
         }
     ).demandCommand();
 
-async function handleError(e: Error, task: Task, _: Partial<FileSystemArtefact | FS.Entry>, store: Store<FileSystemArtefact>) {
+async function handleError(e: Error, task: Task, _: Partial<Artefact | FS.Entry>, store: Store<FileSystemArtefact>) {
     // const error = Object.assign(e, { task: task });//new Error("${task.name}: Error!\n_=${nodeUtil.inspect(_, false, 1)}\nError={e/* .stack */}"), { /* cause: e, stack: e.stack */ });
     if (!(e instanceof MongoError)) {
         const result = await store.updateOne(
             FS.Entry.is(_) ? ({ [`${_._T}.path`]: _.path }) :
-            isArtefact<FileSystemArtefact>(_) ? (_._id ? { _id: _._id } :
+            isArtefact<Artefact>(_) ? (_._id ? { _id: _._id } :
             _.File ? { "File.path": _.File.path } :
             _.Directory ? { "Directory.path": _.Directory.path } :
             _.Unknown ? { "Unknown.path": _.Unknown?.path } :

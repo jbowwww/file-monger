@@ -73,9 +73,9 @@ export function chain<T0 = any, T1 = any, T2 = any>(stage0: PipelineItemFunction
 export function chain<T0 = any, T1 = any, T2 = any, T3 = any>(stage0: PipelineItemFunctionStage<T0, T1>, stage1: PipelineItemFunctionStage<T1, T2>, stage2: PipelineItemFunctionStage<T2, T3>): PipelineItemFunctionStage<T0, T3>;
 export function chain<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any>(stage0: PipelineItemFunctionStage<T0, T1>, stage1: PipelineItemFunctionStage<T1, T2>, stage2: PipelineItemFunctionStage<T2, T3>, stage3: PipelineItemFunctionStage<T3, T4>): PipelineItemFunctionStage<T0, T4>;
 export function chain<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any>(stage0: PipelineItemFunctionStage<T0, T1>, stage1: PipelineItemFunctionStage<T1, T2>, stage2: PipelineItemFunctionStage<T2, T3>, stage3: PipelineItemFunctionStage<T3, T4>, stage4: PipelineItemFunctionStage<T4, T5>): PipelineItemFunctionStage<T0, T5>;
-export function chain<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, T6 = any>(stage0: PipelineItemFunctionStage<T0, T1>, stage1?: PipelineItemFunctionStage<T1, T2>, stage2?: PipelineItemFunctionStage<T2, T3>, stage3?: PipelineItemFunctionStage<T3, T4>, stage4?: PipelineItemFunctionStage<T4, T5>, stage5?: PipelineItemFunctionStage<T5, T6>): PipelineFunction<T0, T6>;
-export function chain<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, T6 = any, T7 = any>(stage0: PipelineItemFunctionStage<T0, T1>, stage1?: PipelineItemFunctionStage<T1, T2>, stage2?: PipelineItemFunctionStage<T2, T3>, stage3?: PipelineItemFunctionStage<T3, T4>, stage4?: PipelineItemFunctionStage<T4, T5>, stage5?: PipelineItemFunctionStage<T5, T6>, stage6?: PipelineItemFunctionStage<T6, T7>): PipelineFunction<T0, T7>;
-export function chain<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, T6 = any, T7 = any, T8 = any>(stage0: PipelineItemFunctionStage<T0, T1>, stage1?: PipelineItemFunctionStage<T1, T2>, stage2?: PipelineItemFunctionStage<T2, T3>, stage3?: PipelineItemFunctionStage<T3, T4>, stage4?: PipelineItemFunctionStage<T4, T5>, stage5?: PipelineItemFunctionStage<T5, T6>, stage6?: PipelineItemFunctionStage<T6, T7>, stage7?: PipelineItemFunctionStage<T7, T8>): PipelineFunction<T0, T8>;
+export function chain<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, T6 = any>(stage0: PipelineItemFunctionStage<T0, T1>, stage1: PipelineItemFunctionStage<T1, T2>, stage2: PipelineItemFunctionStage<T2, T3>, stage3: PipelineItemFunctionStage<T3, T4>, stage4: PipelineItemFunctionStage<T4, T5>, stage5: PipelineItemFunctionStage<T5, T6>): PipelineFunction<T0, T6>;
+export function chain<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, T6 = any, T7 = any>(stage0: PipelineItemFunctionStage<T0, T1>, stage1: PipelineItemFunctionStage<T1, T2>, stage2: PipelineItemFunctionStage<T2, T3>, stage3: PipelineItemFunctionStage<T3, T4>, stage4: PipelineItemFunctionStage<T4, T5>, stage5: PipelineItemFunctionStage<T5, T6>, stage6: PipelineItemFunctionStage<T6, T7>): PipelineFunction<T0, T7>;
+export function chain<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, T6 = any, T7 = any, T8 = any>(stage0: PipelineItemFunctionStage<T0, T1>, stage1: PipelineItemFunctionStage<T1, T2>, stage2: PipelineItemFunctionStage<T2, T3>, stage3: PipelineItemFunctionStage<T3, T4>, stage4: PipelineItemFunctionStage<T4, T5>, stage5: PipelineItemFunctionStage<T5, T6>, stage6: PipelineItemFunctionStage<T6, T7>, stage7: PipelineItemFunctionStage<T7, T8>): PipelineFunction<T0, T8>;
 export function chain<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, T6 = any, T7 = any, T8 = any>(
     stage0: PipelineItemFunctionStage<T0, T1>,
     stage1?: PipelineItemFunctionStage<T1, T2>,
@@ -90,22 +90,22 @@ export function chain<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any
 }
 
 export function genChain<T0 = any, T1 = any, R = any>(stage0: PipelineStage<T0, T1, R>): PipelineFunction<T0, T1, R>;
-export function genChain<T0 = any, T1 = any, T2 = any, R = any>(stage0: PipelineStage<T0, T1>, stage1: PipelineStage<T1, T2, R>): PipelineFunction<T0, T2, R>;
+export function genChain<T0 = any, T1 = any, T2 = any, R = any>(stage0: PipelineStage<T0, T1>, stage1: PipelineStage<T1, T2, R> | undefined): PipelineFunction<T0, T2, R>;
 export function genChain<T0 = any, T1 = any, T2 = any, T3 = any, R = any>(stage0: PipelineStage<T0, T1>, stage1: PipelineStage<T1, T2>, stage2: PipelineStage<T2, T3, R>): PipelineFunction<T0, T3, R>;
 export function genChain<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, R = any>(stage0: PipelineStage<T0, T1>, stage1: PipelineStage<T1, T2>, stage2: PipelineStage<T2, T3>, stage3: PipelineStage<T3, T4, R>): PipelineFunction<T0, T4, R>;
-export function genChain<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, R = any>(stage0: PipelineStage<T0, T1>, stage1?: PipelineStage<T1, T2>, stage2?: PipelineStage<T2, T3>, stage3?: PipelineStage<T3, T4, R>, stage4?: PipelineStage<T4, T5, R>): PipelineFunction<T0, T5, R>;
-export function genChain<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, T6 = any, R = any>(stage0: PipelineStage<T0, T1>, stage1?: PipelineStage<T1, T2>, stage2?: PipelineStage<T2, T3>, stage3?: PipelineStage<T3, T4>, stage4?: PipelineStage<T4, T5, R>, stage5?: PipelineStage<T5, T6, R>): PipelineFunction<T0, T6, R>;
-export function genChain<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, T6 = any, T7 = any, R = any>(stage0: PipelineStage<T0, T1>, stage1?: PipelineStage<T1, T2>, stage2?: PipelineStage<T2, T3>, stage3?: PipelineStage<T3, T4>, stage4?: PipelineStage<T4, T5>, stage5?: PipelineStage<T5, T6, R>, stage6?: PipelineStage<T6, T7, R>): PipelineFunction<T0, T7, R>;
-export function genChain<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, T6 = any, T7 = any, T8 = any, R = any>(stage0: PipelineStage<T0, T1>, stage1?: PipelineStage<T1, T2>, stage2?: PipelineStage<T2, T3>, stage3?: PipelineStage<T3, T4>, stage4?: PipelineStage<T4, T5>, stage5?: PipelineStage<T5, T6>, stage6?: PipelineStage<T6, T7, R>, stage7?: PipelineStage<T7, T8, R>): PipelineFunction<T0, T8, R>;
+export function genChain<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, R = any>(stage0: PipelineStage<T0, T1>, stage1: PipelineStage<T1, T2>, stage2: PipelineStage<T2, T3>, stage3: PipelineStage<T3, T4>, stage4: PipelineStage<T4, T5, R>): PipelineFunction<T0, T5, R>;
+export function genChain<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, T6 = any, R = any>(stage0: PipelineStage<T0, T1>, stage1: PipelineStage<T1, T2>, stage2: PipelineStage<T2, T3>, stage3: PipelineStage<T3, T4>, stage4: PipelineStage<T4, T5>, stage5: PipelineStage<T5, T6, R>): PipelineFunction<T0, T6, R>;
+export function genChain<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, T6 = any, T7 = any, R = any>(stage0: PipelineStage<T0, T1>, stage1: PipelineStage<T1, T2>, stage2: PipelineStage<T2, T3>, stage3: PipelineStage<T3, T4>, stage4: PipelineStage<T4, T5>, stage5: PipelineStage<T5, T6>, stage6: PipelineStage<T6, T7, R>): PipelineFunction<T0, T7, R>;
+export function genChain<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, T6 = any, T7 = any, T8 = any, R = any>(stage0: PipelineStage<T0, T1>, stage1: PipelineStage<T1, T2>, stage2: PipelineStage<T2, T3>, stage3: PipelineStage<T3, T4>, stage4: PipelineStage<T4, T5>, stage5: PipelineStage<T5, T6>, stage6: PipelineStage<T6, T7>, stage7: PipelineStage<T7, T8, R>): PipelineFunction<T0, T8, R>;
 export function genChain<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, T6 = any, T7 = any, T8 = any, R = any>(
-    stage0: PipelineStage<T0, T1, R>,
-    stage1?: PipelineStage<T1, T2, R>,
-    stage2?: PipelineStage<T2, T3, R>,
-    stage3?: PipelineStage<T3, T4, R>,
-    stage4?: PipelineStage<T4, T5, R>,
-    stage5?: PipelineStage<T5, T6, R>,
-    stage6?: PipelineStage<T6, T7, R>,
-    stage7?: PipelineStage<T7, T8, R>
+    stage0: PipelineStage<T0, T1, any>,
+    stage1?: PipelineStage<T1, T2, any>,
+    stage2?: PipelineStage<T2, T3, any>,
+    stage3?: PipelineStage<T3, T4, any>,
+    stage4?: PipelineStage<T4, T5, any>,
+    stage5?: PipelineStage<T5, T6, any>,
+    stage6?: PipelineStage<T6, T7, any>,
+    stage7?: PipelineStage<T7, T8, any>
 ): PipelineFunction<T0, T1 | T2 | T3 | T4 | T5 | T6 | T7 | T8, R> {
     // TODO: Someway to reduce the stages to an asyncgeneratorfunction and then return a fn(source) that calls that fn with source, returning asynciterable
     const r = async function* (source: PipelineSource<T0, any, any>) {
@@ -137,23 +137,23 @@ export function pipe<T0 = any, T1 = any, R = any>(source: PipelineSourceLengthWr
 export function pipe<T0 = any, T1 = any, T2 = any, R = any>(source: PipelineSource<T0>, stage0: PipelineStage<T0, T1>, stage1: PipelineStage<T1, T2, R>): Pipeline<T0, T2, R>;
 export function pipe<T0 = any, T1 = any, T2 = any, T3 = any, R = any>(source: PipelineSource<T0>, stage0: PipelineStage<T0, T1>, stage1: PipelineStage<T1, T2>, stage2: PipelineStage<T2, T3, R>): Pipeline<T0, T3, R>;
 export function pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, R = any>(source: PipelineSource<T0>, stage0: PipelineStage<T0, T1>, stage1: PipelineStage<T1, T2>, stage2: PipelineStage<T2, T3>, stage3: PipelineStage<T3, T4, R>): Pipeline<T0, T4, R>;
-export function pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, R = any>(source: PipelineSource<T0>, stage0: PipelineStage<T0, T1>, stage1?: PipelineStage<T1, T2>, stage2?: PipelineStage<T2, T3>, stage3?: PipelineStage<T3, T4>, stage4?: PipelineStage<T4, T5, R>): Pipeline<T0, T5, R>;
-export function pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, T6 = any, R = any>(source: PipelineSource<T0>, stage0: PipelineStage<T0, T1>, stage1?: PipelineStage<T1, T2>, stage2?: PipelineStage<T2, T3>, stage3?: PipelineStage<T3, T4>, stage4?: PipelineStage<T4, T5>, stage5?: PipelineStage<T5, T6, R>): Pipeline<T0, T6, R>;
-export function pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, T6 = any, T7 = any, R = any>(source: PipelineSource<T0>, stage0: PipelineStage<T0, T1>, stage1?: PipelineStage<T1, T2>, stage2?: PipelineStage<T2, T3>, stage3?: PipelineStage<T3, T4>, stage4?: PipelineStage<T4, T5>, stage5?: PipelineStage<T5, T6>, stage6?: PipelineStage<T6, T7, R>): Pipeline<T0, T7, R>;
-export function pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, T6 = any, T7 = any, T8 = any, R = any>(source: PipelineSource<T0>, stage0: PipelineStage<T0, T1>, stage1?: PipelineStage<T1, T2>, stage2?: PipelineStage<T2, T3>, stage3?: PipelineStage<T3, T4>, stage4?: PipelineStage<T4, T5>, stage5?: PipelineStage<T5, T6>, stage6?: PipelineStage<T6, T7>, stage7?: PipelineStage<T7, T8, R>): Pipeline<T0, T8, R>;
+export function pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, R = any>(source: PipelineSource<T0>, stage0: PipelineStage<T0, T1>, stage1: PipelineStage<T1, T2>, stage2: PipelineStage<T2, T3>, stage3: PipelineStage<T3, T4>, stage4: PipelineStage<T4, T5, R>): Pipeline<T0, T5, R>;
+export function pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, T6 = any, R = any>(source: PipelineSource<T0>, stage0: PipelineStage<T0, T1>, stage1: PipelineStage<T1, T2>, stage2: PipelineStage<T2, T3>, stage3: PipelineStage<T3, T4>, stage4: PipelineStage<T4, T5>, stage5: PipelineStage<T5, T6, R>): Pipeline<T0, T6, R>;
+export function pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, T6 = any, T7 = any, R = any>(source: PipelineSource<T0>, stage0: PipelineStage<T0, T1>, stage1: PipelineStage<T1, T2>, stage2: PipelineStage<T2, T3>, stage3: PipelineStage<T3, T4>, stage4: PipelineStage<T4, T5>, stage5: PipelineStage<T5, T6>, stage6: PipelineStage<T6, T7, R>): Pipeline<T0, T7, R>;
+export function pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, T6 = any, T7 = any, T8 = any, R = any>(source: PipelineSource<T0>, stage0: PipelineStage<T0, T1>, stage1: PipelineStage<T1, T2>, stage2: PipelineStage<T2, T3>, stage3: PipelineStage<T3, T4>, stage4: PipelineStage<T4, T5>, stage5: PipelineStage<T5, T6>, stage6: PipelineStage<T6, T7>, stage7: PipelineStage<T7, T8, R>): Pipeline<T0, T8, R>;
 export function pipe<T0 = any, T1 = any, T2 = any, T3 = any, T4 = any, T5 = any, T6 = any, T7 = any, T8 = any, R = any>(
     source: PipelineSource<T0, any, any>, 
-    stage0: PipelineStage<T0, T1, R>,
-    stage1?: PipelineStage<T1, T2, R>,
-    stage2?: PipelineStage<T2, T3, R>,
-    stage3?: PipelineStage<T3, T4, R>,
-    stage4?: PipelineStage<T4, T5, R>,
-    stage5?: PipelineStage<T5, T6, R>,
-    stage6?: PipelineStage<T6, T7, R>,
-    stage7?: PipelineStage<T7, T8, R>
+    stage0: PipelineStage<T0, T1, any>,
+    stage1?: PipelineStage<T1, T2, any>,
+    stage2?: PipelineStage<T2, T3, any>,
+    stage3?: PipelineStage<T3, T4, any>,
+    stage4?: PipelineStage<T4, T5, any>,
+    stage5?: PipelineStage<T5, T6, any>,
+    stage6?: PipelineStage<T6, T7, any>,
+    stage7?: PipelineStage<T7, T8, any>
 ): Pipeline<T0, T1 | T2 | T3 | T4 | T5 | T6 | T7 | T8, R> {
     const iterable = Object.assign(
-        pipeline<T0, T1, T2, T3, T4, T5, T6, T7, T8, R>(stage0, stage1, stage2, stage3, stage4, stage5, stage6, stage7)(makeAsyncGenerator<T0, any, any>(source)), {
+        pipeline<T0, T1, T2, T3, T4, T5, T6, T7, T8, R>(stage0, stage1!, stage2!, stage3!, stage4!, stage5!, stage6!, stage7!)(makeAsyncGenerator<T0, any, any>(source)), {
             execute(sinkFn?: (source: AsyncIterable<T8, R, never>) => R | Promise<R>) {
                 return (
                     sinkFn?.(iterable) ??

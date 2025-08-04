@@ -1,28 +1,40 @@
 import * as nodePath from "node:path";
 import { Filter, ObjectId } from "mongodb";
-import { KeyValuePair, mapObject } from ".";
+import { AnyParameters, Aspect, AspectClass, KeyValuePair, mapObject, MaybeAsyncFunction } from ".";
 // import { get } from "../prop-path";
 // import { ChangeTrackingProxy } from "../change-tracking-proxy";
 
 import debug from "debug";
 const log = debug(nodePath.basename(module.filename));
 
-export interface ArtefactSchema extends Artefact {
-    /* model modules should use interface merging to add types to this interface */
-}
+// export type DataMemberFn</* K extends PropertyKey = string | symbol,  */M extends ArtefactModel, A extends Aspect = Aspect> = (_: M) => A | Promise<A>;
+export type DataMemberFn<M extends Artefact = Artefact, A extends Aspect = Aspect> = (_: Artefact) => A | Promise<A>;
 
-export type Tree<T> = {
-    [K in keyof T]: TimestampTree<T[K]>;
-};
+export type ArtefactSchema<A extends Artefact> = { [K in keyof Omit<A, keyof Artefact>]: MaybeAsyncFunction<AnyParameters, A[K]> | A[K]; };
+// extends PropertyKey = string | symbol, M extends ArtefactModel = ArtefactModel>
 
-export type TimestampTree<T> = (T extends { [K: string]: any; } ? {
-    [K in keyof T]: TimestampTree<T[K]>;
-} : {}) & {
+export type ArtefactSchemaMember<A extends Aspect = Aspect> = AspectClass<A> | DataMemberFn<Artefact, A>;
+// export type Artefact = { };
+export type ArtefactSchemaMemberType<M extends ArtefactSchemaMember> = M extends ArtefactSchemaMember<infer A> ? A : never;
+// export type ArtefactModel<S extends {} = {}> = { [K in keyof S]: ArtefactSchemaMemberType<S[K]>; };
+
+// export type ArtefactObjectParameter<M extends ArtefactModel> = {
+//     [K in keyof M]: M[K] extends AspectType ? M[K] : M[K] extends DataMemberFn<M, any> ? ReturnType<M[K]> : never;
+// };
+
+
+export interface ArtefactSchemaMaster extends Artefact {}
+
+export type Tree<T, D> = (T extends { [K: string]: any; } ? {
+    [K in keyof T]: Tree<T[K], D>;
+} : {}) & D;
+
+export type TimestampTree<T> = Tree<T, {
     _created: Date;
     _checked: Date;
     _updated: Date;
     _deleted?: Date;
-};
+}>;
 
 // Create a TimestampTree with the same prop name heirarcy as data, if supplied
 export const makeTimestampTree = <T extends { [K: string]: any; }>(data?: T) => {
@@ -70,7 +82,7 @@ export const hasId = <A extends Artefact = Artefact>(_: any): _ is A => "_id" in
 
 export const isArtefact = <A extends Artefact = Artefact>(o: any): o is A => o && o.isArtefact;
 
-export type Artefact = {
+export type Artefact/* <S extends Artefact = ArtefactSchemaMaster> */ = /* ArtefactModel<S> & */ {
     isArtefact: true;
     _id?: ObjectId;
     _v: number;
@@ -79,6 +91,20 @@ export type Artefact = {
 };
 
 export type ArtefactQueryFn<A extends Artefact> = (_: A) => Filter<A>;
+
+// export class Artefact<T extends { [K: string]: any; }> {
+//     isArtefact: true = true;
+//     _id?: ObjectId | undefined;
+//     _v: number = 0;
+//     _ts: TimestampTree<Partial<T>>;
+//     _e?: Error[] | undefined;
+//     constructor(data?: Partial<T>) {
+//         if (data) {
+//             Object.assign(this, data);
+//         }
+//         this._ts = data ? makeTimestampTree(data) : {} as TimestampTree<Partial<T>>;
+//     }
+// }
 
 // export class Artefact {
 //     constructor(data?: Partial<Artefact>, enableTimestamps: boolean = false) {

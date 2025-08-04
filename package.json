@@ -5,10 +5,10 @@
   "main": "index.js",
   "scripts": {
     "build": "npx tsc",
-    "start": "npm run build ; node --enable-source-maps ./dist/cli.js",
-    "debug": "npm run build ; node --enable-source-maps --inspect-brk ./dist/cli.js",
-    "dev": "node --enable-source-maps ./dist/cli.js",
-    "help": "node dist/cli.js --help",
+    "start": "npm run build ; node --enable-source-maps ./dist/src/cli.js",
+    "debug": "npm run build ; node --enable-source-maps --inspect-brk ./dist/src/cli.js",
+    "dev": "node --enable-source-maps ./dist/src/cli.js",
+    "help": "node dist/src/cli.js --help",
     "test": "jest"
   },
   "repository": {

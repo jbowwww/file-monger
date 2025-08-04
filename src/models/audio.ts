@@ -8,7 +8,7 @@ const log = debug(nodePath.basename(module.filename));
 
 
 declare module "./artefact" {
-    export interface ArtefactSchema {
+    export interface ArtefactSchemaMaster {
         Audio: Audio;
     }
 }
@@ -16,6 +16,7 @@ declare module "./artefact" {
 export const fileExtensions = [ "mp3", "wav", "au", "aiff", "flac" ];
 
 export class Audio extends Aspect {
+    static _T = "Audio";
     constructor(
         public format: mm.IFormat,
         public native: INativeTags,

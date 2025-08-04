@@ -1,7 +1,7 @@
 import * as nodePath from "node:path";
 import mongo, { AnyBulkWriteOperation, BulkWriteOptions, ChangeStreamOptions, ChangeStreamDocument, ChangeStreamInsertDocument, ChangeStreamUpdateDocument, Collection, CollectionOptions, CountOptions, Db, Filter, FindOneAndUpdateOptions, FindOptions, MongoClient, UpdateFilter, UpdateOptions, UpdateResult, IndexSpecification, CreateIndexesOptions, Condition, InsertOneModel, DeleteManyModel, DeleteOneModel, ReplaceOneModel, UpdateManyModel, UpdateOneModel, BSON, DeleteOptions, ReplaceOptions, InsertOneOptions, OptionalId, WithoutId, FindCursor, FilterOperators } from "mongodb";
 import { Artefact, ArtefactQueryFn, hasId, isArtefact } from "./models/artefact";
-import { Aspect, DeepProps, Choose, Constructor, isConstructor, ValueUnion, makeDefaultOptions, isNonDateObject, ProgressOption, AsyncGeneratorFunction, Function, makeFunction, AnyParameters, isString, isAspectTypeOrName, AspectTypeOrName, isAspectType } from "./models/";
+import { Aspect, DeepProps, Choose, Constructor, isConstructor, ValueUnion, makeDefaultOptions, isNonDateObject, ProgressOption, AsyncGeneratorFunction, Function, makeFunction, AnyParameters, isString, isAspectTypeOrName, AspectClassOrName, isAspectType, omitFromObject } from "./models/";
 import { PipelineGeneratorStage, PipelineSink, PipelineSourceLengthWrapped, batch, wrapPipelineSourceWithLength } from "./pipeline";
 
 import { inspect } from "node:util";
@@ -85,7 +85,7 @@ export const MongoStoreOptions: {
     default: {
         createIndexes: [],
         queries: {
-            byUnique: <A extends Artefact>(_: A) => ({ "_id": _._id, }),
+            byUnique: (_: Artefact) => ({ "_id": _._id, }),
         },
     },
 };
@@ -95,39 +95,39 @@ export type CreateIndexArgs = {
     options?: CreateIndexesOptions;
 };
 
-export type QueryExpression = `\$${string}`;
-
-export namespace Query { export type Expression = QueryExpression; };
-
-export const Query = Object.assign(
-    <A extends Aspect, P extends DeepProps<A>/* , T extends Choose<A, P> = Choose<A, P> */>(aspectTypeOrPrefix: AspectTypeOrName<A>/* | string */, propPath?: P) => {
-        const fqPropPath = aspectTypeOrPrefix &&
-            (isString(aspectTypeOrPrefix) ? (aspectTypeOrPrefix + (propPath ? "." + propPath : "")) :
-                (/* isAspectType(aspectTypeOrPrefix) ? */ (aspectTypeOrPrefix._T ?? aspectTypeOrPrefix.name) + (propPath ? "." + propPath : "")));
-        const op = <T extends Choose<A, P> = Choose<A, P>>(op: keyof FilterOperators<A>) =>
-                (value: T) => ({ [fqPropPath]: { [op/* `\$${op}` */]: value } });
-        return ({
-            exists: (exists: boolean = true) => ({ [fqPropPath]: { _T: isAspectType(aspectTypeOrPrefix) ? aspectTypeOrPrefix._T : aspectTypeOrPrefix, } }),//{ $exists: exists } }),
-            equals: op("$eq"),//(value: Choose<A, typeof fqPropPath>) => ({ [fqPropPath]: { $eq: value } }),
-            gt: op("$gt"),//(value: Choose<A, typeof fqPropPath>) => ({ [fqPropPath]: { $gt: value } }),
-            gte: op("$gte"),//(value: Choose<A, typeof fqPropPath>) => ({ [fqPropPath]: { $gte: value } }),
-            lt: op("$lt"),//(value: Choose<A, typeof fqPropPath>) => ({ [fqPropPath]: { $lt: value } }),
-            lte: op("$lte"),//(value: Choose<A, typeof fqPropPath>) => ({ [fqPropPath]: { $lte: value } }),
-            in: op("$in"),//(value: Choose<A, typeof fqPropPath>[]) => ({ [fqPropPath]: { $in: value } }),
-            nin: op("$nin"),//(value: Choose<A, typeof fqPropPath>[]) => ({ [fqPropPath]: { $nin: value } }),
-        });
-    }, {
-        and: <A extends Aspect, P extends DeepProps<A>>(...conditions: { [K: string]: Filter<A> }[]) => ({ $and: conditions }),
-        or: <A extends Aspect, P extends DeepProps<A>>(...conditions: { [K: string]: Filter<A> }[]) => ({ $or: conditions }),
-        expr: {
-            gt: (operand1: Query.Expression, operand2: Query.Expression) => ({ $expr: { $gt: [ operand1, operand2 ] } }),
-            gte: (operand1: Query.Expression, operand2: Query.Expression) => ({ $expr: { $gte: [ operand1, operand2 ] } }),
-            lt: (operand1: Query.Expression, operand2: Query.Expression) => ({ $expr: { $lt: [ operand1, operand2 ] } }),
-            lte: (operand1: Query.Expression, operand2: Query.Expression) => ({ $expr: { $lte: [ operand1, operand2 ] } }),
-            // in: (operand1: Query.Expression, operand2: Query.Expression) => ({ $expr: { $in: [ operand1, operand2 ] } }),
-            // nin: (operand1: Query.Expression, operand2: Query.Expression) => ({ $expr: { $gt: [ operand1, operand2 ] } }),
-        },
+// This is a function and not a class specifically because I want Query syntax to be as terse as possible
+// When importing can also import like "Query as Q" and query expressions then become Q.and(Q(FS.File).exists(false), ...)
+export function Query /* = Object.assign( */
+<A extends Aspect, P extends DeepProps<A>/* , T extends Choose<A, P> = Choose<A, P> */>(aspectTypeOrPrefix: AspectClassOrName<A>/* | string */, propPath?: P)/*  => */ {
+    const fqPropPath = aspectTypeOrPrefix &&
+        (isString(aspectTypeOrPrefix) ? (aspectTypeOrPrefix + (propPath ? "." + propPath : "")) :
+            (/* isAspectType(aspectTypeOrPrefix) ? */ (aspectTypeOrPrefix._T ?? aspectTypeOrPrefix.name) + (propPath ? "." + propPath : "")));
+    const op = <T extends Choose<A, P> = Choose<A, P>>(op: keyof FilterOperators<A>) =>
+            (value: T) => ({ [fqPropPath]: { [op/* `\$${op}` */]: value } });
+    return ({
+        exists: (exists: boolean = true) => ({ [fqPropPath]: { _T: isAspectType(aspectTypeOrPrefix) ? aspectTypeOrPrefix._T : aspectTypeOrPrefix, } }),//{ $exists: exists } }),
+        equals: op("$eq"),//(value: Choose<A, typeof fqPropPath>) => ({ [fqPropPath]: { $eq: value } }),
+        gt: op("$gt"),//(value: Choose<A, typeof fqPropPath>) => ({ [fqPropPath]: { $gt: value } }),
+        gte: op("$gte"),//(value: Choose<A, typeof fqPropPath>) => ({ [fqPropPath]: { $gte: value } }),
+        lt: op("$lt"),//(value: Choose<A, typeof fqPropPath>) => ({ [fqPropPath]: { $lt: value } }),
+        lte: op("$lte"),//(value: Choose<A, typeof fqPropPath>) => ({ [fqPropPath]: { $lte: value } }),
+        in: op("$in"),//(value: Choose<A, typeof fqPropPath>[]) => ({ [fqPropPath]: { $in: value } }),
+        nin: op("$nin"),//(value: Choose<A, typeof fqPropPath>[]) => ({ [fqPropPath]: { $nin: value } }),
     });
+}
+export namespace Query {
+    export type Expression = `\$${string}`;
+    export const and = <A extends Aspect, P extends DeepProps<A>>(...conditions: { [K: string]: Filter<A> }[]) => ({ $and: conditions });
+    export const or = <A extends Aspect, P extends DeepProps<A>>(...conditions: { [K: string]: Filter<A> }[]) => ({ $or: conditions });
+    export const expr = {
+        gt: (operand1: Query.Expression, operand2: Query.Expression) => ({ $expr: { $gt: [ operand1, operand2 ] } }),
+        gte: (operand1: Query.Expression, operand2: Query.Expression) => ({ $expr: { $gte: [ operand1, operand2 ] } }),
+        lt: (operand1: Query.Expression, operand2: Query.Expression) => ({ $expr: { $lt: [ operand1, operand2 ] } }),
+        lte: (operand1: Query.Expression, operand2: Query.Expression) => ({ $expr: { $lte: [ operand1, operand2 ] } }),
+        // in: (operand1: Query.Expression, operand2: Query.Expression) => ({ $expr: { $in: [ operand1, operand2 ] } }),
+        // nin: (operand1: Query.Expression, operand2: Query.Expression) => ({ $expr: { $gt: [ operand1, operand2 ] } }),
+    };
+}
 
 export const updateResultToString = (result: UpdateResult | null | undefined) =>
     result === null ? "(null)" : result === undefined ? "(undef)" :
@@ -417,7 +417,7 @@ export class MongoStore<A extends Artefact> implements Store<A> {
         deleteMany: this.makeOp("deleteMany", (_: A | Aspect, options: DeleteOptions) => ({ "deleteMany": { filter: _ as Filter<A>, ...options } })),
         replaceOne: this.makeOp("replaceOne", (_: A | Aspect, options: ReplaceOptions) => ({ "replaceOne": hasId(_) ?
             ({ filter: ({ _id: _._id, }) as Filter<A>, replacement: _ as WithoutId<A>, ...options }) :
-            ({ filter: _.Query.byUnique() as Filter<A>, replacement: (!Aspect.is(_) ? _ : _.asArtefact()) as WithoutId<A>, ...options }),
+            ({ filter: _.Query.byUnique() as Filter<A>, replacement: omitFromObject(!Aspect.is(_) ? _ : _.asArtefact()) as WithoutId<A>, ...options }),
          }))
     }
 }

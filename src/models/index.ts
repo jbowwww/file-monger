@@ -28,7 +28,7 @@ export type Function<A extends AnyParameters = any[], R extends any = any> = (..
 export const isFunction = (fn: any): fn is Function => typeof fn === "function";
 export const isPlainFunction = (fn: any): fn is Function => isFunction(fn) && !isAsyncGeneratorFunction(fn);
 export const getFunctionName = (fn: Function, ...fallbackNames: string[]) => (fn.name?.trim() ?? "").length > 0 ? fn.name : fallbackNames.length > 0 ? fallbackNames.reduce((setName, nextName) => setName?.trim() === "" ? nextName : setName) : "(anon)";
-export const makeFunction = <P extends AnyParameters, R extends any>(name: string, fn: Function<P, R>) => Object.defineProperty(fn, "name", name);
+export const makeFunction = <P extends AnyParameters, R extends any>(name: string, fn: Function<P, R>) => Object.defineProperty(fn, "name", { value: name });
 
 export type AsyncGeneratorFunction<I = any, O = any, R = any, N = any, L extends number = 0 | 1> =
     (...args:
@@ -74,17 +74,12 @@ _mapObject.recursive = function <T extends { [K: string]: any; }, TOut extends {
         return _mapObject<any, TOut>(o, filter, recursiveMap)
     };
 export const mapObject: typeof _mapObject & { recursive: typeof _mapObject.recursive; } = Object.assign(_mapObject, { recursive: _mapObject.recursive });
-export function filterObject<T extends {}>(o: T, filter: FilterFn<T>): Partial<T> {
-    return Object.fromEntries((Object.entries(o) as KeyValuePair<keyof T, T[keyof T]>[]).filter(filter)) as Partial<T>;
-}
+export const filterObject = <T extends {}>(o: T, filter: FilterFn<T>): Partial<T> => Object.fromEntries((Object.entries(o) as KeyValuePair<keyof T, T[keyof T]>[]).filter(filter)) as Partial<T>;
 
-export function partialObject<T extends {}>(o: T, ...keys: (keyof T)[]): Partial<T> {
-    const result: Partial<T> = {};
-    for (const K of keys) {
-        result[K] = o[K];
-    }
-    return result;
-}
+export const partialObject = <T extends {}>(o: T, ...keys: (keyof T)[]): Partial<T> => filterObject(o, ([K, V]) => !!keys.find(k => k === K));
+export const pickFromObject = partialObject;
+
+export const omitFromObject = <T extends {}>(o: T, ...keys: (keyof T)[]): Partial<T> => filterObject(o, ([K, V]) => !keys.find(k => k === K));
 
 export type ValueUnion<T extends {}> = T[keyof T];
 export type DiscriminateUnion<T, K extends keyof T, V extends T[K]> = Extract<T, Record<K, V>>;
@@ -227,8 +222,8 @@ export type AspectInstanceExtensionQueries<A extends Aspect = Aspect> = {
 
 export type AspectParameters<A extends Aspect> = DataProperties<Omit<A, "_T" | "Query" | "uniqueQuery" | "isAspect" | "ops">>;
 
-export type AspectType<A extends Aspect = Aspect> = AbstractConstructor<A>/*  & { name: string; } */ & { _T: string; };
-export type AspectTypeOrName<A extends Aspect = Aspect> = AspectType<A> | string;
+export type AspectClass<A extends Aspect = Aspect> = AbstractConstructor<A>/*  & { name: string; } */ & { _T: string; };
+export type AspectClassOrName<A extends Aspect = Aspect> = AspectClass<A> | string;
 
 export type NamespacedAspect<T> = { [K: string]: T; };
 
@@ -244,9 +239,9 @@ export function isAspect<A extends Aspect>(this: Aspect | AbstractConstructor<A>
 };
 // might still need to handle case where this===null && value is AspectType<A> (ths might even be the most common usage)
 
-export const isAspectType = <A extends Aspect>(/* this: AspectType<A> | string | void, */ value: any): value is AspectType<A> =>
+export const isAspectType = <A extends Aspect>(/* this: AspectType<A> | string | void, */ value: any): value is AspectClass<A> =>
     value && (typeof value === "function" && "_T" in value && typeof value._T === "string");
-export const isAspectTypeOrName = <A extends Aspect>(/* this: AspectType<A> | string | void, */ value: any): value is AspectTypeOrName<A> =>
+export const isAspectTypeOrName = <A extends Aspect>(/* this: AspectType<A> | string | void, */ value: any): value is AspectClassOrName<A> =>
     value && (typeof value === "string" || (typeof value === "function" && "_T" in value && typeof value._T === "string"));
         // _T(value ? (
     //     typeof this === "function" ?
