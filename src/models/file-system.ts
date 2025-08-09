@@ -30,7 +30,6 @@ declare module "./artefact" {
     }
 }
 
-
 export abstract class BlockDevice extends UniqueAspect {
     static ExpiryAgeMs = 15000;
     name: string;

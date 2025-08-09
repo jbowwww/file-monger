@@ -2,7 +2,6 @@ import { isDate } from "util/types";
 import { AbstractConstructor, Aspect, KeyValuePair, mapObject } from ".";
 import { ChangeTrackingProxy } from "../change-tracking-proxy";
 
-
 export type TimestampsInitializer = {
     [K: string]: true | Date | undefined;
 };

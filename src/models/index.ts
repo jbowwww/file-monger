@@ -9,6 +9,10 @@ import { Progress } from "../progress";
 import debug from "debug";
 const log = debug(nodePath.basename(module.filename));
 
+export type Tagged<T, Tag extends PropertyKey, M = void> = T & { [K in Tag]: M; };
+const _T: unique symbol = Symbol("_T");
+export type Typed<T, _T extends symbol> = Tagged<T, typeof _T, _T>;
+
 export const isBoolean = (v: any): v is boolean => typeof v === "boolean";
 export const isNumber = (v: any): v is number => typeof v === "number";
 export const isString = (v: any): v is string => typeof v === "string";
@@ -33,19 +37,19 @@ export const makeFunction = <P extends AnyParameters, R extends any>(name: strin
 export type AsyncGeneratorFunction<I = any, O = any, R = any, N = any, L extends number = 0 | 1> =
     (...args:
         L extends 1 ? [AsyncIterable<I>/* , ...extra: AnyParameters */] :
-        L extends 0 ? [/* ...extra: AnyParameters */] : [AsyncIterable<I>/* , ...extra: AnyParameters */]) => AsyncGenerator<O, R, N>;
+        L extends 0 ? [/* ...extra: AnyParameters */] : [AsyncIterable<I>, ...extra: AnyParameters]) => AsyncGenerator<O, R, N>;
 
-export const isIterable = <T extends any = any, R = any, N = any>(value: any): value is Iterable<T, R, N> => value && Symbol.iterator in value && typeof value[Symbol.iterator] === "function";
-export const isAsyncIterable = <T extends any = any, R = any, N = any>(value: any): value is AsyncIterable<T, R, N> => value && Symbol.asyncIterator in value && typeof value[Symbol.asyncIterator] === "function";
-export const isAsyncGenerator = <T = unknown, R = any, N = any>(value: any): value is AsyncGenerator<T, R, N> => value && isAsyncIterable(value) && "next" in value && typeof value.next === "function";
-export const isAsyncGeneratorFunction = <I = any, O = any, R = any, N = any, L extends 0 | 1 = 0 | 1>(value: any, argumentsLength?: L): value is AsyncGeneratorFunction<I, O, R, N, L> =>
+export const isIterable = <T = any, R = any, N = any>(value: any): value is Iterable<T, R, N> => value && Symbol.iterator in value && typeof value[Symbol.iterator] === "function";
+export const isAsyncIterable = <T = any, R = any, N = any>(value: any): value is AsyncIterable<T, R, N> => value && Symbol.asyncIterator in value && typeof value[Symbol.asyncIterator] === "function";
+export const isAsyncGenerator = <T = any, R = any, N = any>(value: any): value is AsyncGenerator<T, R, N> => value && isAsyncIterable(value) && "next" in value && typeof value.next === "function";
+export const isAsyncGeneratorFunction = <I = any, O = any, R = any, N = any, L extends 0 | 1 = 0 | 1>(value: any, argumentsLength?: L): value is AsyncGeneratorFunction<I, R, N> =>
         value && typeof value === "function" && isAsyncGenerator<O, R, N>(value.prototype) && (!argumentsLength || value.length === argumentsLength);
 
 export type TypeGuard<T> = (value: any) => value is T;
 
 export type AbstractConstructor<T = any> = abstract new (...args: any[]) => T;
 export type Constructor<T = any> = { name: string; new(...args: any[]): T; /* prototype: T; */ };
-export const isConstructor = <T = {}>(value: unknown, ctor?: AbstractConstructor<T>): value is Constructor<T> =>
+export const isConstructor = <T = {}>(value: any, ctor?: AbstractConstructor<T>): value is Constructor<T> =>
     value && typeof value === "function" && value.prototype && (
         !ctor || (typeof ctor.name === "string" &&
         typeof ctor.prototype === "object" && hasPrototype(ctor.prototype, value as Constructor<T>)));
@@ -58,7 +62,7 @@ export type FunctionProperties<T> = Pick<T, FunctionPropertyNames<T>>;
 export type NonFunctionPropertyNames<T> = { [K in keyof T]: T[K] extends Function ? never : K; }[keyof T];
 export type DataProperties<T> = Pick<T, NonFunctionPropertyNames<T>>;
 
-export type KeyValuePair<K extends PropertyKey = PropertyKey, V = unknown> = [K: K, V: V];
+export type KeyValuePair<K extends PropertyKey = PropertyKey, V = any> = [K: K, V: V];
 export type FilterFn<T extends {}> = (kv: KeyValuePair<keyof T, T[keyof T]>) => boolean;
 export type MapFn<T extends {}, TOut extends {} = T> = (kv: KeyValuePair<keyof T, T[keyof T]>/* , obj: {} */) => KeyValuePair<keyof TOut, TOut[keyof TOut]>;
 function _mapObject<T extends { [K: string]: any; }, TOut extends { [K: string]: any; }>(o: T, map: MapFn<T, TOut>): TOut;
@@ -95,7 +99,7 @@ export type DeepProps<
     T extends Record<string | number, any>,
     K extends Exclude<keyof T, symbol> = Exclude<keyof T, symbol>,
     U extends string | number = ''
-> = T[K] extends Record<string | number, unknown> ?
+> = T[K] extends Record<string | number, any> ?
     (U extends '' ? K : U) |
     DeepProps<
         T[K],
@@ -142,7 +146,7 @@ const getUnorderedParameterAndOption = <P1, P2>(
 // could be a class ? but then would always have to new () when passing options :/
 export type OptionsDefaultContainer<T extends {}> = {
     default: T;
-    mergeDefaults: (/* this: OptionsDefaultContainer<T>, */ defaultOptions?: Partial<T>) => T;
+    mergeDefaults: (/* this: OptionsDefaultContainer<T>, */ options?: Partial<T>) => T;
     applyDefaults: (/* this: OptionsDefaultContainer<T>, */ options: Partial<T>) => void;
 };
 export function mergeOptions<T extends {}>(this: /* defaultOptionsContainer: */ OptionsDefaultContainer<T>, options?: Partial<T>): T { return ({ ...this.default, ...options, }); }
@@ -200,7 +204,7 @@ export const memoize = <R extends any>(
 export type Id<T> = { [K in keyof T]: T[K] };
 export type Converter<T, K extends string, V> = T extends any ? { [P in keyof Id<Record<K, V> & T>]: Id<Record<K, V> & T>[P] } : never;
 
-export type AspectStaticQuery<A extends Aspect = Aspect> = (...args: [A] | [unknown] | unknown[]) => Filter<Document>;
+export type AspectStaticQuery<A extends Aspect = Aspect> = (...args: [A] | [any] | any[]) => Filter<Document>;
 export type AspectStaticQueries<A extends Aspect = Aspect, Q extends AspectStaticExtensionQueries<A> = AspectStaticExtensionQueries<A>> = {
     // byUnique: AspectStaticQuery<Document>;
 } & Q;
@@ -227,7 +231,7 @@ export type AspectClassOrName<A extends Aspect = Aspect> = AspectClass<A> | stri
 
 export type NamespacedAspect<T> = { [K: string]: T; };
 
-export function isAspect<A extends Aspect>(this: Aspect | AbstractConstructor<A> | undefined, value: any): value is A {
+export function isAspect<A extends Aspect>(this: Aspect | AbstractConstructor<A> | void, value: any): value is A {
     return (this && typeof this === "function" && "_T" in this && typeof this._T === "string" &&
         value && typeof value === "object" && "_T" in value && value._T === this._T) ||
         (!this && value && typeof value === "object" && "_T" in value && typeof value._T === "string");//

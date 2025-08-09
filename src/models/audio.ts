@@ -16,7 +16,7 @@ declare module "./artefact" {
 export const fileExtensions = [ "mp3", "wav", "au", "aiff", "flac" ];
 
 export class Audio extends Aspect {
-    static _T = "Audio";
+    // static _T = "Audio"; // should already be taken care of with Aspect base class
     constructor(
         public format: mm.IFormat,
         public native: INativeTags,
