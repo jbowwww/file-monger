@@ -6,7 +6,7 @@
   "scripts": {
     "build": "npx tsc",
     "start": "npm run build ; node --enable-source-maps ./dist/cli.js",
-    "dev": "node --enable-source-maps ./dist/cli.js",
+    "dev": "npm run build ; node --enable-source-maps ./dist/cli.js",
     "help": "node dist/cli.js --help",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -36,6 +36,7 @@
     "deep-object-diff": "^1.1.9",
     "miniplex-project": "github:jbowwww/miniplex",
     "mongodb": "^6.5.0",
+    "music-metadata": "^10.8.3",
     "reflect-metadata": "^0.2.2",
     "yargs": "^17.7.2"
   },
