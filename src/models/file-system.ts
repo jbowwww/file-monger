@@ -83,7 +83,7 @@ export const walk = /* wrapModuleGeneratorMetadata(
 // );
 
 export const enum HashType { Hash = "Hash" };
-export type Hash = Aspect<HashType.Hash, Timestamped<{ sha256: string; }>>;
+export type Hash = Aspect<Timestamped<{ _T: HashType.Hash; sha256: string; }>>;
 
 export const Hash = async ({ path }: { path: string })/* : Hash */ => {
     try {
